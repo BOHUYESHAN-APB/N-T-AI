@@ -1,0 +1,8 @@
+{
+  "name": "ntai-bootstrap-server-vercel",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@upstash/redis": "^1.18.2"
+  }
+}
