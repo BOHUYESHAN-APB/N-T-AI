@@ -4,9 +4,21 @@ This project is distributed under the GNU General Public License v3 (GPLv3) by d
 
 How to obtain a commercial license
 
-1. Contact the copyright holder at: [REPLACE_WITH_CONTACT_EMAIL]
-2. Provide the intended usage scenario (distribution model, whether you will redistribute modified binaries, expected user base, etc.).
-3. Negotiation and terms will be provided; once agreed a commercial license document will be issued and signed by both parties.
+1. Open a new issue in this repository using the provided template: [Create Commercial License Request](https://github.com/BOHUYESHAN-APB/N-T-AI/issues/new/choose) and select "Commercial License Request" (or click New Issue → Commercial License Request). Include your intended usage scenario (distribution model, whether you will redistribute modified binaries, expected user base, expected deployment scale, and contact information).
+2. Provide the intended usage scenario (distribution model, whether you will redistribute modified binaries, expected user base, expected deployment scale, and your legal entity name).
+3. We will respond on the Issue with a proposed commercial license offer that includes scope, fees, payment terms, and any special clauses (support, warranty, source access). After mutual agreement we will issue a signed Commercial License Agreement.
+
+Suggested information to include in the Issue (the repository provides an Issue template to help):
+
+- Company / Entity name
+- Contact person and email
+- Intended use (product name, distribution channel)
+- Whether you will redistribute modified or unmodified binaries
+- Estimated monthly active users or deployments
+- Required license duration (perpetual / time-limited)
+- Any additional requests (source access, indemnity, priority support)
+
+Processing: We will normally respond within 5 business days. The Issue will be used to track negotiation; once terms are agreed the repository owner will attach a PDF of the signed license and close the Issue.
 
 Commercial license template (example)
 

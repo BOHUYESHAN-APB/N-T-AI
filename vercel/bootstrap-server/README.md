@@ -33,7 +33,7 @@
 
 点击下面的按钮可以快速在 Vercel 上创建并部署本目录为一个 Serverless 项目。请替换链接中的 `USERNAME/REPO` 为你的 GitHub 仓库地址，或在 Vercel 导入页面将 "Root Directory" 设置为 `vercel/bootstrap-server`。
 
-[![Deploy to Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/USERNAME/REPO&project-name=ntai-bootstrap-server)
+[![Deploy to Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/BOHUYESHAN-APB/N-T-AI&project-name=ntai-bootstrap-server&rootDirectory=vercel/bootstrap-server)
 
 部署后记得在 Vercel 项目设置中添加以下环境变量（Environment Variables）：
 
