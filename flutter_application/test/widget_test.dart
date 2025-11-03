@@ -5,26 +5,22 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:flutter_application/main.dart';
+import 'package:flutter_application/settings/settings_controller.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('App boots and shows tabs', (tester) async {
+    final controller = SettingsController();
+    // 不调用 load() 也可读取默认设置，避免依赖平台插件初始化
+    await tester.pumpWidget(NTApp(controller: controller));
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // 初始渲染
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Chats'), findsOneWidget);
+    expect(find.text('Notes'), findsOneWidget);
+    expect(find.text('Social'), findsOneWidget);
+    expect(find.text('System'), findsOneWidget);
   });
 }

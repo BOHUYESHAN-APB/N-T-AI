@@ -29,22 +29,49 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('N-T-AI'),
-        centerTitle: true,
-      ),
-      body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble), label: 'Chats'),
-          BottomNavigationBarItem(icon: Icon(Icons.note), label: 'Notes'),
-          BottomNavigationBarItem(icon: Icon(Icons.public), label: 'Social'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'System'),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        final navItems = const [
+          NavigationDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: 'Chats'),
+          NavigationDestination(icon: Icon(Icons.note_outlined), selectedIcon: Icon(Icons.note), label: 'Notes'),
+          NavigationDestination(icon: Icon(Icons.public_outlined), selectedIcon: Icon(Icons.public), label: 'Social'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'System'),
+        ];
+
+        final content = _pages[_selectedIndex];
+
+        final titles = const ['Chats', 'Notes', 'Social', 'System'];
+        return Scaffold(
+          appBar: AppBar(title: Text('N-T-AI · ${titles[_selectedIndex]}')),
+          body: isWide
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: _selectedIndex,
+                      onDestinationSelected: _onItemTapped,
+                      labelType: NavigationRailLabelType.all,
+                      destinations: const [
+                        NavigationRailDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: Text('Chats')),
+                        NavigationRailDestination(icon: Icon(Icons.note_outlined), selectedIcon: Icon(Icons.note), label: Text('Notes')),
+                        NavigationRailDestination(icon: Icon(Icons.public_outlined), selectedIcon: Icon(Icons.public), label: Text('Social')),
+                        NavigationRailDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: Text('System')),
+                      ],
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: content),
+                  ],
+                )
+              : content,
+          bottomNavigationBar: isWide
+              ? null
+              : NavigationBar(
+                  selectedIndex: _selectedIndex,
+                  onDestinationSelected: _onItemTapped,
+                  destinations: navItems,
+                ),
+        );
+      },
     );
   }
 }

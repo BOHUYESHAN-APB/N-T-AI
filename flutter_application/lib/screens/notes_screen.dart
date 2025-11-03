@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../data/mock_data.dart';
+import '../settings/settings_scope.dart';
+import '../settings/settings.dart';
 
 class NotesScreen extends StatelessWidget {
   const NotesScreen({Key? key}) : super(key: key);
@@ -7,17 +9,27 @@ class NotesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final notes = noteDocuments;
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
+    final density = SettingsScope.of(context).settings.density;
+    final pad = switch (density) {
+      DensityOption.compact => const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+      DensityOption.normal => const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      DensityOption.spacious => const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+    };
+    return ListView.builder(
+      padding: pad,
       itemCount: notes.length,
-      separatorBuilder: (_, __) => const Divider(),
       itemBuilder: (context, index) {
         final n = notes[index];
-        return ListTile(
-          title: Text(n.title),
-          subtitle: Text(n.preview),
-          leading: const Icon(Icons.note),
-          onTap: () {},
+        return Card(
+          child: ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: Text(n.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4.0),
+              child: Text(n.preview, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            onTap: () {},
+          ),
         );
       },
     );

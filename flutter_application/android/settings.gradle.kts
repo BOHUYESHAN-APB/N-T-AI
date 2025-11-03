@@ -26,3 +26,13 @@ plugins {
 }
 
 include(":app")
+
+// 项目依赖解析也优先使用国内镜像（保留 google/mavenCentral 作为回退）
+dependencyResolutionManagement {
+    repositories {
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        google()
+        mavenCentral()
+    }
+}

@@ -1,16 +1,67 @@
+class Attachment {
+  final String name;
+  final String path;
+  final int? size;
+  final String? mime;
+
+  const Attachment({required this.name, required this.path, this.size, this.mime});
+}
+
+enum ContactType { ai, human, other }
+
+class Contact {
+  final String id;
+  final String name;
+  final ContactType type;
+  final String? avatarEmoji; // 简易头像占位
+  final bool pinned;
+  final String? note;
+
+  const Contact({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.avatarEmoji,
+    this.pinned = false,
+    this.note,
+  });
+
+  Contact copyWith({String? name, ContactType? type, String? avatarEmoji, bool? pinned, String? note}) => Contact(
+        id: id,
+        name: name ?? this.name,
+        type: type ?? this.type,
+        avatarEmoji: avatarEmoji ?? this.avatarEmoji,
+        pinned: pinned ?? this.pinned,
+        note: note ?? this.note,
+      );
+}
+
 class ChatMessage {
   final String id;
   final String text;
   final bool isMine;
   final String time;
+  final List<Attachment> attachments;
 
-  ChatMessage({required this.id, required this.text, this.isMine = false, required this.time});
+  ChatMessage({
+    required this.id,
+    required this.text,
+    this.isMine = false,
+    required this.time,
+    List<Attachment>? attachments,
+  }) : attachments = attachments ?? const [];
 }
 
 final List<ChatMessage> chatMessages = [
   ChatMessage(id: '1', text: '嗨！欢迎使用 N-T-AI 原型。', isMine: false, time: '09:00'),
   ChatMessage(id: '2', text: '我们现在可以聊天、笔记和发布动态。', isMine: true, time: '09:01'),
   ChatMessage(id: '3', text: '试试切换到 Notes 或 Social 页面看看。', isMine: false, time: '09:02'),
+];
+
+final List<Contact> contacts = const [
+  Contact(id: 'ai_local', name: '本地智能体', type: ContactType.ai, avatarEmoji: '🤖', pinned: true),
+  Contact(id: 'alice', name: 'Alice', type: ContactType.human, avatarEmoji: '🧑🏻‍💻'),
+  Contact(id: 'system', name: '系统助手', type: ContactType.other, avatarEmoji: '🛠️'),
 ];
 
 class NoteDocument {
