@@ -45,6 +45,7 @@
 | Type | Model ID | Pricing |
 | :--- | :--- | :--- |
 | **STT** | `FunAudioLLM/SenseVoiceSmall` | Free |
+| **STT** | `TeleAI/TeleSpeechASR` | Free |
 | **TTS** | `FunAudioLLM/CosyVoice2-0.5B` | ¥50/1M tokens |
 | **TTS** | `IndexTeam/IndexTTS-2` | ¥50/1M tokens |
 | **TTS** | `fnlp/MOSS-TTSD-v0.5` | ¥50/1M tokens |
