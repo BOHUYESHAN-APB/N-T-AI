@@ -1,0 +1,535 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
+import '../../../core/services/llm_service.dart';
+import '../../../settings/settings_scope.dart';
+import '../../../settings/settings.dart';
+import '../../../settings/settings_controller.dart';
+
+class CapabilitiesTab extends StatelessWidget {
+  const CapabilitiesTab({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = SettingsScope.of(context);
+    final settings = controller.settings;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildSectionHeader(context, 'Python 神经中枢 (Neural Hub)'),
+        Card(
+          elevation: 0,
+          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.1)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.hub, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '本地 Python 后端',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const Text(
+                            '提供高级逻辑推理、向量记忆与复杂任务处理能力',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: settings.enablePythonBackend,
+                      onChanged: (v) => controller.setEnablePythonBackend(v),
+                    ),
+                  ],
+                ),
+                if (settings.enablePythonBackend) ...[
+                  const Divider(height: 24),
+                  _buildBackendControls(context, controller, settings),
+                ],
+              ],
+            ),
+          ),
+        ),
+        
+        if (settings.enablePythonBackend) ...[
+          const SizedBox(height: 16),
+          _buildSectionHeader(context, '高级能力 (Advanced)'),
+          Opacity(
+            opacity: 0.5,
+            child: SwitchListTile(
+              title: const Text('深度研究 (Deep Research)'),
+              subtitle: const Text('🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)'),
+              value: false,
+              onChanged: null,  // 禁用开关
+              secondary: const Icon(Icons.science_outlined),
+            ),
+          ),
+          // Vector memory is implicit when backend is active, but we could add a toggle if needed
+          // For now, we assume backend = vector memory enabled.
+        ] else ...[
+           const SizedBox(height: 16),
+           _buildSectionHeader(context, '高级能力 (Advanced)'),
+           ListTile(
+             leading: const Icon(Icons.science_outlined, color: Colors.grey),
+             title: const Text('深度研究 (Deep Research)', style: TextStyle(color: Colors.grey)),
+             subtitle: const Text('需要启用 Python 后端', style: TextStyle(color: Colors.grey)),
+             trailing: const Icon(Icons.lock_outline, color: Colors.grey),
+             onTap: () {
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先启用 Python 后端以解锁此功能')));
+             },
+           ),
+        ],
+
+        const SizedBox(height: 16),
+        _buildSectionHeader(context, '基础能力 (Basic)'),
+        SwitchListTile(
+          title: const Text('启用 Agent 模式'),
+          subtitle: const Text('允许模型使用工具（如联网搜索、时间查询等）'),
+          value: settings.agentEnabled,
+          onChanged: (v) => controller.setAgentEnabled(v),
+          secondary: const Icon(Icons.auto_awesome),
+        ),
+        SwitchListTile(
+          title: const Text('联网搜索'),
+          subtitle: Text(settings.enablePythonBackend 
+              ? '使用后端 Agent 进行聚合搜索' 
+              : '请求模型使用自带联网能力 (如 Perplexity/Gemini) 或调用本地 Bing 工具'),
+          value: settings.enableBrowser,
+          onChanged: settings.agentEnabled ? (v) => controller.setEnableBrowser(v) : null,
+          secondary: Icon(Icons.public, color: settings.agentEnabled ? null : Colors.grey),
+        ),
+        SwitchListTile(
+          title: const Text('显示思考过程'),
+          subtitle: const Text('在聊天中展示 Agent 的思维链 (Chain of Thought)'),
+          value: settings.showAgentThoughts,
+          onChanged: (v) => controller.setAgentShowThoughts(v),
+          secondary: const Icon(Icons.psychology_outlined),
+        ),
+        
+        const Divider(height: 32),
+        _buildSectionHeader(context, '视觉中枢 (Vision)'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: settings.activeVisionProviderId ?? 'follow_main',
+                  decoration: const InputDecoration(labelText: '视觉来源', border: OutlineInputBorder()),
+                  items: [
+                    const DropdownMenuItem(value: 'follow_main', child: Text('跟随主脑（优先使用主脑视觉）')),
+                    for (final p in controller.providers) DropdownMenuItem(value: p.id, child: Text('专用：${p.name}')),
+                  ],
+                  onChanged: (v) => controller.setActiveVisionProvider(v == 'follow_main' ? null : v),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('主脑具备视觉时优先使用'),
+                  value: settings.useMainVisionIfCapable,
+                  onChanged: (v) => controller.setUseMainVisionIfCapable(v),
+                ),
+                SwitchListTile(
+                  title: const Text('无视觉时自动走 Agent'),
+                  value: settings.visionFallbackToAgent,
+                  onChanged: (v) => controller.setVisionFallbackToAgent(v),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: TextEditingController(text: settings.visionPromptTemplate),
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: '默认视觉提示词', border: OutlineInputBorder()),
+                  onSubmitted: (v) => controller.setVisionPromptTemplate(v.trim()),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(child: Text('建议字数: ${settings.visionPreferredLength}')),
+                    Expanded(child: Text('最大字数: ${settings.visionMaxLength}')),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
+                        value: settings.visionPreferredLength.toDouble(),
+                        min: 60, max: 200, divisions: 14,
+                        onChanged: (v) => controller.setVisionPreferredLength(v.round()),
+                      ),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: settings.visionMaxLength.toDouble(),
+                        min: 200, max: 500, divisions: 6,
+                        onChanged: (v) => controller.setVisionMaxLength(v.round()),
+                      ),
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.tonal(
+                    onPressed: () => _testVision(context, controller),
+                    child: const Text('测试视觉'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildSectionHeader(context, '表情与情绪'),
+        Card(
+          child: Column(
+            children: [
+              SwitchListTile(
+                title: const Text('启用表情 Agent'),
+                subtitle: const Text('分析情绪并驱动表情'),
+                value: settings.enableExpressionAgent,
+                onChanged: (v) => controller.setEnableExpressionAgent(v),
+              ),
+              SwitchListTile(
+                title: const Text('显示动态表情（灵动岛）'),
+                value: settings.showExpressionFace,
+                onChanged: (v) => controller.setShowExpressionFace(v),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: DropdownButtonFormField<String>(
+                  value: settings.activeExpressionProviderId ?? 'follow_main',
+                  decoration: const InputDecoration(labelText: '表情推理模型', border: OutlineInputBorder()),
+                  items: [
+                    const DropdownMenuItem(value: 'follow_main', child: Text('跟随主脑')),
+                    for (final p in controller.providers) DropdownMenuItem(value: p.id, child: Text('${p.name} (${p.model})')),
+                  ],
+                  onChanged: (v) => controller.setActiveExpressionProvider(v == 'follow_main' ? null : v),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const Divider(height: 32),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _buildSectionHeader(context, 'MCP 服务器'),
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: '添加服务器',
+              onPressed: settings.enablePythonBackend 
+                  ? () => _showEditServerDialog(context, controller)
+                  : null, // Disable add button if backend is off
+            ),
+          ],
+        ),
+        
+        // Warning for MCP when backend is disabled
+        if (!settings.enablePythonBackend)
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Theme.of(context).colorScheme.error.withOpacity(0.5)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Theme.of(context).colorScheme.error),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '未启用 Python 后端：无法使用非官方默认工具 (MCP)。\n请在上方开启 "本地 Python 后端" 以启用此功能。',
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onErrorContainer),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        const Padding(
+          padding: EdgeInsets.only(bottom: 16.0),
+          child: Text(
+            '配置外部 MCP 服务器以扩展 AI 的能力。支持标准输入/输出 (stdio) 协议。',
+            style: TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ),
+        if (settings.mcpServers.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Text('暂无配置的 MCP 服务器'),
+            ),
+          )
+        else
+          ...settings.mcpServers.map((server) => _buildServerTile(context, controller, server, enabled: settings.enablePythonBackend)),
+      ],
+    );
+  }
+
+  void _testVision(BuildContext context, SettingsController controller) async {
+    final picker = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+    if (picker == null || picker.files.first.bytes == null) return;
+    final bytes = picker.files.first.bytes!;
+    final llm = LLMService();
+    final s = controller.settings;
+    final hint = '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+    
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在请求视觉分析...')));
+    
+    try {
+      final result = await llm.chatWithImage(
+        messages: const [ {'role':'system','content':'你是一个擅长中文描述的图像助手。'} ],
+        imageBytes: bytes,
+        prompt: hint,
+        usageType: 'tool',
+        providerIdOverride: controller.settings.activeVisionProviderId,
+      );
+      if (!context.mounted) return;
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('视觉测试结果'),
+        content: SingleChildScrollView(child: Text(result)),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+      ));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
+    }
+  }
+
+  Widget _buildBackendControls(BuildContext context, SettingsController controller, AppSettings settings) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: TextEditingController(text: settings.pythonBackendUrl),
+                decoration: const InputDecoration(
+                  labelText: '后端地址',
+                  hintText: 'http://localhost:8000',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (v) => controller.setPythonBackendUrl(v),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: () async {
+                final url = Uri.parse('${settings.pythonBackendUrl}/docs');
+                if (await canLaunchUrl(url)) {
+                  launchUrl(url);
+                }
+              },
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('API 文档'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Placeholder buttons for process management
+            // In a real implementation, these would call a native bridge or shell command
+            OutlinedButton.icon(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在尝试启动后端进程...')));
+                // TODO: Implement Process.run for backend
+              },
+              icon: const Icon(Icons.play_arrow, color: Colors.green),
+              label: const Text('启动服务'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在停止服务...')));
+              },
+              icon: const Icon(Icons.stop, color: Colors.red),
+              label: const Text('停止服务'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+      ),
+    );
+  }
+
+  Widget _buildServerTile(BuildContext context, SettingsController controller, McpServerConfig server, {bool enabled = true}) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      color: enabled ? null : Theme.of(context).disabledColor.withOpacity(0.05),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.2)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListTile(
+        enabled: enabled,
+        title: Text(server.name, style: const TextStyle(fontWeight: FontWeight.w500)),
+        subtitle: Text(
+          '${server.command} ${server.args.join(" ")}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Switch(
+              value: server.enabled,
+              onChanged: enabled ? (v) {
+                controller.updateMcpServer(server.copyWith(enabled: v));
+              } : null,
+            ),
+            PopupMenuButton<String>(
+              enabled: enabled,
+              onSelected: (value) {
+                if (value == 'edit') {
+                  _showEditServerDialog(context, controller, server: server);
+                } else if (value == 'delete') {
+                  _confirmDelete(context, controller, server);
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                const PopupMenuItem(value: 'delete', child: Text('删除', style: TextStyle(color: Colors.red))),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context, SettingsController controller, McpServerConfig server) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除 MCP 服务器 "${server.name}" 吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              controller.removeMcpServer(server.id);
+              Navigator.pop(context);
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditServerDialog(BuildContext context, SettingsController controller, {McpServerConfig? server}) {
+    final isEditing = server != null;
+    final nameCtrl = TextEditingController(text: server?.name ?? '');
+    final cmdCtrl = TextEditingController(text: server?.command ?? '');
+    final argsCtrl = TextEditingController(text: server?.args.join(' ') ?? '');
+    final envCtrl = TextEditingController(
+      text: server?.env.entries.map((e) => '${e.key}=${e.value}').join('\n') ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isEditing ? '编辑 MCP 服务器' : '添加 MCP 服务器'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: '名称', hintText: '例如: Filesystem Server'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: cmdCtrl,
+                decoration: const InputDecoration(labelText: '命令 (Command)', hintText: '例如: npx, python, docker'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: argsCtrl,
+                decoration: const InputDecoration(labelText: '参数 (Arguments)', hintText: '空格分隔，例如: -y @modelcontextprotocol/server-filesystem'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: envCtrl,
+                decoration: const InputDecoration(
+                  labelText: '环境变量 (Environment)',
+                  hintText: 'KEY=VALUE (每行一个)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              if (nameCtrl.text.isEmpty || cmdCtrl.text.isEmpty) return;
+
+              final args = argsCtrl.text.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+              
+              final env = <String, String>{};
+              final envLines = envCtrl.text.split('\n');
+              for (final line in envLines) {
+                final parts = line.split('=');
+                if (parts.length >= 2) {
+                  env[parts[0].trim()] = parts.sublist(1).join('=').trim();
+                }
+              }
+
+              final newServer = McpServerConfig(
+                id: server?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                name: nameCtrl.text,
+                command: cmdCtrl.text,
+                args: args,
+                env: env,
+                enabled: server?.enabled ?? true,
+              );
+
+              if (isEditing) {
+                controller.updateMcpServer(newServer);
+              } else {
+                controller.addMcpServer(newServer);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+}

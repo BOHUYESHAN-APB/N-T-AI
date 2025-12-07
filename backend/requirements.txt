@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlmodel
+python-dotenv
+openai
+httpx
+pydantic-settings
+ddgs>=6.0.0
+beautifulsoup4
+requests
+
+
+

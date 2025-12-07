@@ -1,0 +1,185 @@
+name: flutter_application
+description: "A new Flutter project."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 0.3.3-beta+3
+
+environment:
+  sdk: ^3.8.1
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.3.2
+  file_picker: ^10.3.7
+  http: ^1.2.2
+  package_info_plus: ^8.0.2
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
+  path: ^1.8.3
+  uuid: ^4.2.1
+  html: ^0.15.6
+  intl: ^0.20.2
+  url_launcher: ^6.3.2
+  webview_flutter: ^4.13.0
+  webview_windows: ^0.4.0
+  path_provider: ^2.1.5
+  audioplayers: ^6.0.0
+  record: ^5.2.0
+  flutter_localizations:
+    sdk: flutter
+  flutter_markdown: ^0.7.7+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  msix: ^3.16.7
+
+dependency_overrides:
+  record_linux: ^1.2.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/images/splash_1.png
+  color_dark: "#1a1a1a"
+  image_dark: assets/images/splash_2.png
+
+  android_12:
+    image: assets/images/splash_1.png
+    icon_background_color: "#ffffff"
+    image_dark: assets/images/splash_2.png
+    icon_background_color_dark: "#1a1a1a"
+
+  web: false
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_icon.png"
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/images/app_icon.png"
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: "assets/images/app_icon.png"
+    icon_size: 48
+  macos:
+    generate: true
+    image_path: "assets/images/app_icon.png"
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^5.0.0
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+  generate: true
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  assets:
+    # Changelog
+    - CHANGELOG.md
+    # 许可证文本（用于“关于”页面和 LicenseRegistry）
+    - assets/licenses/FZG-OFL-1.1.txt
+    - assets/licenses/FZG-OFL-zh.md
+    - assets/licenses/MiSans-LICENSE.txt
+    - assets/licenses/nfdcs-LICENSE.txt
+    - assets/licenses/PRIVACY_POLICY.md
+    - assets/licenses/USER_AGREEMENT.md
+    - assets/licenses/COMMERCIAL_LICENSE_TERMS.md
+    # Images
+    - assets/images/
+    # Excalidraw assets
+    - assets/excalidraw/
+    - assets/excalidraw/fonts/Assistant/
+    - assets/excalidraw/fonts/Cascadia/
+    - assets/excalidraw/fonts/ComicShanns/
+    - assets/excalidraw/fonts/Excalifont/
+    - assets/excalidraw/fonts/Liberation/
+    - assets/excalidraw/fonts/Lilita/
+    - assets/excalidraw/fonts/Nunito/
+    - assets/excalidraw/fonts/Virgil/
+    - assets/excalidraw/fonts/Xiaolai/
+    - assets/excalidraw/locales/
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # 将字体复制到应用内，避免包外路径限制
+  fonts:
+    - family: MiSansVF
+      fonts:
+        - asset: assets/fonts/MiSans VF.ttf
+          weight: 400
+    - family: FZG
+      fonts:
+        - asset: assets/fonts/FZG_CN.ttf
+          weight: 400
+        - asset: assets/fonts/FZG_HAX.ttf
+          weight: 700
+    - family: nfdcs
+      fonts:
+        - asset: assets/fonts/nfdcsCN16.ttf
+          weight: 400
+        - asset: assets/fonts/nfdcsCN24.ttf
+          weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package
+
+msix_config:
+  display_name: N-T-AI
+  publisher_display_name: BoHuYeShan
+  identity_name: com.bohuyeshan.ntai
+  msix_version: 1.0.0.0
+  logo_path: assets/images/app_icon.png
+  output_name: N-T-AI
+  # capabilities:
+  #   - internetClient

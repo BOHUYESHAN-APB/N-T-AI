@@ -1,0 +1,167 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Only trigger on version tags, e.g. v0.3.3
+
+jobs:
+  check-permission:
+    name: Check CI Permission
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f "CI_PERMISSION.md" ] && grep -q "true" "CI_PERMISSION.md"; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "CI is enabled."
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "CI is disabled or permission file missing."
+          fi
+
+  build-android:
+    name: Build Android APK
+    needs: check-permission
+    if: needs.check-permission.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Sync Version
+        shell: pwsh
+        run: ./scripts/update_version.ps1
+          
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+        working-directory: flutter_application
+
+      - name: Create key.properties
+        run: |
+          echo "storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> android/key.properties
+          echo "storeFile=upload-keystore.jks" >> android/key.properties
+        working-directory: flutter_application
+
+      - name: Get Dependencies
+        run: flutter pub get
+        working-directory: flutter_application
+
+      - name: Build APK
+        run: flutter build apk --release
+        working-directory: flutter_application
+        
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: flutter_application/build/app/outputs/flutter-apk/app-release.apk
+
+  build-windows:
+    name: Build Windows MSIX
+    needs: check-permission
+    if: needs.check-permission.outputs.should_run == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Sync Version
+        shell: pwsh
+        run: ./scripts/update_version.ps1
+          
+      - name: Decode PFX Certificate
+        run: |
+          $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.WINDOWS_PFX_BASE64 }}")
+          [IO.File]::WriteAllBytes("$pwd/flutter_application/certificate.pfx", $pfx_cert_byte)
+        shell: powershell
+
+      - name: Get Dependencies
+        run: flutter pub get
+        working-directory: flutter_application
+
+      - name: Configure MSIX Signing
+        # We use msix:create but we need to ensure pubspec.yaml or msix_config uses the certificate
+        # Alternatively, we can pass arguments if the package supports it, or edit pubspec on the fly.
+        # Assuming msix config in pubspec reads from a file or we use the default test cert if not configured.
+        # For production, we usually configure msix_config in pubspec.yaml to point to the certificate.
+        # Here we assume the user will configure pubspec.yaml to point to 'certificate.pfx'
+        run: |
+          # Just a placeholder to ensure the file exists where expected
+          ls certificate.pfx
+        working-directory: flutter_application
+
+      - name: Build MSIX
+        run: dart run msix:create --certificate-path certificate.pfx --certificate-password "${{ secrets.WINDOWS_CERT_PASSWORD }}"
+        working-directory: flutter_application
+        
+      - name: Upload MSIX Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-msix
+          path: flutter_application/build/windows/x64/runner/Release/*.msix
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Extract Changelog
+        id: changelog
+        # Extracts the content for the current version from CHANGELOG.md
+        # Assumes format: ## [Version] - Date ... content ... ## [Next Version]
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          # Simple extraction logic: find the version header, print until next header
+          # Note: This is a simple heuristic. For robust parsing, a script is better.
+          # Here we just use the whole file or a simple sed if structure is strict.
+          # Let's try to extract just the latest entry.
+          sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$d' > release_notes.md
+          echo "::set-output name=path::release_notes.md"
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release-apk
+          path: release_assets
+
+      - name: Download MSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release-msix
+          path: release_assets
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release_notes.md
+          files: |
+            release_assets/*.apk
+            release_assets/*.msix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.env
+.venv
+env/
+venv/
+astra_me.db
+Astra-Me/
+
+# Live2D models (user uploads)
+app/static/live2d/*
+!app/static/live2d/libs/
+!app/static/live2d/*.js
+!app/static/live2d/*.html
+!app/static/live2d/README.md
+

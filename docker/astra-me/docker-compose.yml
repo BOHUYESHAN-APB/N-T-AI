@@ -1,0 +1,13 @@
+services:
+  astra-me:
+    build:
+      context: ../../
+      dockerfile: docker/astra-me/Dockerfile
+    container_name: astra-me-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../backend:/app
+    environment:
+      - PROJECT_NAME=Astra-Me
+    restart: unless-stopped

@@ -1,0 +1,134 @@
+import 'package:flutter/material.dart';
+import 'screens/firefly_screen.dart';
+import 'screens/notes_screen.dart';
+import 'screens/settings/settings_screen.dart';
+import 'screens/memory_manager_screen.dart';
+import 'screens/tarot_screen.dart';
+
+class HomeShell extends StatefulWidget {
+  const HomeShell({Key? key}) : super(key: key);
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int _selectedIndex = 0;
+
+  static final List<Widget> _pages = <Widget>[
+    const FireflyScreen(),
+    const MemoryManagerScreen(heroTag: 'memory_fab_home'),
+    NotesScreen(),
+    const TarotScreen(),
+    SettingsScreen(),
+  ];
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        
+        // Use IndexedStack to preserve state of all pages
+        final content = IndexedStack(
+          index: _selectedIndex,
+          children: _pages,
+        );
+
+        // final titles = const ['流萤', '记忆', '笔记', '塔罗', '系统'];
+        
+        if (isWide) {
+          return Scaffold(
+            body: Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: _selectedIndex < 4 ? _selectedIndex : null,
+                  onDestinationSelected: _onItemTapped,
+                  labelType: NavigationRailLabelType.all,
+                  groupAlignment: -1.0, // Align to top
+                  leading: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24.0),
+                    child: CircleAvatar(
+                      radius: 24,
+                      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                      child: Icon(Icons.auto_awesome, color: Theme.of(context).colorScheme.primary),
+                    ),
+                  ),
+                  destinations: const [
+                    NavigationRailDestination(
+                      icon: Icon(Icons.chat_bubble_outlined),
+                      selectedIcon: Icon(Icons.chat_bubble),
+                      label: Text('流萤'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.psychology_outlined),
+                      selectedIcon: Icon(Icons.psychology),
+                      label: Text('记忆'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.edit_note_outlined),
+                      selectedIcon: Icon(Icons.edit_note),
+                      label: Text('笔记'),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.style_outlined),
+                      selectedIcon: Icon(Icons.style),
+                      label: Text('塔罗'),
+                    ),
+                    // System is handled by trailing button to separate it
+                  ],
+                  trailing: Expanded(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 24.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(
+                                _selectedIndex == 4 ? Icons.settings : Icons.settings_outlined,
+                                color: _selectedIndex == 4 ? Theme.of(context).colorScheme.primary : null,
+                              ),
+                              tooltip: '系统设置',
+                              onPressed: () => _onItemTapped(4),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text('系统', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const VerticalDivider(width: 1, thickness: 1),
+                Expanded(child: content),
+              ],
+            ),
+          );
+        } else {
+          return Scaffold(
+            body: content,
+            bottomNavigationBar: NavigationBar(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: _onItemTapped,
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: '流萤'),
+                NavigationDestination(icon: Icon(Icons.psychology_outlined), selectedIcon: Icon(Icons.psychology), label: '记忆'),
+                NavigationDestination(icon: Icon(Icons.edit_note_outlined), selectedIcon: Icon(Icons.edit_note), label: '笔记'),
+                NavigationDestination(icon: Icon(Icons.style_outlined), selectedIcon: Icon(Icons.style), label: '塔罗'),
+                NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: '系统'),
+              ],
+            ),
+          );
+        }
+      },
+    );
+  }
+}

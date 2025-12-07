@@ -1,0 +1,11 @@
+node_modules/
+dist/
+**/node_modules/
+**/dist/
+*.log
+env.local
+.DS_Store
+/Astra-Me/other-Repository/
+/Astra-Me/docs/
+TEMP-AI编程窗口任务交接文档.md
+/Astra-Me/

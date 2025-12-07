@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D Renderer</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+        #debug-console {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            max-height: 50%;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-family: monospace;
+            font-size: 12px;
+            pointer-events: none;
+            display: none; /* Hidden by default, toggle with query param debug=true */
+        }
+        .log-entry { border-bottom: 1px solid #444; padding: 2px; }
+        .log-error { color: #ff5555; }
+        .log-warn { color: #ffaa00; }
+    </style>
+    <!-- Load Libraries -->
+    <script src="/static/live2d/libs/live2dcubismcore.min.js"></script>
+    <script src="/static/live2d/libs/live2d.min.js"></script>
+    <!-- Use PIXI v7.4.3 -->
+    <script src="/static/live2d/libs/pixi.min.js"></script>
+    <script>
+        // Ensure PIXI is globally accessible for pixi-live2d-display
+        window.PIXI = PIXI;
+    </script>
+    
+    <!-- Load pixi-live2d-display v0.5.0-ls-6 (RaSan147 fork) -->
+    <script src="/static/live2d/libs/pixi-live2d-display-rasan.min.js"></script>
+    
+    <script>
+        // Debug: Check if PIXI.live2d was attached
+        console.log('[PIXI Setup] PIXI.live2d available:', !!PIXI.live2d);
+        console.log('[PIXI Setup] PIXI.live2d keys:', Object.keys(PIXI.live2d || {}));
+        console.log('[PIXI Setup] PIXI.live2d.Live2DModel:', !!PIXI.live2d?.Live2DModel);
+        
+        // Manual fallback if needed (sometimes UMD attaches to window.Live2DModel directly?)
+        if (!PIXI.live2d.Live2DModel && window.Live2DModel) {
+            console.log('[PIXI Setup] Found Live2DModel on window, attaching to PIXI.live2d');
+            PIXI.live2d.Live2DModel = window.Live2DModel;
+        }
+    </script>
+    
+    <!-- Load Main Logic -->
+    <script src="/static/live2d/live2d.v2.js"></script>
+</head>
+<body>
+    <div id="debug-console"></div>
+    <div id="canvas-container">
+        <canvas id="live2d-canvas"></canvas>
+    </div>
+
+    <script>
+        // Simple on-screen logger
+        const debugConsole = document.getElementById('debug-console');
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('debug') === 'true') {
+            debugConsole.style.display = 'block';
+        }
+
+        function logToScreen(msg, type = 'info') {
+            if (debugConsole.style.display === 'none') return;
+            const div = document.createElement('div');
+            div.className = 'log-entry log-' + type;
+            div.textContent = `[${type.toUpperCase()}] ${msg}`;
+            debugConsole.appendChild(div);
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+        }
+
+        // Capture global errors
+        window.onerror = function(msg, url, line, col, error) {
+            logToScreen(`${msg} at ${url}:${line}:${col}`, 'error');
+            return false;
+        };
+
+        window.addEventListener('unhandledrejection', function(event) {
+            logToScreen(`Unhandled Rejection: ${event.reason}`, 'error');
+        });
+
+        // Wait for libraries to load
+        window.onload = function() {
+            logToScreen('Window loaded. Checking libraries...');
+            if (typeof PIXI === 'undefined') {
+                logToScreen('PIXI is undefined!', 'error');
+            } else {
+                logToScreen(`PIXI version: ${PIXI.VERSION}`);
+                if (PIXI.live2d && PIXI.live2d.Live2DModel) {
+                    logToScreen('PIXI.live2d loaded');
+                } else {
+                    logToScreen('PIXI.live2d is missing - library load failed', 'error');
+                    if (window.Live2DModel) logToScreen('But found window.Live2DModel!', 'warn');
+                }
+            }
+            
+            if (!window.live2dManager) {
+                 const manager = new Live2DManager();
+                 window.live2dManager = manager;
+            }
+            
+            init();
+        };
+
+        async function init() {
+            logToScreen('Initializing...');
+            try {
+                if (!window.live2dManager) {
+                    throw new Error("Live2DManager not initialized");
+                }
+                
+                // initPIXI(canvasId, containerId)
+                await window.live2dManager.initPIXI('live2d-canvas', 'canvas-container');
+                logToScreen('PIXI Initialized');
+                
+                // Check for model in URL params
+                const modelPath = urlParams.get('model');
+                
+                if (modelPath) {
+                    logToScreen(`Loading model: ${modelPath}`);
+                    await window.live2dManager.loadModel(modelPath);
+                    logToScreen('Model loaded successfully');
+                } else {
+                    logToScreen('No model parameter provided', 'warn');
+                }
+            } catch (e) {
+                logToScreen(`Init failed: ${e.message}`, 'error');
+                console.error(e);
+            }
+        }
+    </script>
+</body>
+</html>
