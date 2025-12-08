@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
 import '../widgets/expressive_face.dart';
@@ -21,6 +22,8 @@ import '../core/services/chat_history_service.dart' hide ChatMessage;
 import 'memory_manager_screen.dart'; // Import MemoryManagerScreen
 import 'settings/settings_screen.dart'; // Import SettingsScreen
 import 'first_run_dialog.dart'; // Import FirstRunDialog
+import '../services/floating_window_factory.dart'; // Import FloatingWindowService
+import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
 
 class FireflyScreen extends StatefulWidget {
   const FireflyScreen({Key? key}) : super(key: key);
@@ -39,16 +42,21 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Uint8List? _pendingImageBytes;
   late final ExpressionController _faceController;
   bool _historyOpen = false; // 左侧历史与功能面板
-  
+
   // Multi-session state
   List<ChatSession> _sessions = [];
   String? _currentSessionId;
-  List<Map<String, dynamic>> _messages = []; // {role: user/assistant, content: text, created_at: DateTime}
+  List<Map<String, dynamic>> _messages =
+      []; // {role: user/assistant, content: text, created_at: DateTime}
   bool _isLoading = false;
   Completer<void>? _interruptCompleter;
 
   StreamSubscription? _historySubscription;
   StreamSubscription? _faceSubscription;
+
+  // Floating window service
+  FloatingWindowService? _floatingWindowService;
+  bool _floatingWindowEnabled = false;
 
   @override
   void initState() {
@@ -60,21 +68,69 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _historySubscription = _chatHistory.updateStream.listen((_) {
       if (mounted) _loadSessions();
     });
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkFirstRun();
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Check floating window setting and update accordingly
+    final settings = SettingsScope.of(context).settings;
+    _updateFloatingWindow(settings.enableFloatingWindow);
+  }
+
+  Future<void> _updateFloatingWindow(bool enabled) async {
+    if (enabled == _floatingWindowEnabled) return;
+    _floatingWindowEnabled = enabled;
+
+    // 启用/禁用广播（让悬浮窗通过 WebSocket 接收表情/动作指令）
+    _brain.expressionAgent.setBroadcastEnabled(enabled);
+
+    if (!FloatingWindowServiceFactory.isSupported()) return;
+
+    if (enabled) {
+      // Create floating window
+      try {
+        // 获取当前选择的 Live2D 模型路径
+        final prefs = await SharedPreferences.getInstance();
+        final modelPath = prefs.getString('settings.character.modelPath') ?? '';
+
+        _floatingWindowService ??= FloatingWindowServiceFactory.getInstance(
+          backendUrl: 'http://localhost:8000',
+        );
+        await _floatingWindowService!.initialize();
+        await _floatingWindowService!.createFloatingWindow(
+          modelPath: modelPath,
+          width: 400,
+          height: 600,
+        );
+      } catch (e) {
+        debugPrint('[FireflyScreen] Failed to create floating window: $e');
+      }
+    } else {
+      // Close floating window
+      try {
+        await _floatingWindowService?.closeFloatingWindow();
+      } catch (e) {
+        debugPrint('[FireflyScreen] Failed to close floating window: $e');
+      }
+    }
+  }
+
   void _interruptGeneration() {
-    if (_isLoading && _interruptCompleter != null && !_interruptCompleter!.isCompleted) {
+    if (_isLoading &&
+        _interruptCompleter != null &&
+        !_interruptCompleter!.isCompleted) {
       _interruptCompleter!.complete();
       setState(() {
         _isLoading = false;
         _messages.add(<String, dynamic>{
           'role': 'system',
           'content': '[用户中断了生成]',
-          'created_at': DateTime.now()
+          'created_at': DateTime.now(),
         });
       });
     }
@@ -86,7 +142,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
       await showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => FirstRunDialog(settingsController: settingsController, brain: _brain),
+        builder: (context) => FirstRunDialog(
+          settingsController: settingsController,
+          brain: _brain,
+        ),
       );
     }
   }
@@ -95,6 +154,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   void dispose() {
     _historySubscription?.cancel();
     _faceSubscription?.cancel();
+    _floatingWindowService?.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _faceController.dispose();
@@ -119,7 +179,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   Future<void> _createNewSession() async {
     final l10n = AppLocalizations.of(context)!;
-    final session = await _chatHistory.createSession('${l10n.quickActionNewChat} ${DateTime.now().month}/${DateTime.now().day}');
+    final session = await _chatHistory.createSession(
+      '${l10n.quickActionNewChat} ${DateTime.now().month}/${DateTime.now().day}',
+    );
     await _loadSessions();
     await _selectSession(session.id);
   }
@@ -129,21 +191,34 @@ class _FireflyScreenState extends State<FireflyScreen> {
     setState(() {
       _currentSessionId = sessionId;
       // Explicitly create List<Map<String, dynamic>> to avoid runtime type issues
-      _messages = msgs.map((m) => <String, dynamic>{
-        'role': m.role, 
-        'content': m.content,
-        'created_at': m.createdAt
-      }).toList();
+      _messages = msgs
+          .map(
+            (m) => <String, dynamic>{
+              'role': m.role,
+              'content': m.content,
+              'created_at': m.createdAt,
+            },
+          )
+          .toList();
     });
-    
+
     // If empty, add greeting (but don't save it to DB yet to keep it clean)
     if (_messages.isEmpty) {
       _checkApiKey();
     }
-    
+
     // Update Brain context
-    _brain.setContext(_messages.map((m) => {'role': m['role'].toString(), 'content': m['content'].toString()}).toList());
-    
+    _brain.setContext(
+      _messages
+          .map(
+            (m) => {
+              'role': m['role'].toString(),
+              'content': m['content'].toString(),
+            },
+          )
+          .toList(),
+    );
+
     _scrollToBottom();
   }
 
@@ -160,6 +235,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       }
     }
   }
+
   Future<void> _checkApiKey() async {
     final key = await _llmService.getApiKey();
     final l10n = AppLocalizations.of(context)!;
@@ -168,7 +244,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         setState(() {
           _messages.add(<String, dynamic>{
             'role': 'assistant',
-            'content': l10n.greetingMissingKey
+            'content': l10n.greetingMissingKey,
           });
         });
       }
@@ -177,7 +253,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       setState(() {
         _messages.add(<String, dynamic>{
           'role': 'assistant',
-          'content': l10n.greetingNormal
+          'content': l10n.greetingNormal,
         });
       });
     }
@@ -185,7 +261,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   AiProviderConfig? _resolveAudioProvider(AiProviderCategory category) {
     final providers = SettingsScope.of(context).providers;
-    
+
     // 1. Try to find explicit provider
     final explicit = providers.firstWhere(
       (p) => p.category == category && p.enabled,
@@ -198,19 +274,26 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (settings.enablePythonBackend) {
       // Try to find an LLM provider to borrow the API Key (e.g. SiliconFlow)
       final llmProvider = providers.firstWhere(
-        (p) => p.category == AiProviderCategory.llm && p.enabled && (p.baseUrl.contains('siliconflow') || p.name.toLowerCase().contains('silicon')),
-        orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+        (p) =>
+            p.category == AiProviderCategory.llm &&
+            p.enabled &&
+            (p.baseUrl.contains('siliconflow') ||
+                p.name.toLowerCase().contains('silicon')),
+        orElse: () =>
+            AiProviderConfig(id: '', name: '', kind: AiProvider.local),
       );
-      
+
       String apiKey = llmProvider.id.isNotEmpty ? llmProvider.apiKey : '';
-      
+
       return AiProviderConfig(
         id: 'backend_proxy_${category.name}',
         name: 'Backend Proxy (${category.name})',
-        kind: AiProvider.openai, 
-        baseUrl: 'http://localhost:8000/api', 
-        apiKey: apiKey, 
-        model: category == AiProviderCategory.stt ? 'FunAudioLLM/SenseVoiceSmall' : 'FunAudioLLM/CosyVoice2-0.5B',
+        kind: AiProvider.openai,
+        baseUrl: 'http://localhost:8000/api',
+        apiKey: apiKey,
+        model: category == AiProviderCategory.stt
+            ? 'FunAudioLLM/SenseVoiceSmall'
+            : 'FunAudioLLM/CosyVoice2-0.5B',
         category: category,
         enabled: true,
       );
@@ -224,9 +307,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
     setState(() => _isLoading = true);
     try {
       final sttProvider = _resolveAudioProvider(AiProviderCategory.stt);
-      
+
       if (sttProvider == null) {
-         throw Exception('未配置 STT 服务 (No STT Provider)');
+        throw Exception('未配置 STT 服务 (No STT Provider)');
       }
 
       final text = await _brain.transcribe(path, sttProvider);
@@ -235,7 +318,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
         _sendMessage();
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -249,9 +335,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
     setState(() {
       // Explicitly cast to Map<String, dynamic> to match _messages definition
       _messages.add(<String, dynamic>{
-        'role': 'user', 
-        'content': _pendingImageBytes != null ? (text.isNotEmpty ? '$text\n[已附加图片]' : '[已附加图片]') : text,
-        'created_at': DateTime.now()
+        'role': 'user',
+        'content': _pendingImageBytes != null
+            ? (text.isNotEmpty ? '$text\n[已附加图片]' : '[已附加图片]')
+            : text,
+        'created_at': DateTime.now(),
       });
       _isLoading = true;
       _interruptCompleter = Completer<void>(); // Initialize completer
@@ -260,8 +348,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _scrollToBottom();
 
     // Save user message
-    await _chatHistory.addMessage(_currentSessionId!, 'user', text.isEmpty ? '[图片]' : text);
-    
+    await _chatHistory.addMessage(
+      _currentSessionId!,
+      'user',
+      text.isEmpty ? '[图片]' : text,
+    );
+
     // Update session title if it's the first message
     if (_messages.length <= 2) {
       // Simple heuristic: use first 10 chars
@@ -273,7 +365,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     try {
       final settings = SettingsScope.of(context).settings;
       String response;
-      
+
       // Define the generation task
       Future<String> generationTask() async {
         if (_pendingImageBytes != null) {
@@ -286,27 +378,40 @@ class _FireflyScreenState extends State<FireflyScreen> {
             final s = SettingsScope.of(context).settings;
             // Vision selection strategy: use main if capable; else use selected vision provider; else fallback
             final useMainIfCapable = s.useMainVisionIfCapable;
-            final mainVisionCapable = await _llmService.isActiveModelVisionCapable();
-            final selectedVisionProviderId = s.activeVisionProviderId; // null means follow main
+            final mainVisionCapable = await _llmService
+                .isActiveModelVisionCapable();
+            final selectedVisionProviderId =
+                s.activeVisionProviderId; // null means follow main
 
             if (useMainIfCapable && mainVisionCapable) {
-              final defaultHint = '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+              final defaultHint =
+                  '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
               return await _llmService.chatWithImage(
-              messages: _messages.map((m) => {
-                'role': m['role'].toString(),
-                'content': m['content'].toString(),
-              }).toList(),
-              imageBytes: _pendingImageBytes!,
+                messages: _messages
+                    .map(
+                      (m) => {
+                        'role': m['role'].toString(),
+                        'content': m['content'].toString(),
+                      },
+                    )
+                    .toList(),
+                imageBytes: _pendingImageBytes!,
                 prompt: text.isNotEmpty ? text : defaultHint,
-              usageType: 'main',
+                usageType: 'main',
               );
-            } else if (selectedVisionProviderId != null && selectedVisionProviderId.isNotEmpty) {
-              final defaultHint = '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+            } else if (selectedVisionProviderId != null &&
+                selectedVisionProviderId.isNotEmpty) {
+              final defaultHint =
+                  '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
               return await _llmService.chatWithImage(
-                messages: _messages.map((m) => {
-                  'role': m['role'].toString(),
-                  'content': m['content'].toString(),
-                }).toList(),
+                messages: _messages
+                    .map(
+                      (m) => {
+                        'role': m['role'].toString(),
+                        'content': m['content'].toString(),
+                      },
+                    )
+                    .toList(),
                 imageBytes: _pendingImageBytes!,
                 prompt: text.isNotEmpty ? text : defaultHint,
                 usageType: 'main',
@@ -314,15 +419,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
               );
             } else {
               // Fallback: insert helper guidance to switch to a vision-capable model
-              final helper = '当前未配置视觉中枢或模型不支持视觉。建议在系统 → 视觉中枢中选择具备视觉能力的平台（如 gpt-4o、qwen2.5-vl）。我将按文字路径继续。';
+              final helper =
+                  '当前未配置视觉中枢或模型不支持视觉。建议在系统 → 视觉中枢中选择具备视觉能力的平台（如 gpt-4o、qwen2.5-vl）。我将按文字路径继续。';
               if (mounted) {
-                  setState(() {
-                    _messages.add(<String, dynamic>{
+                setState(() {
+                  _messages.add(<String, dynamic>{
                     'role': 'assistant',
                     'content': helper,
                     'created_at': DateTime.now(),
-                    });
                   });
+                });
               }
               return await _brain.processMessage(
                 text.isNotEmpty ? text : '用户上传了一张图片，但当前模型不支持视觉。请仅基于现有上下文继续对话。',
@@ -349,8 +455,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
             );
           }
         } else {
-          final provider = SettingsScope.of(context).selectProviderForNextCall(category: AiProviderCategory.llm);
-          
+          final provider = SettingsScope.of(
+            context,
+          ).selectProviderForNextCall(category: AiProviderCategory.llm);
+
           final result = await _brain.processMessage(
             text,
             agentEnabled: settings.agentEnabled,
@@ -362,9 +470,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
             systemPromptOverride: settings.systemPrompt,
             providerOverride: provider,
           );
-          
+
           if (provider != null) {
-             await SettingsScope.of(context).incrementUsage(provider.id);
+            await SettingsScope.of(context).incrementUsage(provider.id);
           }
           return result;
         }
@@ -384,20 +492,24 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
       if (mounted) {
         final cleanedResponse = _stripExpressionBlocks(response);
-        
+
         if (settings.chatMode == ChatModeOption.standard) {
-           setState(() {
+          setState(() {
             _isLoading = false;
             _pendingImageBytes = null;
             _messages.add(<String, dynamic>{
-              'role': 'assistant', 
+              'role': 'assistant',
               'content': cleanedResponse,
-              'created_at': DateTime.now()
+              'created_at': DateTime.now(),
             });
           });
           _scrollToBottom();
-          await _chatHistory.addMessage(_currentSessionId!, 'assistant', cleanedResponse);
-          
+          await _chatHistory.addMessage(
+            _currentSessionId!,
+            'assistant',
+            cleanedResponse,
+          );
+
           // Trigger Motion Agent
           if (settings.enableLive2D) {
             _brain.expressionAgent.requestMotion(text, cleanedResponse);
@@ -405,14 +517,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
           // Trigger TTS
           if (settings.enableTts) {
-             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
-             if (ttsProvider != null) {
-               _brain.speak(cleanedResponse, ttsProvider);
-             }
+            final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+            if (ttsProvider != null) {
+              _brain.speak(cleanedResponse, ttsProvider);
+            }
           }
         } else {
           final parts = cleanedResponse.split('[SPLIT]');
-          
+
           setState(() {
             _isLoading = false;
             _pendingImageBytes = null;
@@ -421,25 +533,31 @@ class _FireflyScreenState extends State<FireflyScreen> {
           for (var i = 0; i < parts.length; i++) {
             final part = parts[i].trim();
             if (part.isEmpty) continue;
-            
+
             if (i > 0) {
               // Add a small natural delay between messages
-              await Future.delayed(Duration(milliseconds: 500 + (part.length * 20).clamp(0, 1500)));
+              await Future.delayed(
+                Duration(milliseconds: 500 + (part.length * 20).clamp(0, 1500)),
+              );
               if (!mounted) return;
             }
 
             setState(() {
               _messages.add(<String, dynamic>{
-                'role': 'assistant', 
+                'role': 'assistant',
                 'content': part,
-                'created_at': DateTime.now()
+                'created_at': DateTime.now(),
               });
             });
             _scrollToBottom();
             // Save assistant message
-            await _chatHistory.addMessage(_currentSessionId!, 'assistant', part);
+            await _chatHistory.addMessage(
+              _currentSessionId!,
+              'assistant',
+              part,
+            );
           }
-          
+
           // Trigger Motion Agent with full response
           if (settings.enableLive2D) {
             _brain.expressionAgent.requestMotion(text, cleanedResponse);
@@ -447,20 +565,21 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
           // Trigger TTS
           if (settings.enableTts) {
-             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
-             if (ttsProvider != null) {
-               _brain.speak(cleanedResponse, ttsProvider);
-             }
+            final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+            if (ttsProvider != null) {
+              _brain.speak(cleanedResponse, ttsProvider);
+            }
           }
         }
       }
     } catch (e) {
-      if (mounted && _isLoading) { // Only show error if not interrupted/cleared
+      if (mounted && _isLoading) {
+        // Only show error if not interrupted/cleared
         setState(() {
           _messages.add(<String, dynamic>{
-            'role': 'assistant', 
+            'role': 'assistant',
             'content': '呜呜，我好像出错了... ($e)',
-            'created_at': DateTime.now()
+            'created_at': DateTime.now(),
           });
           _isLoading = false;
           _pendingImageBytes = null;
@@ -494,8 +613,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   Future<void> _attachImage() async {
     try {
-      final res = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
-      if (res != null && res.files.isNotEmpty && res.files.first.bytes != null) {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      if (res != null &&
+          res.files.isNotEmpty &&
+          res.files.first.bytes != null) {
         setState(() {
           _pendingImageBytes = res.files.first.bytes;
         });
@@ -505,7 +629,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${AppLocalizations.of(context)!.errImagePick}$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${AppLocalizations.of(context)!.errImagePick}$e'),
+        ),
+      );
     }
   }
 
@@ -549,7 +677,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     final l10n = AppLocalizations.of(context)!;
     final screenWidth = MediaQuery.of(context).size.width;
     final historyPanelWidth = screenWidth > 360 ? 320.0 : screenWidth * 0.85;
-    
+
     // Determine font family for the title
     String? titleFontFamily;
     if (settings.decoFamily == DecorativeFontFamily.fzg) {
@@ -562,28 +690,38 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
-      body: isDesktop 
-        ? _buildDesktopLayout(context, settings, settingsController, l10n, titleFontFamily)
-        : _buildMobileLayout(context, settings, settingsController, l10n, titleFontFamily, historyPanelWidth),
+      body: isDesktop
+          ? _buildDesktopLayout(
+              context,
+              settings,
+              settingsController,
+              l10n,
+              titleFontFamily,
+            )
+          : _buildMobileLayout(
+              context,
+              settings,
+              settingsController,
+              l10n,
+              titleFontFamily,
+              historyPanelWidth,
+            ),
     );
   }
 
   Widget _buildDesktopLayout(
-    BuildContext context, 
-    AppSettings settings, 
-    SettingsController settingsController, 
-    AppLocalizations l10n, 
-    String? titleFontFamily
+    BuildContext context,
+    AppSettings settings,
+    SettingsController settingsController,
+    AppLocalizations l10n,
+    String? titleFontFamily,
   ) {
     return Row(
       children: [
         // Left Sidebar (History)
         if (_historyOpen)
-          SizedBox(
-            width: 300,
-            child: _buildHistoryPanel(context, l10n),
-          ),
-        
+          SizedBox(width: 300, child: _buildHistoryPanel(context, l10n)),
+
         // Main Chat Area
         Expanded(
           child: Stack(
@@ -592,7 +730,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 children: [
                   _buildHeader(context, settings, titleFontFamily),
                   Expanded(child: _buildMessageList(context, settings)),
-                  _buildInputArea(context, settings, settingsController, l10n, settings.quickActions),
+                  _buildInputArea(
+                    context,
+                    settings,
+                    settingsController,
+                    l10n,
+                    settings.quickActions,
+                  ),
                 ],
               ),
               // Top-left toggle button for history
@@ -602,12 +746,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 child: SafeArea(
                   child: IconButton(
                     icon: Icon(_historyOpen ? Icons.menu_open : Icons.menu),
-                    onPressed: () => setState(() => _historyOpen = !_historyOpen),
+                    onPressed: () =>
+                        setState(() => _historyOpen = !_historyOpen),
                   ),
                 ),
               ),
-              // Dynamic Island (Expression)
-              if (settings.showExpressionFace && settings.enableExpressionAgent)
+              // Dynamic Island (Expression) - 表情系统与 Live2D 互斥
+              if (settings.showExpressionFace)
                 Positioned(
                   top: 12,
                   left: 0,
@@ -621,210 +766,348 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     ),
                   ),
                 ),
+              // 右上角显示模式下拉菜单
+              Positioned(
+                top: 12,
+                right: 12,
+                child: SafeArea(
+                  child: _buildDisplayModeButton(
+                    context,
+                    settings,
+                    settingsController,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
 
         // Right Sidebar (Live2D)
-        if (settings.enableLive2D && settings.showLive2D)
+        if (settings.enableLive2D &&
+            settings.showLive2D &&
+            !settings.enableFloatingWindow)
           Container(
             width: 400,
             decoration: BoxDecoration(
-              border: Border(left: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.1))),
-            ),
-            child: Stack(
-              children: [
-                CharacterDisplay(
-                  backendUrl: 'http://localhost:8000',
-                  expressionAgent: _brain.expressionAgent,
+              border: Border(
+                left: BorderSide(
+                  color: Theme.of(context).dividerColor.withOpacity(0.1),
                 ),
-                // Toggle button for Live2D (inside the panel)
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => settingsController.setShowLive2D(false),
-                    tooltip: 'Hide Character',
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        // If Live2D is hidden, show a small toggle button on the right edge?
-        if (!settings.enableLive2D)
-          Container(
-            width: 48,
-            alignment: Alignment.topCenter,
-            padding: const EdgeInsets.only(top: 12),
-            child: IconButton(
-              icon: const Icon(Icons.animation),
-              onPressed: () => settingsController.setEnableLive2D(true),
-              tooltip: 'Show Character',
+            child: CharacterDisplay(
+              backendUrl: 'http://localhost:8000',
+              expressionAgent: _brain.expressionAgent,
             ),
           ),
       ],
     );
   }
 
-  Widget _buildMobileLayout(
-    BuildContext context, 
-    AppSettings settings, 
-    SettingsController settingsController, 
-    AppLocalizations l10n, 
-    String? titleFontFamily,
-    double historyPanelWidth
+  /// 显示模式下拉菜单按钮
+  Widget _buildDisplayModeButton(
+    BuildContext context,
+    AppSettings settings,
+    SettingsController settingsController,
   ) {
-    return Stack(
-        children: [
-          // Live2D Character (Background Layer)
-          if (settings.enableLive2D)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              width: 400,
-              height: 600,
-              child: CharacterDisplay(
-                backendUrl: 'http://localhost:8000',
-                expressionAgent: _brain.expressionAgent,
-              ),
-            ),
+    // 图标与当前激活模式一致
+    IconData currentIcon;
+    bool isActive;
+    if (settings.showExpressionFace) {
+      currentIcon = Icons.face_retouching_natural; // 表情系统模式
+      isActive = true;
+    } else if (settings.enableFloatingWindow) {
+      currentIcon = Icons.open_in_new; // 悬浮窗模式
+      isActive = true;
+    } else if (settings.showLive2D) {
+      currentIcon = Icons.view_sidebar; // 侧边栏模式
+      isActive = true;
+    } else {
+      currentIcon = Icons.visibility_off; // 隐藏模式
+      isActive = false;
+    }
 
-          // 主聊天列 — 在历史面板打开时向右平移，避免被面板遮挡
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            top: 0,
-            bottom: 0,
-            left: _historyOpen ? historyPanelWidth : 0,
-            right: 0,
-            child: Column(
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: PopupMenuButton<String>(
+        tooltip: '显示模式',
+        padding: EdgeInsets.zero,
+        icon: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(
+            currentIcon,
+            size: 24,
+            color: isActive
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+        onSelected: (value) {
+          switch (value) {
+            case 'expression':
+              // 表情系统（灵动岛）
+              settingsController.setShowExpressionFace(true);
+              break;
+            case 'sidebar':
+              // Live2D 侧边栏
+              settingsController.setShowLive2D(true);
+              break;
+            case 'floating':
+              // Live2D 悬浮窗
+              settingsController.setEnableFloatingWindow(true);
+              break;
+            case 'hide':
+              settingsController.setShowLive2D(false);
+              settingsController.setEnableFloatingWindow(false);
+              settingsController.setShowExpressionFace(false);
+              break;
+          }
+        },
+        itemBuilder: (context) => [
+          PopupMenuItem(
+            value: 'expression',
+            child: Row(
               children: [
-                _buildHeader(context, settings, titleFontFamily),
-                Expanded(child: _buildMessageList(context, settings)),
-                _buildInputArea(context, settings, settingsController, l10n, settings.quickActions),
+                Icon(
+                  Icons.face_retouching_natural,
+                  color: settings.showExpressionFace
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                const Text('表情系统（灵动岛）'),
               ],
             ),
           ),
-          // 顶部居中动态岛（表情）
-          if (settings.showExpressionFace && settings.enableExpressionAgent)
-            Positioned(
-              top: 12,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: SafeArea(
-                  child: _DynamicIsland(
-                    faceController: _faceController,
-                    statusStream: _brain.statusStream,
-                  ),
+          PopupMenuItem(
+            value: 'sidebar',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.view_sidebar,
+                  color: settings.showLive2D && !settings.enableFloatingWindow
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
                 ),
-              ),
-            ),
-          // 左上角历史按钮
-          Positioned(
-            top: 12,
-            left: 12,
-            child: SafeArea(
-              child: GestureDetector(
-                onTap: () => setState(() => _historyOpen = !_historyOpen),
-                child: Glass(
-                  padding: const EdgeInsets.all(10),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Icon(_historyOpen ? Icons.close : Icons.menu, size: 22),
-                ),
-              ),
+                const SizedBox(width: 12),
+                const Text('Live2D 侧边栏'),
+              ],
             ),
           ),
-          
-          // 右上角 Live2D 开关
-          Positioned(
-            top: 12,
-            right: 12,
-            child: SafeArea(
-              child: GestureDetector(
-                onTap: () => settingsController.setEnableLive2D(!settings.enableLive2D),
-                child: Glass(
-                  padding: const EdgeInsets.all(10),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Icon(
-                    settings.enableLive2D ? Icons.animation : Icons.animation_outlined, 
-                    size: 22,
-                    color: settings.enableLive2D ? Theme.of(context).colorScheme.primary : null,
-                  ),
+          PopupMenuItem(
+            value: 'floating',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.open_in_new,
+                  color: settings.enableFloatingWindow
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
                 ),
-              ),
+                const SizedBox(width: 12),
+                const Text('Live2D 悬浮窗'),
+              ],
             ),
           ),
-
-          // 当历史面板打开时，添加一个透明遮罩，点击遮罩可关闭面板
-          if (_historyOpen)
-            Positioned.fill(
-              child: GestureDetector(
-                onTap: () => setState(() => _historyOpen = false),
-                behavior: HitTestBehavior.translucent,
-                child: Container(color: Colors.transparent),
-              ),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'hide',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.visibility_off,
+                  color:
+                      !settings.showLive2D &&
+                          !settings.enableFloatingWindow &&
+                          !settings.showExpressionFace
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                const Text('全部隐藏'),
+              ],
             ),
-          // 历史与功能面板 Overlay
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            top: 0,
-            bottom: 0,
-            left: _historyOpen ? 0 : -historyPanelWidth,
-            width: historyPanelWidth,
-            child: _buildHistoryPanel(context, l10n),
           ),
         ],
-      );
+      ),
+    );
   }
 
-  Widget _buildHeader(BuildContext context, AppSettings settings, String? titleFontFamily) {
+  Widget _buildMobileLayout(
+    BuildContext context,
+    AppSettings settings,
+    SettingsController settingsController,
+    AppLocalizations l10n,
+    String? titleFontFamily,
+    double historyPanelWidth,
+  ) {
+    return Stack(
+      children: [
+        // Live2D Character (Background Layer)
+        if (settings.enableLive2D)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            width: 400,
+            height: 600,
+            child: CharacterDisplay(
+              backendUrl: 'http://localhost:8000',
+              expressionAgent: _brain.expressionAgent,
+            ),
+          ),
+
+        // 主聊天列 — 在历史面板打开时向右平移，避免被面板遮挡
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          top: 0,
+          bottom: 0,
+          left: _historyOpen ? historyPanelWidth : 0,
+          right: 0,
+          child: Column(
+            children: [
+              _buildHeader(context, settings, titleFontFamily),
+              Expanded(child: _buildMessageList(context, settings)),
+              _buildInputArea(
+                context,
+                settings,
+                settingsController,
+                l10n,
+                settings.quickActions,
+              ),
+            ],
+          ),
+        ),
+        // 顶部居中动态岛（表情）- 与 Live2D 互斥
+        if (settings.showExpressionFace)
+          Positioned(
+            top: 12,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SafeArea(
+                child: _DynamicIsland(
+                  faceController: _faceController,
+                  statusStream: _brain.statusStream,
+                ),
+              ),
+            ),
+          ),
+        // 左上角历史按钮
+        Positioned(
+          top: 12,
+          left: 12,
+          child: SafeArea(
+            child: GestureDetector(
+              onTap: () => setState(() => _historyOpen = !_historyOpen),
+              child: Glass(
+                padding: const EdgeInsets.all(10),
+                borderRadius: BorderRadius.circular(18),
+                child: Icon(_historyOpen ? Icons.close : Icons.menu, size: 22),
+              ),
+            ),
+          ),
+        ),
+
+        // 右上角显示模式下拉菜单
+        Positioned(
+          top: 12,
+          right: 12,
+          child: SafeArea(
+            child: _buildDisplayModeButton(
+              context,
+              settings,
+              settingsController,
+            ),
+          ),
+        ),
+
+        // 当历史面板打开时，添加一个透明遮罩，点击遮罩可关闭面板
+        if (_historyOpen)
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => setState(() => _historyOpen = false),
+              behavior: HitTestBehavior.translucent,
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+        // 历史与功能面板 Overlay
+        AnimatedPositioned(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          top: 0,
+          bottom: 0,
+          left: _historyOpen ? 0 : -historyPanelWidth,
+          width: historyPanelWidth,
+          child: _buildHistoryPanel(context, l10n),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeader(
+    BuildContext context,
+    AppSettings settings,
+    String? titleFontFamily,
+  ) {
     return Container(
       height: 80,
       alignment: Alignment.center,
-      child: (!settings.showExpressionFace || !settings.enableExpressionAgent) 
-        ? SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 48.0), // Avoid overlap with menu button
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    settings.assistantName,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      fontFamily: titleFontFamily,
+      child: (!settings.showExpressionFace)
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 48.0,
+                ), // Avoid overlap with menu button
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      settings.assistantName,
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: titleFontFamily,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Astra-Me',
-                    style: TextStyle(
-                      fontSize: 10,
-                      letterSpacing: 1.2,
-                      color: Theme.of(context).colorScheme.outline,
-                      fontFamily: titleFontFamily,
+                    const SizedBox(height: 2),
+                    Text(
+                      'Astra-Me',
+                      style: TextStyle(
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        color: Theme.of(context).colorScheme.outline,
+                        fontFamily: titleFontFamily,
+                      ),
                     ),
-                  ),
-                  Text(
-                    'Project N-T-AI',
-                    style: TextStyle(
-                      fontSize: 8,
-                      letterSpacing: 3.0,
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
-                      fontFamily: titleFontFamily,
+                    Text(
+                      'Project N-T-AI',
+                      style: TextStyle(
+                        fontSize: 8,
+                        letterSpacing: 3.0,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.outline.withOpacity(0.5),
+                        fontFamily: titleFontFamily,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          )
-        : null,
+            )
+          : null,
     );
   }
 
@@ -838,7 +1121,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
         final msg = _messages[index];
         final isUser = msg['role'] == 'user';
         final time = msg['created_at'] as DateTime?;
-        final timeStr = time != null ? DateFormat('yyyy:MM:dd:HH:mm:ss').format(time) : '';
+        final timeStr = time != null
+            ? DateFormat('yyyy:MM:dd:HH:mm:ss').format(time)
+            : '';
 
         return RepaintBoundary(
           child: MessageBubble(
@@ -854,7 +1139,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
     );
   }
 
-  Widget _buildInputArea(BuildContext context, AppSettings settings, SettingsController settingsController, AppLocalizations l10n, List<String> quickActions) {
+  Widget _buildInputArea(
+    BuildContext context,
+    AppSettings settings,
+    SettingsController settingsController,
+    AppLocalizations l10n,
+    List<String> quickActions,
+  ) {
     return Column(
       children: [
         if (_isLoading)
@@ -864,8 +1155,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
               stream: _brain.statusStream,
               builder: (context, snapshot) {
                 final status = snapshot.data ?? 'Thinking...';
-                final showThoughts = SettingsScope.of(context).settings.showAgentThoughts;
-                
+                final showThoughts = SettingsScope.of(
+                  context,
+                ).settings.showAgentThoughts;
+
                 if (!showThoughts) {
                   return Center(
                     child: SizedBox(
@@ -877,9 +1170,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 }
 
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest.withOpacity(0.5),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -913,14 +1211,24 @@ class _FireflyScreenState extends State<FireflyScreen> {
               Expanded(
                 child: CallbackShortcuts(
                   bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): () => _sendMessage(),
-                    const SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
+                    const SingleActivator(LogicalKeyboardKey.enter): () =>
+                        _sendMessage(),
+                    const SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      shift: true,
+                    ): () {
                       final text = _controller.text;
                       final selection = _controller.selection;
-                      final newText = text.replaceRange(selection.start, selection.end, '\n');
+                      final newText = text.replaceRange(
+                        selection.start,
+                        selection.end,
+                        '\n',
+                      );
                       _controller.value = TextEditingValue(
                         text: newText,
-                        selection: TextSelection.collapsed(offset: selection.start + 1),
+                        selection: TextSelection.collapsed(
+                          offset: selection.start + 1,
+                        ),
                       );
                     },
                   },
@@ -933,7 +1241,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     decoration: InputDecoration(
                       hintText: l10n.chatPlaceholder,
                       border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                     ),
                   ),
                 ),
@@ -945,26 +1256,70 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 VoidCallback onTap;
                 switch (id) {
                   case 'attach_image':
-                    icon = Icons.image_outlined; tooltip = l10n.quickActionAttachImage; onTap = _attachImage; break;
+                    icon = Icons.image_outlined;
+                    tooltip = l10n.quickActionAttachImage;
+                    onTap = _attachImage;
+                    break;
                   case 'compress':
-                    icon = Icons.cleaning_services_outlined; tooltip = l10n.quickActionCompress; onTap = () async { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.msgCompressing))); await _brain.compressContext(); }; break;
+                    icon = Icons.cleaning_services_outlined;
+                    tooltip = l10n.quickActionCompress;
+                    onTap = () async {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(l10n.msgCompressing)),
+                      );
+                      await _brain.compressContext();
+                    };
+                    break;
                   case 'new_chat':
-                    icon = Icons.add_comment_outlined; tooltip = l10n.quickActionNewChat; onTap = _createNewSession; break;
+                    icon = Icons.add_comment_outlined;
+                    tooltip = l10n.quickActionNewChat;
+                    onTap = _createNewSession;
+                    break;
                   case 'memory':
-                    icon = Icons.memory; tooltip = l10n.quickActionMemory; onTap = () { Navigator.push(context, MaterialPageRoute(builder: (_) => const MemoryManagerScreen(heroTag: 'memory_fab_sidebar'))); }; break;
+                    icon = Icons.memory;
+                    tooltip = l10n.quickActionMemory;
+                    onTap = () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const MemoryManagerScreen(
+                            heroTag: 'memory_fab_sidebar',
+                          ),
+                        ),
+                      );
+                    };
+                    break;
                   case 'expression_toggle':
-                    icon = settings.showExpressionFace ? Icons.emoji_emotions : Icons.emoji_emotions_outlined; tooltip = l10n.quickActionExpression; onTap = () { settingsController.setShowExpressionFace(!settings.showExpressionFace); }; break;
+                    icon = settings.showExpressionFace
+                        ? Icons.emoji_emotions
+                        : Icons.emoji_emotions_outlined;
+                    tooltip = l10n.quickActionExpression;
+                    onTap = () {
+                      settingsController.setShowExpressionFace(
+                        !settings.showExpressionFace,
+                      );
+                    };
+                    break;
                   default:
-                    icon = Icons.extension; tooltip = id; onTap = () {}; break;
+                    icon = Icons.extension;
+                    tooltip = id;
+                    onTap = () {};
+                    break;
                 }
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: IconButton(icon: Icon(icon), tooltip: tooltip, onPressed: onTap),
+                  child: IconButton(
+                    icon: Icon(icon),
+                    tooltip: tooltip,
+                    onPressed: onTap,
+                  ),
                 );
               }).toList(),
               const SizedBox(width: 4),
               IconButton(
-                icon: Icon(_isLoading ? Icons.stop_circle_outlined : Icons.send),
+                icon: Icon(
+                  _isLoading ? Icons.stop_circle_outlined : Icons.send,
+                ),
                 onPressed: _isLoading ? _interruptGeneration : _sendMessage,
                 color: _isLoading ? Theme.of(context).colorScheme.error : null,
                 tooltip: _isLoading ? 'Interrupt' : 'Send',
@@ -987,12 +1342,20 @@ class _FireflyScreenState extends State<FireflyScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Text(l10n.historyTitle, style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    l10n.historyTitle,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.settings_outlined),
                     onPressed: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SettingsScreen(),
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -1011,13 +1374,20 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? Theme.of(context).colorScheme.primary : null,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
                     ),
                   ),
                   subtitle: Text(
                     DateFormat('MM/dd HH:mm').format(session.updatedAt),
-                    style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.outline),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
                   ),
                   selected: isSelected,
                   onTap: () {
@@ -1041,7 +1411,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l10n.modelTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                Text(
+                  l10n.modelTitle,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 _ModelSwitcher(settingsController: SettingsScope.of(context)),
               ],
@@ -1055,8 +1431,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
 // 简单行动 Chip
 class _ActionChip extends StatelessWidget {
-  final IconData icon; final String label; final VoidCallback onTap;
-  const _ActionChip({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -1064,9 +1446,14 @@ class _ActionChip extends StatelessWidget {
       child: Glass(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         borderRadius: BorderRadius.circular(20),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 16), const SizedBox(width: 4), Text(label, style: const TextStyle(fontSize: 12)),
-        ]),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
@@ -1076,7 +1463,10 @@ class _ActionChip extends StatelessWidget {
 class _DynamicIsland extends StatefulWidget {
   final ExpressionController faceController;
   final Stream<String> statusStream;
-  const _DynamicIsland({required this.faceController, required this.statusStream});
+  const _DynamicIsland({
+    required this.faceController,
+    required this.statusStream,
+  });
   @override
   State<_DynamicIsland> createState() => _DynamicIslandState();
 }
@@ -1088,26 +1478,28 @@ class _DynamicIslandState extends State<_DynamicIsland> {
   void initState() {
     super.initState();
     _sub = widget.statusStream.listen((v) {
-      setState(() { _status = v.isEmpty ? '待机' : v; });
+      setState(() {
+        _status = v.isEmpty ? '待机' : v;
+      });
     });
   }
+
   @override
   void dispose() {
     _sub?.cancel();
     super.dispose();
   }
+
   @override
   Widget build(BuildContext context) {
     final minW = 160.0;
-    final text = _status.length > 24 ? _status.substring(0,24)+'…' : _status;
+    final text = _status.length > 24 ? _status.substring(0, 24) + '…' : _status;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
       constraints: BoxConstraints(minWidth: minW, maxWidth: 340),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(34),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(34)),
       child: Glass(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         borderRadius: BorderRadius.circular(28),
@@ -1118,8 +1510,13 @@ class _DynamicIslandState extends State<_DynamicIsland> {
             const SizedBox(width: 12),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 220),
-              transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
-              child: Text(text, key: ValueKey(text), style: const TextStyle(fontSize: 12)),
+              transitionBuilder: (child, anim) =>
+                  FadeTransition(opacity: anim, child: child),
+              child: Text(
+                text,
+                key: ValueKey(text),
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
           ],
         ),
@@ -1149,7 +1546,9 @@ class _ModelSwitcher extends StatelessWidget {
           final isVision = visionId != null && p.id == visionId;
           return GestureDetector(
             onTap: () => settingsController.setActiveProvider(p.id),
-            onLongPress: () => settingsController.setActiveVisionProvider(isVision ? null : p.id),
+            onLongPress: () => settingsController.setActiveVisionProvider(
+              isVision ? null : p.id,
+            ),
             child: Glass(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               borderRadius: BorderRadius.circular(18),
@@ -1160,21 +1559,45 @@ class _ModelSwitcher extends StatelessWidget {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(isActive ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 16),
-                      const SizedBox(width: 4),
-                      Text(p.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      if (isVision) const Padding(
-                        padding: EdgeInsets.only(left:4),
-                        child: Icon(Icons.visibility, size: 14),
+                      Icon(
+                        isActive
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 16,
                       ),
+                      const SizedBox(width: 4),
+                      Text(
+                        p.name,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (isVision)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.visibility, size: 14),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(p.model.isNotEmpty ? p.model : '未配置模型', style: const TextStyle(fontSize: 10)),
+                  Text(
+                    p.model.isNotEmpty ? p.model : '未配置模型',
+                    style: const TextStyle(fontSize: 10),
+                  ),
                   const SizedBox(height: 2),
-                  Text(p.baseUrl.split('//').last.split('/').first, style: TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.outline)),
+                  Text(
+                    p.baseUrl.split('//').last.split('/').first,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                  ),
                   const SizedBox(height: 6),
-                  Text(isVision ? '长按取消视觉中枢' : '长按设为视觉', style: const TextStyle(fontSize: 9)),
+                  Text(
+                    isVision ? '长按取消视觉中枢' : '长按设为视觉',
+                    style: const TextStyle(fontSize: 9),
+                  ),
                 ],
               ),
             ),
@@ -1207,8 +1630,12 @@ class _VoiceInputButtonState extends State<_VoiceInputButton> {
     try {
       if (await _recorder.hasPermission()) {
         final tempDir = await getTemporaryDirectory();
-        final path = '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
-        await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: path);
+        final path =
+            '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
+        await _recorder.start(
+          const RecordConfig(encoder: AudioEncoder.wav),
+          path: path,
+        );
         setState(() => _isRecording = true);
       }
     } catch (e) {
@@ -1237,16 +1664,18 @@ class _VoiceInputButtonState extends State<_VoiceInputButton> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: _isRecording ? Colors.red : Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: _isRecording
+              ? Colors.red
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
           shape: BoxShape.circle,
         ),
         child: Icon(
           _isRecording ? Icons.mic : Icons.mic_none,
-          color: _isRecording ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+          color: _isRecording
+              ? Colors.white
+              : Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );
   }
 }
-
-

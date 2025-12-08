@@ -12,14 +12,21 @@
             height: 100%;
             background: transparent;
             overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }
         #canvas-container {
             width: 100%;
             height: 100%;
+            position: relative;
         }
         canvas {
             width: 100%;
             height: 100%;
+            display: block;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
         }
         #debug-console {
             position: absolute;
@@ -33,12 +40,16 @@
             font-family: monospace;
             font-size: 12px;
             pointer-events: none;
-            display: none; /* Hidden by default, toggle with query param debug=true */
+            display: none;
+            z-index: 10000;
         }
         .log-entry { border-bottom: 1px solid #444; padding: 2px; }
         .log-error { color: #ff5555; }
         .log-warn { color: #ffaa00; }
+        /* 浮窗模式优化 */
+        body.locked #canvas-container { pointer-events: none; }
     </style>
+
     <!-- Load Libraries -->
     <script src="/static/live2d/libs/live2dcubismcore.min.js"></script>
     <script src="/static/live2d/libs/live2d.min.js"></script>
@@ -70,18 +81,21 @@
 </head>
 <body>
     <div id="debug-console"></div>
+
     <div id="canvas-container">
         <canvas id="live2d-canvas"></canvas>
     </div>
-
     <script>
-        // Simple on-screen logger
         const debugConsole = document.getElementById('debug-console');
         const urlParams = new URLSearchParams(window.location.search);
+        const isFloatingMode = urlParams.get('floating') === 'true';
         if (urlParams.get('debug') === 'true') {
             debugConsole.style.display = 'block';
         }
-
+        if (isFloatingMode) {
+            document.body.classList.add('floating-mode');
+            console.log('[Live2D] Floating window mode enabled - optimizing for streaming');
+        }
         function logToScreen(msg, type = 'info') {
             if (debugConsole.style.display === 'none') return;
             const div = document.createElement('div');
@@ -90,18 +104,90 @@
             debugConsole.appendChild(div);
             debugConsole.scrollTop = debugConsole.scrollHeight;
         }
-
-        // Capture global errors
-        window.onerror = function(msg, url, line, col, error) {
-            logToScreen(`${msg} at ${url}:${line}:${col}`, 'error');
-            return false;
-        };
-
-        window.addEventListener('unhandledrejection', function(event) {
-            logToScreen(`Unhandled Rejection: ${event.reason}`, 'error');
-        });
-
-        // Wait for libraries to load
+        
+        // ========== WebSocket 连接接收表情/动作指令 ==========
+        let live2dSocket = null;
+        let wsHeartbeatInterval = null;
+        const WS_HEARTBEAT_INTERVAL = 30000;
+        
+        function connectLive2DWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${protocol}://${window.location.host}/api/live2d/ws`;
+            
+            logToScreen(`Connecting to Live2D WebSocket: ${wsUrl}`);
+            console.log('[Live2D WS] Connecting to:', wsUrl);
+            
+            live2dSocket = new WebSocket(wsUrl);
+            
+            live2dSocket.onopen = () => {
+                console.log('[Live2D WS] Connected');
+                logToScreen('WebSocket connected');
+                
+                // 启动心跳
+                if (wsHeartbeatInterval) clearInterval(wsHeartbeatInterval);
+                wsHeartbeatInterval = setInterval(() => {
+                    if (live2dSocket && live2dSocket.readyState === WebSocket.OPEN) {
+                        live2dSocket.send(JSON.stringify({ action: 'ping' }));
+                    }
+                }, WS_HEARTBEAT_INTERVAL);
+            };
+            
+            live2dSocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleLive2DMessage(message);
+                } catch (e) {
+                    console.error('[Live2D WS] Parse error:', e);
+                }
+            };
+            
+            live2dSocket.onclose = () => {
+                console.log('[Live2D WS] Disconnected, reconnecting in 3s...');
+                logToScreen('WebSocket disconnected, reconnecting...', 'warn');
+                if (wsHeartbeatInterval) {
+                    clearInterval(wsHeartbeatInterval);
+                    wsHeartbeatInterval = null;
+                }
+                setTimeout(connectLive2DWebSocket, 3000);
+            };
+            
+            live2dSocket.onerror = (error) => {
+                console.error('[Live2D WS] Error:', error);
+                logToScreen('WebSocket error', 'error');
+            };
+        }
+        
+        function handleLive2DMessage(message) {
+            const type = message.type;
+            const data = message.data;
+            
+            if (type === 'pong') {
+                // 心跳响应
+                return;
+            }
+            
+            if (type === 'expression') {
+                // 表情参数更新
+                console.log('[Live2D WS] Expression update:', data);
+                logToScreen(`Expression: mouth=${data.mouth?.toFixed(2)}, eyes=${data.eyes?.toFixed(2)}`);
+                if (window.live2dManager) {
+                    window.live2dManager.updateParameters(data);
+                }
+            } else if (type === 'motion_request') {
+                // 动作请求
+                console.log('[Live2D WS] Motion request:', data);
+                logToScreen(`Motion request: ${data.userText?.substring(0, 20)}...`);
+                if (window.LanLan1 && window.LanLan1.askMotionAgent) {
+                    window.LanLan1.askMotionAgent(data.userText, data.aiText);
+                } else if (window.live2dManager && window.live2dManager.askMotionAgent) {
+                    window.live2dManager.askMotionAgent(data.userText, data.aiText);
+                }
+            }
+        }
+        
+        // 初始化 WebSocket 连接
+        connectLive2DWebSocket();
+        
         window.onload = function() {
             logToScreen('Window loaded. Checking libraries...');
             if (typeof PIXI === 'undefined') {
@@ -115,33 +201,35 @@
                     if (window.Live2DModel) logToScreen('But found window.Live2DModel!', 'warn');
                 }
             }
-            
             if (!window.live2dManager) {
-                 const manager = new Live2DManager();
-                 window.live2dManager = manager;
+                window.live2dManager = new Live2DManager();
             }
-            
             init();
         };
-
         async function init() {
             logToScreen('Initializing...');
             try {
                 if (!window.live2dManager) {
-                    throw new Error("Live2DManager not initialized");
+                    throw new Error('Live2DManager not initialized');
                 }
-                
-                // initPIXI(canvasId, containerId)
+                if (isFloatingMode) {
+                    window.floatingWindowConfig = {
+                        enableMotion: true,
+                        enableExpression: true,
+                        enablePhysics: true,
+                        motionPriority: 'balance',
+                    };
+                }
                 await window.live2dManager.initPIXI('live2d-canvas', 'canvas-container');
                 logToScreen('PIXI Initialized');
-                
-                // Check for model in URL params
                 const modelPath = urlParams.get('model');
-                
                 if (modelPath) {
                     logToScreen(`Loading model: ${modelPath}`);
                     await window.live2dManager.loadModel(modelPath);
                     logToScreen('Model loaded successfully');
+                    if (isFloatingMode) {
+                        logToScreen('Floating window mode active');
+                    }
                 } else {
                     logToScreen('No model parameter provided', 'warn');
                 }

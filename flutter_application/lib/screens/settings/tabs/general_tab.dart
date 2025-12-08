@@ -22,7 +22,11 @@ class GeneralTab extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.face),
           title: Text(l10n.generalUserNickname),
-          subtitle: Text(s.userNickname.isEmpty ? l10n.generalNicknameNotSet : s.userNickname),
+          subtitle: Text(
+            s.userNickname.isEmpty
+                ? l10n.generalNicknameNotSet
+                : s.userNickname,
+          ),
           trailing: const Icon(Icons.edit_outlined),
           onTap: () async {
             final ctl = TextEditingController(text: s.userNickname);
@@ -32,11 +36,19 @@ class GeneralTab extends StatelessWidget {
                 title: Text(l10n.generalSetNickname),
                 content: TextField(
                   controller: ctl,
-                  decoration: InputDecoration(hintText: l10n.generalNicknameHint),
+                  decoration: InputDecoration(
+                    hintText: l10n.generalNicknameHint,
+                  ),
                 ),
                 actions: [
-                  TextButton(onPressed: () => Navigator.pop(context), child: Text(l10n.commonCancel)),
-                  FilledButton(onPressed: () => Navigator.pop(context, ctl.text), child: Text(l10n.commonSave)),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l10n.commonCancel),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, ctl.text),
+                    child: Text(l10n.commonSave),
+                  ),
                 ],
               ),
             );
@@ -51,7 +63,10 @@ class GeneralTab extends StatelessWidget {
           subtitle: Text(l10n.generalManageModels),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const CharacterManagerScreen()));
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CharacterManagerScreen()),
+            );
           },
         ),
         SwitchListTile(
@@ -66,16 +81,37 @@ class GeneralTab extends StatelessWidget {
           title: const Text('主页显示 Live2D'),
           subtitle: const Text('在主聊天界面显示 Live2D 形象'),
           value: s.showLive2D,
-          onChanged: (v) => controller.setShowLive2D(v),
+          onChanged: s.enableLive2D ? (v) => controller.setShowLive2D(v) : null,
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.open_in_new),
+          title: const Text('独立悬浮窗显示'),
+          subtitle: const Text('创建独立窗口显示 Live2D（可被 OBS 捕获）'),
+          value: s.enableFloatingWindow,
+          onChanged: s.enableLive2D
+              ? (v) => controller.setEnableFloatingWindow(v)
+              : null,
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.bug_report_outlined),
+          title: const Text('Live2D 调试模式'),
+          subtitle: const Text('显示 Live2D 页面调试信息'),
+          value: s.live2dDebug,
+          onChanged: s.enableLive2D
+              ? (v) => controller.setLive2dDebug(v)
+              : null,
         ),
         SwitchListTile(
           secondary: const Icon(Icons.face_retouching_natural),
           title: Text(l10n.generalExpressionSync),
-          subtitle: Text(l10n.generalSyncExpressions),
-          value: s.showExpressionFace,
-          onChanged: (v) => controller.setShowExpressionFace(v),
+          subtitle: const Text('显示动态表情岛（与 Live2D 独立）'),
+          value: s.showExpressionFace && s.enableExpressionAgent,
+          onChanged: (v) {
+            controller.setShowExpressionFace(v);
+            controller.setEnableExpressionAgent(v);
+          },
         ),
-        
+
         const SizedBox(height: 24),
         _buildSectionHeader(context, '语音交互 (Voice Interaction)'),
         SwitchListTile(
@@ -104,9 +140,18 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setLocale(v);
             },
             items: [
-              DropdownMenuItem(value: LocaleOption.system, child: Text(l10n.generalThemeSystem)),
-              const DropdownMenuItem(value: LocaleOption.zh, child: Text('简体中文')),
-              const DropdownMenuItem(value: LocaleOption.en, child: Text('English')),
+              DropdownMenuItem(
+                value: LocaleOption.system,
+                child: Text(l10n.generalThemeSystem),
+              ),
+              const DropdownMenuItem(
+                value: LocaleOption.zh,
+                child: Text('简体中文'),
+              ),
+              const DropdownMenuItem(
+                value: LocaleOption.en,
+                child: Text('English'),
+              ),
             ],
           ),
         ),
@@ -119,9 +164,18 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setThemeMode(v);
             },
             items: [
-              DropdownMenuItem(value: ThemeModeOption.system, child: Text(l10n.generalThemeSystem)),
-              DropdownMenuItem(value: ThemeModeOption.light, child: Text(l10n.generalThemeLight)),
-              DropdownMenuItem(value: ThemeModeOption.dark, child: Text(l10n.generalThemeDark)),
+              DropdownMenuItem(
+                value: ThemeModeOption.system,
+                child: Text(l10n.generalThemeSystem),
+              ),
+              DropdownMenuItem(
+                value: ThemeModeOption.light,
+                child: Text(l10n.generalThemeLight),
+              ),
+              DropdownMenuItem(
+                value: ThemeModeOption.dark,
+                child: Text(l10n.generalThemeDark),
+              ),
             ],
           ),
         ),
@@ -134,10 +188,22 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setPalette(v);
             },
             items: [
-              DropdownMenuItem(value: PaletteOption.neutral, child: Text(l10n.generalPaletteNeutral)),
-              DropdownMenuItem(value: PaletteOption.green, child: Text(l10n.generalPaletteGreen)),
-              DropdownMenuItem(value: PaletteOption.blue, child: Text(l10n.generalPaletteBlue)),
-              DropdownMenuItem(value: PaletteOption.orange, child: Text(l10n.generalPaletteOrange)),
+              DropdownMenuItem(
+                value: PaletteOption.neutral,
+                child: Text(l10n.generalPaletteNeutral),
+              ),
+              DropdownMenuItem(
+                value: PaletteOption.green,
+                child: Text(l10n.generalPaletteGreen),
+              ),
+              DropdownMenuItem(
+                value: PaletteOption.blue,
+                child: Text(l10n.generalPaletteBlue),
+              ),
+              DropdownMenuItem(
+                value: PaletteOption.orange,
+                child: Text(l10n.generalPaletteOrange),
+              ),
             ],
           ),
         ),
@@ -150,15 +216,28 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setUiMode(v);
             },
             items: [
-              DropdownMenuItem(value: UIModeOption.auto, child: Text(l10n.generalUiModeAuto)),
-              DropdownMenuItem(value: UIModeOption.bubble, child: Text(l10n.generalUiModeBubble)),
-              DropdownMenuItem(value: UIModeOption.simple, child: Text(l10n.generalUiModeSimple)),
+              DropdownMenuItem(
+                value: UIModeOption.auto,
+                child: Text(l10n.generalUiModeAuto),
+              ),
+              DropdownMenuItem(
+                value: UIModeOption.bubble,
+                child: Text(l10n.generalUiModeBubble),
+              ),
+              DropdownMenuItem(
+                value: UIModeOption.simple,
+                child: Text(l10n.generalUiModeSimple),
+              ),
             ],
           ),
         ),
         ListTile(
           title: const Text('聊天模式 (Chat Mode)'),
-          subtitle: Text(s.chatMode == ChatModeOption.persona ? '拟人 (Persona) - 分段气泡，自然对话' : '标准 (Standard) - 严格Markdown，生产力'),
+          subtitle: Text(
+            s.chatMode == ChatModeOption.persona
+                ? '拟人 (Persona) - 分段气泡，自然对话'
+                : '标准 (Standard) - 严格Markdown，生产力',
+          ),
           trailing: DropdownButton<ChatModeOption>(
             value: s.chatMode,
             underline: const SizedBox(),
@@ -166,8 +245,14 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setChatMode(v);
             },
             items: const [
-              DropdownMenuItem(value: ChatModeOption.persona, child: Text('拟人 (Persona)')),
-              DropdownMenuItem(value: ChatModeOption.standard, child: Text('标准 (Standard)')),
+              DropdownMenuItem(
+                value: ChatModeOption.persona,
+                child: Text('拟人 (Persona)'),
+              ),
+              DropdownMenuItem(
+                value: ChatModeOption.standard,
+                child: Text('标准 (Standard)'),
+              ),
             ],
           ),
         ),
@@ -180,8 +265,14 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setChatBg(v);
             },
             items: [
-              DropdownMenuItem(value: ChatBgOption.none, child: Text(l10n.generalChatBgNone)),
-              DropdownMenuItem(value: ChatBgOption.lavender, child: Text(l10n.generalChatBgLavender)),
+              DropdownMenuItem(
+                value: ChatBgOption.none,
+                child: Text(l10n.generalChatBgNone),
+              ),
+              DropdownMenuItem(
+                value: ChatBgOption.lavender,
+                child: Text(l10n.generalChatBgLavender),
+              ),
             ],
           ),
         ),
@@ -197,8 +288,14 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setBaseFontMode(v);
             },
             items: [
-              DropdownMenuItem(value: BaseFontModeOption.system, child: Text(l10n.generalBaseFontSystem)),
-              DropdownMenuItem(value: BaseFontModeOption.miSansPreferred, child: Text(l10n.generalBaseFontMiSans)),
+              DropdownMenuItem(
+                value: BaseFontModeOption.system,
+                child: Text(l10n.generalBaseFontSystem),
+              ),
+              DropdownMenuItem(
+                value: BaseFontModeOption.miSansPreferred,
+                child: Text(l10n.generalBaseFontMiSans),
+              ),
             ],
           ),
         ),
@@ -211,9 +308,18 @@ class GeneralTab extends StatelessWidget {
               if (v != null) controller.setDecoFamily(v);
             },
             items: [
-              DropdownMenuItem(value: DecorativeFontFamily.none, child: Text(l10n.generalDecoFontNone)),
-              const DropdownMenuItem(value: DecorativeFontFamily.fzg, child: Text('FZG')),
-              const DropdownMenuItem(value: DecorativeFontFamily.nfdcs, child: Text('nfdcs')),
+              DropdownMenuItem(
+                value: DecorativeFontFamily.none,
+                child: Text(l10n.generalDecoFontNone),
+              ),
+              const DropdownMenuItem(
+                value: DecorativeFontFamily.fzg,
+                child: Text('FZG'),
+              ),
+              const DropdownMenuItem(
+                value: DecorativeFontFamily.nfdcs,
+                child: Text('nfdcs'),
+              ),
             ],
           ),
         ),
@@ -233,10 +339,14 @@ class GeneralTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Card(
             elevation: 0,
-            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceVariant.withOpacity(0.3),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.1)),
+              side: BorderSide(
+                color: Theme.of(context).dividerColor.withOpacity(0.1),
+              ),
             ),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -245,9 +355,20 @@ class GeneralTab extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.preview, size: 16, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        Icons.preview,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(width: 8),
-                      Text(l10n.generalFontPreview, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.primary)),
+                      Text(
+                        l10n.generalFontPreview,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -256,8 +377,12 @@ class GeneralTab extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 20 * s.textScale,
                       fontWeight: FontWeight.bold,
-                      fontFamily: s.decoUseTitles && s.decoFamily != DecorativeFontFamily.none 
-                          ? (s.decoFamily == DecorativeFontFamily.fzg ? 'FZG' : 'NFDCS') 
+                      fontFamily:
+                          s.decoUseTitles &&
+                              s.decoFamily != DecorativeFontFamily.none
+                          ? (s.decoFamily == DecorativeFontFamily.fzg
+                                ? 'FZG'
+                                : 'NFDCS')
                           : null,
                     ),
                   ),
@@ -270,7 +395,9 @@ class GeneralTab extends StatelessWidget {
                         topLeft: const Radius.circular(12),
                         topRight: const Radius.circular(12),
                         bottomRight: const Radius.circular(12),
-                        bottomLeft: Radius.circular(s.uiMode == UIModeOption.bubble ? 2 : 12),
+                        bottomLeft: Radius.circular(
+                          s.uiMode == UIModeOption.bubble ? 2 : 12,
+                        ),
                       ),
                     ),
                     child: Text(
@@ -278,9 +405,13 @@ class GeneralTab extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 16 * s.textScale,
                         color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        fontFamily: s.decoUseBubbles && s.decoFamily != DecorativeFontFamily.none
-                           ? (s.decoFamily == DecorativeFontFamily.fzg ? 'FZG' : 'NFDCS')
-                           : null,
+                        fontFamily:
+                            s.decoUseBubbles &&
+                                s.decoFamily != DecorativeFontFamily.none
+                            ? (s.decoFamily == DecorativeFontFamily.fzg
+                                  ? 'FZG'
+                                  : 'NFDCS')
+                            : null,
                       ),
                     ),
                   ),
@@ -317,7 +448,10 @@ class GeneralTab extends StatelessWidget {
                   avatar: Icon(_getQuickActionIcon(id), size: 16),
                 ),
               if (s.quickActions.isEmpty)
-                Text(l10n.generalQuickActionsEmpty, style: const TextStyle(fontSize: 12)),
+                Text(
+                  l10n.generalQuickActionsEmpty,
+                  style: const TextStyle(fontSize: 12),
+                ),
             ],
           ),
           trailing: FilledButton.tonal(
@@ -389,7 +523,13 @@ class GeneralTab extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) {
-        final all = ['attach_image','compress','new_chat','memory','expression_toggle'];
+        final all = [
+          'attach_image',
+          'compress',
+          'new_chat',
+          'memory',
+          'expression_toggle',
+        ];
         final selected = List<String>.from(s.quickActions);
         return StatefulBuilder(
           builder: (ctx2, setStateDialog) => AlertDialog(
@@ -420,8 +560,17 @@ class GeneralTab extends StatelessWidget {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.commonCancel)),
-              FilledButton(onPressed: () { controller.setQuickActions(selected); Navigator.pop(ctx); }, child: Text(l10n.commonSave)),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  controller.setQuickActions(selected);
+                  Navigator.pop(ctx);
+                },
+                child: Text(l10n.commonSave),
+              ),
             ],
           ),
         );

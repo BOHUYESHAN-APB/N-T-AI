@@ -455,27 +455,24 @@ class Live2DManager {
             return;
         }
 
-        // [Special Case] Procedural Wink Animation
-        if (emotion === 'Wink') {
-            console.log('[Motion] Triggering procedural Wink animation (Smooth)');
-            
-            const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
-            const easeInCubic = t => t * t * t;
+        const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+        const easeInCubic = t => t * t * t;
+        const easeInOutQuad = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
-            // 1. Tween to Wink State
+        // ========== 程序化动画库 ==========
+        
+        // [Wink] 歪头眨眼 + 微笑 + 脸红
+        if (emotion === 'Wink') {
+            console.log('[Motion] Triggering procedural Wink animation');
             const winkParams = {
                 'ParamEyeLOpen': 0.0,
                 'ParamEyeROpen': 1.0,
                 'ParamAngleZ': 10.0,
                 'ParamMouthForm': 1.0,
-                'ParamCheek': 1.0
+                'ParamCheek': 0.8
             };
             await this.tweenParameters(winkParams, 200, easeOutCubic);
-
-            // 2. Hold
             await new Promise(resolve => setTimeout(resolve, 400));
-
-            // 3. Tween back to Neutral (Open eyes, straight head)
             const neutralParams = {
                 'ParamEyeLOpen': 1.0,
                 'ParamEyeROpen': 1.0,
@@ -484,19 +481,299 @@ class Live2DManager {
                 'ParamCheek': 0.0
             };
             await this.tweenParameters(neutralParams, 200, easeInCubic);
-
-            // 4. Release overrides
-            const releaseParams = {
-                'ParamEyeLOpen': null,
-                'ParamEyeROpen': null,
-                'ParamAngleZ': null,
-                'ParamMouthForm': null,
-                'ParamCheek': null
-            };
-            this.applyParameters(releaseParams, true);
-            
+            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleZ': null, 'ParamMouthForm': null, 'ParamCheek': null}, true);
             return;
         }
+
+        // [CuteWink] 可爱眨眼 - 歪头 + 单眼闭 + 大笑脸 + 脸红
+        if (emotion === 'CuteWink') {
+            console.log('[Motion] Triggering procedural CuteWink animation');
+            // Phase 1: 歪头 + 闭眼 + 笑脸 + 脸红
+            await this.tweenParameters({
+                'ParamEyeLOpen': 0.0,
+                'ParamEyeROpen': 1.0,
+                'ParamAngleZ': 15.0,
+                'ParamAngleX': 8.0,
+                'ParamMouthForm': 1.0,
+                'ParamMouthOpenY': 0.2,
+                'ParamCheek': 1.0,
+                'ParamBrowLY': 0.3,
+                'ParamBrowRY': 0.3
+            }, 250, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Phase 2: 恢复
+            await this.tweenParameters({
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0,
+                'ParamAngleZ': 0.0,
+                'ParamAngleX': 0.0,
+                'ParamMouthForm': 0.3,
+                'ParamMouthOpenY': 0.0,
+                'ParamCheek': 0.3,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0
+            }, 300, easeInCubic);
+            await new Promise(resolve => setTimeout(resolve, 200));
+            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleZ': null, 'ParamAngleX': null, 'ParamMouthForm': null, 'ParamMouthOpenY': null, 'ParamCheek': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            return;
+        }
+
+        // [ShyBlush] 害羞脸红 - 低头 + 脸红 + 眼球往旁边看 + 微笑
+        if (emotion === 'ShyBlush') {
+            console.log('[Motion] Triggering procedural ShyBlush animation');
+            await this.tweenParameters({
+                'ParamAngleY': -12.0,
+                'ParamAngleZ': -8.0,
+                'ParamCheek': 1.0,
+                'ParamEyeBallX': -0.5,
+                'ParamEyeBallY': -0.2,
+                'ParamMouthForm': 0.4,
+                'ParamBrowLY': -0.2,
+                'ParamBrowRY': -0.2
+            }, 400, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 800));
+            await this.tweenParameters({
+                'ParamAngleY': 0.0,
+                'ParamAngleZ': 0.0,
+                'ParamCheek': 0.3,
+                'ParamEyeBallX': 0.0,
+                'ParamEyeBallY': 0.0,
+                'ParamMouthForm': 0.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0
+            }, 400, easeInCubic);
+            this.applyParameters({'ParamAngleY': null, 'ParamAngleZ': null, 'ParamCheek': null, 'ParamEyeBallX': null, 'ParamEyeBallY': null, 'ParamMouthForm': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            return;
+        }
+
+        // [HeadTilt] 歪头 - 好奇地歪头 + 睁大眼睛
+        if (emotion === 'HeadTilt') {
+            console.log('[Motion] Triggering procedural HeadTilt animation');
+            const direction = Math.random() > 0.5 ? 1 : -1;
+            await this.tweenParameters({
+                'ParamAngleZ': 12.0 * direction,
+                'ParamAngleX': 5.0 * direction,
+                'ParamEyeLOpen': 1.1,
+                'ParamEyeROpen': 1.1,
+                'ParamBrowLY': 0.4,
+                'ParamBrowRY': 0.4
+            }, 300, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 600));
+            await this.tweenParameters({
+                'ParamAngleZ': 0.0,
+                'ParamAngleX': 0.0,
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0
+            }, 300, easeInCubic);
+            this.applyParameters({'ParamAngleZ': null, 'ParamAngleX': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            return;
+        }
+
+        // [Giggle] 咯咯笑 - 笑脸 + 脸红 + 轻微摇动
+        if (emotion === 'Giggle') {
+            console.log('[Motion] Triggering procedural Giggle animation');
+            // 笑脸 + 脸红
+            await this.tweenParameters({
+                'ParamMouthForm': 1.0,
+                'ParamMouthOpenY': 0.3,
+                'ParamCheek': 0.7,
+                'ParamEyeLOpen': 0.8,
+                'ParamEyeROpen': 0.8
+            }, 200, easeOutCubic);
+            // 轻微摇动 3 次
+            for (let i = 0; i < 3; i++) {
+                await this.tweenParameters({'ParamAngleZ': 5.0, 'ParamAngleY': 3.0}, 100, easeInOutQuad);
+                await this.tweenParameters({'ParamAngleZ': -5.0, 'ParamAngleY': -3.0}, 100, easeInOutQuad);
+            }
+            await this.tweenParameters({
+                'ParamAngleZ': 0.0,
+                'ParamAngleY': 0.0,
+                'ParamMouthForm': 0.3,
+                'ParamMouthOpenY': 0.0,
+                'ParamCheek': 0.2,
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0
+            }, 300, easeInCubic);
+            this.applyParameters({'ParamAngleZ': null, 'ParamAngleY': null, 'ParamMouthForm': null, 'ParamMouthOpenY': null, 'ParamCheek': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null}, true);
+            return;
+        }
+
+        // [Curious] 好奇 - 歪头 + 睁大眼睛 + 扬眉
+        if (emotion === 'Curious') {
+            console.log('[Motion] Triggering procedural Curious animation');
+            await this.tweenParameters({
+                'ParamAngleZ': 10.0,
+                'ParamAngleY': 5.0,
+                'ParamEyeLOpen': 1.2,
+                'ParamEyeROpen': 1.2,
+                'ParamBrowLY': 0.5,
+                'ParamBrowRY': 0.5,
+                'ParamEyeBallY': 0.2
+            }, 300, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 700));
+            await this.tweenParameters({
+                'ParamAngleZ': 0.0,
+                'ParamAngleY': 0.0,
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0,
+                'ParamEyeBallY': 0.0
+            }, 300, easeInCubic);
+            this.applyParameters({'ParamAngleZ': null, 'ParamAngleY': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamEyeBallY': null}, true);
+            return;
+        }
+
+        // [Nod] 点头 - 用于认同/确认
+        if (emotion === 'Nod') {
+            console.log('[Motion] Triggering procedural Nod animation');
+            for (let i = 0; i < 2; i++) {
+                await this.tweenParameters({'ParamAngleY': -10.0}, 150, easeOutCubic);
+                await this.tweenParameters({'ParamAngleY': 5.0}, 150, easeInCubic);
+            }
+            await this.tweenParameters({'ParamAngleY': 0.0}, 100, easeInCubic);
+            this.applyParameters({'ParamAngleY': null}, true);
+            return;
+        }
+
+        // [HeadShake] 摇头 - 用于否认/不同意
+        if (emotion === 'HeadShake') {
+            console.log('[Motion] Triggering procedural HeadShake animation');
+            for (let i = 0; i < 2; i++) {
+                await this.tweenParameters({'ParamAngleX': 15.0}, 120, easeOutCubic);
+                await this.tweenParameters({'ParamAngleX': -15.0}, 120, easeInCubic);
+            }
+            await this.tweenParameters({'ParamAngleX': 0.0}, 100, easeInCubic);
+            this.applyParameters({'ParamAngleX': null}, true);
+            return;
+        }
+
+        // [ThinkingPose] 思考姿态 - 抬头看上方 + 眉头微皙
+        if (emotion === 'ThinkingPose') {
+            console.log('[Motion] Triggering procedural ThinkingPose animation');
+            await this.tweenParameters({
+                'ParamAngleY': 12.0,
+                'ParamAngleX': 5.0,
+                'ParamEyeBallY': 0.5,
+                'ParamEyeBallX': 0.3,
+                'ParamBrowLY': 0.3,
+                'ParamBrowRY': 0.3,
+                'ParamBrowLAngle': 0.3,
+                'ParamBrowRAngle': 0.3
+            }, 400, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await this.tweenParameters({
+                'ParamAngleY': 0.0,
+                'ParamAngleX': 0.0,
+                'ParamEyeBallY': 0.0,
+                'ParamEyeBallX': 0.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0,
+                'ParamBrowLAngle': 0.0,
+                'ParamBrowRAngle': 0.0
+            }, 400, easeInCubic);
+            this.applyParameters({'ParamAngleY': null, 'ParamAngleX': null, 'ParamEyeBallY': null, 'ParamEyeBallX': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamBrowLAngle': null, 'ParamBrowRAngle': null}, true);
+            return;
+        }
+
+        // [Surprised] 惊讶 - 睁大眼 + 后仰 + 张嘴
+        if (emotion === 'Surprised') {
+            console.log('[Motion] Triggering procedural Surprised animation');
+            await this.tweenParameters({
+                'ParamEyeLOpen': 1.3,
+                'ParamEyeROpen': 1.3,
+                'ParamAngleY': -8.0,
+                'ParamBodyAngleY': -3.0,
+                'ParamMouthOpenY': 0.5,
+                'ParamBrowLY': 0.6,
+                'ParamBrowRY': 0.6
+            }, 150, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await this.tweenParameters({
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0,
+                'ParamAngleY': 0.0,
+                'ParamBodyAngleY': 0.0,
+                'ParamMouthOpenY': 0.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0
+            }, 300, easeInCubic);
+            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleY': null, 'ParamBodyAngleY': null, 'ParamMouthOpenY': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            return;
+        }
+
+        // [HappyBounce] 开心跳跃 - 笑脸 + 小幅度上下跳动
+        if (emotion === 'HappyBounce') {
+            console.log('[Motion] Triggering procedural HappyBounce animation');
+            await this.tweenParameters({'ParamMouthForm': 1.0, 'ParamCheek': 0.5}, 150, easeOutCubic);
+            for (let i = 0; i < 3; i++) {
+                await this.tweenParameters({'ParamAngleY': 8.0, 'ParamBodyAngleY': 3.0}, 100, easeOutCubic);
+                await this.tweenParameters({'ParamAngleY': -2.0, 'ParamBodyAngleY': -1.0}, 100, easeInCubic);
+            }
+            await this.tweenParameters({
+                'ParamAngleY': 0.0,
+                'ParamBodyAngleY': 0.0,
+                'ParamMouthForm': 0.3,
+                'ParamCheek': 0.0
+            }, 200, easeInCubic);
+            this.applyParameters({'ParamAngleY': null, 'ParamBodyAngleY': null, 'ParamMouthForm': null, 'ParamCheek': null}, true);
+            return;
+        }
+
+        // [Pout] 嘘嘴/不满 - 鼓起嘴巴 + 眉头下压 + 略微转头
+        if (emotion === 'Pout') {
+            console.log('[Motion] Triggering procedural Pout animation');
+            await this.tweenParameters({
+                'ParamMouthForm': -0.8,
+                'ParamBrowLY': -0.4,
+                'ParamBrowRY': -0.4,
+                'ParamAngleX': 15.0,
+                'ParamAngleZ': -5.0,
+                'ParamCheek': 0.3
+            }, 300, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 800));
+            await this.tweenParameters({
+                'ParamMouthForm': 0.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0,
+                'ParamAngleX': 0.0,
+                'ParamAngleZ': 0.0,
+                'ParamCheek': 0.0
+            }, 300, easeInCubic);
+            this.applyParameters({'ParamMouthForm': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamAngleX': null, 'ParamAngleZ': null, 'ParamCheek': null}, true);
+            return;
+        }
+
+        // [Sleepy] 困倦 - 缓慢眨眼 + 低头
+        if (emotion === 'Sleepy') {
+            console.log('[Motion] Triggering procedural Sleepy animation');
+            await this.tweenParameters({
+                'ParamEyeLOpen': 0.3,
+                'ParamEyeROpen': 0.3,
+                'ParamAngleY': -8.0,
+                'ParamBrowLY': -0.3,
+                'ParamBrowRY': -0.3
+            }, 600, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // 慢慢眨眼
+            await this.tweenParameters({'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 0.0}, 400, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await this.tweenParameters({'ParamEyeLOpen': 0.4, 'ParamEyeROpen': 0.4}, 600, easeInCubic);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await this.tweenParameters({
+                'ParamEyeLOpen': 1.0,
+                'ParamEyeROpen': 1.0,
+                'ParamAngleY': 0.0,
+                'ParamBrowLY': 0.0,
+                'ParamBrowRY': 0.0
+            }, 400, easeInCubic);
+            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleY': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            return;
+        }
+
+        // ========== 原生 Motion 文件播放 ==========
 
         // 优先使用 Cubism 原生 Motion Group（FileReferences.Motions）
         let motions = null;
@@ -1417,25 +1694,25 @@ class Live2DManager {
                 model.x = preferences.position.x;
                 model.y = preferences.position.y;
             } else {
-                // 使用默认设置 - 调整为居中偏下，确保可见
+                // 使用默认设置 - 模型居中显示，确保完整可见
                 // 假设标准模型高度约 3000-4000 单位
-                const scale = Math.min(
-                    0.25, 
-                    (window.innerHeight * 0.8) / 3000,
-                    (window.innerWidth * 0.8) / 3000
-                );
-                model.scale.set(scale);
-                
-                // 强制使用窗口尺寸计算位置，防止 renderer 尺寸未更新
                 const width = window.innerWidth;
                 const height = window.innerHeight;
                 
-                // 水平居中，垂直靠下
-                model.x = width * 0.8;
-                model.y = height * 0.9;
+                // 根据画布尺寸计算合适的缩放比例，确保模型完整显示
+                const scale = Math.min(
+                    0.2, 
+                    (height * 0.7) / 3500,
+                    (width * 0.8) / 2000
+                );
+                model.scale.set(scale);
                 
-                // 锚点设为底部中心偏右 (0.5, 1.0)
-                model.anchor.set(0.5, 1.0);
+                // 水平居中，垂直居中偏下
+                model.x = width * 0.5;
+                model.y = height * 0.55;
+                
+                // 锚点设为中心 (0.5, 0.5)
+                model.anchor.set(0.5, 0.5);
                 
                 console.log(`[Live2D] Applied settings: scale=${scale}, x=${model.x}, y=${model.y}, screen=${width}x${height}`);
             }
@@ -1705,7 +1982,7 @@ class Live2DManager {
         // 移除了 N.E.K.O. 项目特定的云服务功能（麦克风、屏幕分享、Agent工具）
         const buttonConfigs = [
             { id: 'settings', emoji: '⚙️', title: '设置', hasPopup: true, popupToggle: true },
-            { id: 'lock', emoji: this.isLocked ? '🔒' : '🖐', title: '锁定位置', hasPopup: false, toggle: true },
+            { id: 'lock', emoji: this.isLocked ? '🔒' : '🔓', title: '锁定位置', hasPopup: false },
             { id: 'reload', emoji: '🔄', title: '重载模型', hasPopup: false },
             { id: 'goodbye', emoji: '💤', title: '隐藏模型', hasPopup: false }
         ];
@@ -1883,14 +2160,14 @@ class Live2DManager {
                     }
                     if (config.id === 'lock') {
                         this.isLocked = !this.isLocked;
-                        btn.innerText = this.isLocked ? '🔒' : '🖐';
+                        btn.innerText = this.isLocked ? '🔒' : '🔓';
                         // 移除对 container.style.pointerEvents 的修改，
                         // 因为这会禁用所有交互（包括点击），而我们只想禁用拖拽。
                         // 拖拽逻辑在 setupDragAndDrop 中已经检查了 this.isLocked。
                         
                         // 同步更新旧的锁图标（如果存在）
                         if (this._lockIconElement) {
-                            this._lockIconElement.innerText = this.isLocked ? '🔒' : '🖐';
+                            this._lockIconElement.innerText = this.isLocked ? '🔒' : '🔓';
                         }
                         return;
                     }

@@ -24,7 +24,9 @@ class CapabilitiesTab extends StatelessWidget {
           color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.1)),
+            side: BorderSide(
+              color: Theme.of(context).dividerColor.withOpacity(0.1),
+            ),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
@@ -33,7 +35,10 @@ class CapabilitiesTab extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.hub, color: Theme.of(context).colorScheme.primary),
+                    Icon(
+                      Icons.hub,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -41,7 +46,8 @@ class CapabilitiesTab extends StatelessWidget {
                         children: [
                           Text(
                             '本地 Python 后端',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           const Text(
                             '提供高级逻辑推理、向量记忆与复杂任务处理能力',
@@ -64,7 +70,7 @@ class CapabilitiesTab extends StatelessWidget {
             ),
           ),
         ),
-        
+
         if (settings.enablePythonBackend) ...[
           const SizedBox(height: 16),
           _buildSectionHeader(context, '高级能力 (Advanced)'),
@@ -72,26 +78,36 @@ class CapabilitiesTab extends StatelessWidget {
             opacity: 0.5,
             child: SwitchListTile(
               title: const Text('深度研究 (Deep Research)'),
-              subtitle: const Text('🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)'),
+              subtitle: const Text(
+                '🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)',
+              ),
               value: false,
-              onChanged: null,  // 禁用开关
+              onChanged: null, // 禁用开关
               secondary: const Icon(Icons.science_outlined),
             ),
           ),
           // Vector memory is implicit when backend is active, but we could add a toggle if needed
           // For now, we assume backend = vector memory enabled.
         ] else ...[
-           const SizedBox(height: 16),
-           _buildSectionHeader(context, '高级能力 (Advanced)'),
-           ListTile(
-             leading: const Icon(Icons.science_outlined, color: Colors.grey),
-             title: const Text('深度研究 (Deep Research)', style: TextStyle(color: Colors.grey)),
-             subtitle: const Text('需要启用 Python 后端', style: TextStyle(color: Colors.grey)),
-             trailing: const Icon(Icons.lock_outline, color: Colors.grey),
-             onTap: () {
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先启用 Python 后端以解锁此功能')));
-             },
-           ),
+          const SizedBox(height: 16),
+          _buildSectionHeader(context, '高级能力 (Advanced)'),
+          ListTile(
+            leading: const Icon(Icons.science_outlined, color: Colors.grey),
+            title: const Text(
+              '深度研究 (Deep Research)',
+              style: TextStyle(color: Colors.grey),
+            ),
+            subtitle: const Text(
+              '需要启用 Python 后端',
+              style: TextStyle(color: Colors.grey),
+            ),
+            trailing: const Icon(Icons.lock_outline, color: Colors.grey),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('请先启用 Python 后端以解锁此功能')),
+              );
+            },
+          ),
         ],
 
         const SizedBox(height: 16),
@@ -105,12 +121,19 @@ class CapabilitiesTab extends StatelessWidget {
         ),
         SwitchListTile(
           title: const Text('联网搜索'),
-          subtitle: Text(settings.enablePythonBackend 
-              ? '使用后端 Agent 进行聚合搜索' 
-              : '请求模型使用自带联网能力 (如 Perplexity/Gemini) 或调用本地 Bing 工具'),
+          subtitle: Text(
+            settings.enablePythonBackend
+                ? '使用后端 Agent 进行聚合搜索'
+                : '请求模型使用自带联网能力 (如 Perplexity/Gemini) 或调用本地 Bing 工具',
+          ),
           value: settings.enableBrowser,
-          onChanged: settings.agentEnabled ? (v) => controller.setEnableBrowser(v) : null,
-          secondary: Icon(Icons.public, color: settings.agentEnabled ? null : Colors.grey),
+          onChanged: settings.agentEnabled
+              ? (v) => controller.setEnableBrowser(v)
+              : null,
+          secondary: Icon(
+            Icons.public,
+            color: settings.agentEnabled ? null : Colors.grey,
+          ),
         ),
         SwitchListTile(
           title: const Text('显示思考过程'),
@@ -119,7 +142,7 @@ class CapabilitiesTab extends StatelessWidget {
           onChanged: (v) => controller.setAgentShowThoughts(v),
           secondary: const Icon(Icons.psychology_outlined),
         ),
-        
+
         const Divider(height: 32),
         _buildSectionHeader(context, '视觉中枢 (Vision)'),
         Card(
@@ -130,12 +153,24 @@ class CapabilitiesTab extends StatelessWidget {
               children: [
                 DropdownButtonFormField<String>(
                   value: settings.activeVisionProviderId ?? 'follow_main',
-                  decoration: const InputDecoration(labelText: '视觉来源', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: '视觉来源',
+                    border: OutlineInputBorder(),
+                  ),
                   items: [
-                    const DropdownMenuItem(value: 'follow_main', child: Text('跟随主脑（优先使用主脑视觉）')),
-                    for (final p in controller.providers) DropdownMenuItem(value: p.id, child: Text('专用：${p.name}')),
+                    const DropdownMenuItem(
+                      value: 'follow_main',
+                      child: Text('跟随主脑（优先使用主脑视觉）'),
+                    ),
+                    for (final p in controller.providers)
+                      DropdownMenuItem(
+                        value: p.id,
+                        child: Text('专用：${p.name}'),
+                      ),
                   ],
-                  onChanged: (v) => controller.setActiveVisionProvider(v == 'follow_main' ? null : v),
+                  onChanged: (v) => controller.setActiveVisionProvider(
+                    v == 'follow_main' ? null : v,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 SwitchListTile(
@@ -150,15 +185,23 @@ class CapabilitiesTab extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: TextEditingController(text: settings.visionPromptTemplate),
+                  controller: TextEditingController(
+                    text: settings.visionPromptTemplate,
+                  ),
                   maxLines: 2,
-                  decoration: const InputDecoration(labelText: '默认视觉提示词', border: OutlineInputBorder()),
-                  onSubmitted: (v) => controller.setVisionPromptTemplate(v.trim()),
+                  decoration: const InputDecoration(
+                    labelText: '默认视觉提示词',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (v) =>
+                      controller.setVisionPromptTemplate(v.trim()),
                 ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    Expanded(child: Text('建议字数: ${settings.visionPreferredLength}')),
+                    Expanded(
+                      child: Text('建议字数: ${settings.visionPreferredLength}'),
+                    ),
                     Expanded(child: Text('最大字数: ${settings.visionMaxLength}')),
                   ],
                 ),
@@ -167,15 +210,21 @@ class CapabilitiesTab extends StatelessWidget {
                     Expanded(
                       child: Slider(
                         value: settings.visionPreferredLength.toDouble(),
-                        min: 60, max: 200, divisions: 14,
-                        onChanged: (v) => controller.setVisionPreferredLength(v.round()),
+                        min: 60,
+                        max: 200,
+                        divisions: 14,
+                        onChanged: (v) =>
+                            controller.setVisionPreferredLength(v.round()),
                       ),
                     ),
                     Expanded(
                       child: Slider(
                         value: settings.visionMaxLength.toDouble(),
-                        min: 200, max: 500, divisions: 6,
-                        onChanged: (v) => controller.setVisionMaxLength(v.round()),
+                        min: 200,
+                        max: 500,
+                        divisions: 6,
+                        onChanged: (v) =>
+                            controller.setVisionMaxLength(v.round()),
                       ),
                     ),
                   ],
@@ -192,7 +241,7 @@ class CapabilitiesTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        _buildSectionHeader(context, '表情与情绪'),
+        _buildSectionHeader(context, '表情 Agent'),
         Card(
           child: Column(
             children: [
@@ -204,6 +253,7 @@ class CapabilitiesTab extends StatelessWidget {
               ),
               SwitchListTile(
                 title: const Text('显示动态表情（灵动岛）'),
+                subtitle: const Text('简约圆脸表情系统'),
                 value: settings.showExpressionFace,
                 onChanged: (v) => controller.setShowExpressionFace(v),
               ),
@@ -211,13 +261,45 @@ class CapabilitiesTab extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: DropdownButtonFormField<String>(
                   value: settings.activeExpressionProviderId ?? 'follow_main',
-                  decoration: const InputDecoration(labelText: '表情推理模型', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: '表情推理模型',
+                    border: OutlineInputBorder(),
+                  ),
                   items: [
-                    const DropdownMenuItem(value: 'follow_main', child: Text('跟随主脑')),
-                    for (final p in controller.providers) DropdownMenuItem(value: p.id, child: Text('${p.name} (${p.model})')),
+                    const DropdownMenuItem(
+                      value: 'follow_main',
+                      child: Text('跟随主脑'),
+                    ),
+                    for (final p in controller.providers)
+                      DropdownMenuItem(
+                        value: p.id,
+                        child: Text('${p.name} (${p.model})'),
+                      ),
                   ],
-                  onChanged: (v) => controller.setActiveExpressionProvider(v == 'follow_main' ? null : v),
+                  onChanged: (v) => controller.setActiveExpressionProvider(
+                    v == 'follow_main' ? null : v,
+                  ),
                 ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildSectionHeader(context, 'Live2D 显示'),
+        Card(
+          child: Column(
+            children: [
+              SwitchListTile(
+                title: const Text('启用 Live2D 侧边栏'),
+                subtitle: const Text('在主界面右侧显示 Live2D 角色'),
+                value: settings.showLive2D,
+                onChanged: (v) => controller.setShowLive2D(v),
+              ),
+              SwitchListTile(
+                title: const Text('启用 Live2D 悬浮窗'),
+                subtitle: const Text('创建独立窗口（可被 OBS 捕获）'),
+                value: settings.enableFloatingWindow,
+                onChanged: (v) => controller.setEnableFloatingWindow(v),
               ),
             ],
           ),
@@ -231,31 +313,41 @@ class CapabilitiesTab extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.add_circle_outline),
               tooltip: '添加服务器',
-              onPressed: settings.enablePythonBackend 
+              onPressed: settings.enablePythonBackend
                   ? () => _showEditServerDialog(context, controller)
                   : null, // Disable add button if backend is off
             ),
           ],
         ),
-        
+
         // Warning for MCP when backend is disabled
         if (!settings.enablePythonBackend)
           Container(
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.5),
+              color: Theme.of(
+                context,
+              ).colorScheme.errorContainer.withOpacity(0.5),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Theme.of(context).colorScheme.error.withOpacity(0.5)),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.error.withOpacity(0.5),
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: Theme.of(context).colorScheme.error),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: Theme.of(context).colorScheme.error,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     '未启用 Python 后端：无法使用非官方默认工具 (MCP)。\n请在上方开启 "本地 Python 后端" 以启用此功能。',
-                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onErrorContainer),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
                   ),
                 ),
               ],
@@ -277,48 +369,79 @@ class CapabilitiesTab extends StatelessWidget {
             ),
           )
         else
-          ...settings.mcpServers.map((server) => _buildServerTile(context, controller, server, enabled: settings.enablePythonBackend)),
+          ...settings.mcpServers.map(
+            (server) => _buildServerTile(
+              context,
+              controller,
+              server,
+              enabled: settings.enablePythonBackend,
+            ),
+          ),
       ],
     );
   }
 
   void _testVision(BuildContext context, SettingsController controller) async {
-    final picker = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+    final picker = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
     if (picker == null || picker.files.first.bytes == null) return;
     final bytes = picker.files.first.bytes!;
     final llm = LLMService();
     final s = controller.settings;
-    final hint = '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
-    
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在请求视觉分析...')));
-    
+    final hint =
+        '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('正在请求视觉分析...')));
+
     try {
       final result = await llm.chatWithImage(
-        messages: const [ {'role':'system','content':'你是一个擅长中文描述的图像助手。'} ],
+        messages: const [
+          {'role': 'system', 'content': '你是一个擅长中文描述的图像助手。'},
+        ],
         imageBytes: bytes,
         prompt: hint,
         usageType: 'tool',
         providerIdOverride: controller.settings.activeVisionProviderId,
       );
       if (!context.mounted) return;
-      showDialog(context: context, builder: (ctx) => AlertDialog(
-        title: const Text('视觉测试结果'),
-        content: SingleChildScrollView(child: Text(result)),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
-      ));
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('视觉测试结果'),
+          content: SingleChildScrollView(child: Text(result)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
     }
   }
 
-  Widget _buildBackendControls(BuildContext context, SettingsController controller, AppSettings settings) {
+  Widget _buildBackendControls(
+    BuildContext context,
+    SettingsController controller,
+    AppSettings settings,
+  ) {
     return Column(
       children: [
         Row(
           children: [
             Expanded(
               child: TextField(
-                controller: TextEditingController(text: settings.pythonBackendUrl),
+                controller: TextEditingController(
+                  text: settings.pythonBackendUrl,
+                ),
                 decoration: const InputDecoration(
                   labelText: '后端地址',
                   hintText: 'http://localhost:8000',
@@ -349,7 +472,9 @@ class CapabilitiesTab extends StatelessWidget {
             // In a real implementation, these would call a native bridge or shell command
             OutlinedButton.icon(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在尝试启动后端进程...')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('正在尝试启动后端进程...')));
                 // TODO: Implement Process.run for backend
               },
               icon: const Icon(Icons.play_arrow, color: Colors.green),
@@ -357,7 +482,9 @@ class CapabilitiesTab extends StatelessWidget {
             ),
             OutlinedButton.icon(
               onPressed: () {
-                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在停止服务...')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('正在停止服务...')));
               },
               icon: const Icon(Icons.stop, color: Colors.red),
               label: const Text('停止服务'),
@@ -374,25 +501,35 @@ class CapabilitiesTab extends StatelessWidget {
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
 
-  Widget _buildServerTile(BuildContext context, SettingsController controller, McpServerConfig server, {bool enabled = true}) {
+  Widget _buildServerTile(
+    BuildContext context,
+    SettingsController controller,
+    McpServerConfig server, {
+    bool enabled = true,
+  }) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
       color: enabled ? null : Theme.of(context).disabledColor.withOpacity(0.05),
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.2)),
+        side: BorderSide(
+          color: Theme.of(context).dividerColor.withOpacity(0.2),
+        ),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ListTile(
         enabled: enabled,
-        title: Text(server.name, style: const TextStyle(fontWeight: FontWeight.w500)),
+        title: Text(
+          server.name,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
         subtitle: Text(
           '${server.command} ${server.args.join(" ")}',
           maxLines: 1,
@@ -404,9 +541,11 @@ class CapabilitiesTab extends StatelessWidget {
           children: [
             Switch(
               value: server.enabled,
-              onChanged: enabled ? (v) {
-                controller.updateMcpServer(server.copyWith(enabled: v));
-              } : null,
+              onChanged: enabled
+                  ? (v) {
+                      controller.updateMcpServer(server.copyWith(enabled: v));
+                    }
+                  : null,
             ),
             PopupMenuButton<String>(
               enabled: enabled,
@@ -419,7 +558,10 @@ class CapabilitiesTab extends StatelessWidget {
               },
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'edit', child: Text('编辑')),
-                const PopupMenuItem(value: 'delete', child: Text('删除', style: TextStyle(color: Colors.red))),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('删除', style: TextStyle(color: Colors.red)),
+                ),
               ],
             ),
           ],
@@ -428,14 +570,21 @@ class CapabilitiesTab extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, SettingsController controller, McpServerConfig server) {
+  void _confirmDelete(
+    BuildContext context,
+    SettingsController controller,
+    McpServerConfig server,
+  ) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('确认删除'),
         content: Text('确定要删除 MCP 服务器 "${server.name}" 吗？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () {
               controller.removeMcpServer(server.id);
@@ -449,13 +598,19 @@ class CapabilitiesTab extends StatelessWidget {
     );
   }
 
-  void _showEditServerDialog(BuildContext context, SettingsController controller, {McpServerConfig? server}) {
+  void _showEditServerDialog(
+    BuildContext context,
+    SettingsController controller, {
+    McpServerConfig? server,
+  }) {
     final isEditing = server != null;
     final nameCtrl = TextEditingController(text: server?.name ?? '');
     final cmdCtrl = TextEditingController(text: server?.command ?? '');
     final argsCtrl = TextEditingController(text: server?.args.join(' ') ?? '');
     final envCtrl = TextEditingController(
-      text: server?.env.entries.map((e) => '${e.key}=${e.value}').join('\n') ?? '',
+      text:
+          server?.env.entries.map((e) => '${e.key}=${e.value}').join('\n') ??
+          '',
     );
 
     showDialog(
@@ -468,17 +623,27 @@ class CapabilitiesTab extends StatelessWidget {
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: '名称', hintText: '例如: Filesystem Server'),
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  hintText: '例如: Filesystem Server',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: cmdCtrl,
-                decoration: const InputDecoration(labelText: '命令 (Command)', hintText: '例如: npx, python, docker'),
+                decoration: const InputDecoration(
+                  labelText: '命令 (Command)',
+                  hintText: '例如: npx, python, docker',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: argsCtrl,
-                decoration: const InputDecoration(labelText: '参数 (Arguments)', hintText: '空格分隔，例如: -y @modelcontextprotocol/server-filesystem'),
+                decoration: const InputDecoration(
+                  labelText: '参数 (Arguments)',
+                  hintText:
+                      '空格分隔，例如: -y @modelcontextprotocol/server-filesystem',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -494,13 +659,20 @@ class CapabilitiesTab extends StatelessWidget {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () {
               if (nameCtrl.text.isEmpty || cmdCtrl.text.isEmpty) return;
 
-              final args = argsCtrl.text.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
-              
+              final args = argsCtrl.text
+                  .trim()
+                  .split(RegExp(r'\s+'))
+                  .where((e) => e.isNotEmpty)
+                  .toList();
+
               final env = <String, String>{};
               final envLines = envCtrl.text.split('\n');
               for (final line in envLines) {
@@ -511,7 +683,9 @@ class CapabilitiesTab extends StatelessWidget {
               }
 
               final newServer = McpServerConfig(
-                id: server?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                id:
+                    server?.id ??
+                    DateTime.now().millisecondsSinceEpoch.toString(),
                 name: nameCtrl.text,
                 command: cmdCtrl.text,
                 args: args,

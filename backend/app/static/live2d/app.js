@@ -1668,38 +1668,156 @@ function init_app(){
         }
     }
 
+    // ========== 增强口型同步系统 ==========
+    // 平滑参数
+    let smoothedMouthOpen = 0;
+    let smoothedMouthForm = 0;
+    const smoothingFactor = 0.3; // 平滑系数，越小越平滑
+    const minThreshold = 0.02;   // 静音阈值
+    
     function startLipSync(model, analyser) {
-        const dataArray = new Uint8Array(analyser.fftSize);
-
+        // 使用频率数据进行更精确的口型分析
+        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+        const timeData = new Uint8Array(analyser.fftSize);
+        const sampleRate = audioPlayerContext?.sampleRate || 44100;
+        const binSize = sampleRate / analyser.fftSize;
+        
         function animate() {
-            analyser.getByteTimeDomainData(dataArray);
-            // 简单求音量（RMS 或最大振幅）
+            // 获取频率域和时域数据
+            analyser.getByteFrequencyData(frequencyData);
+            analyser.getByteTimeDomainData(timeData);
+            
+            // 1. 计算RMS音量（基础开口度）
             let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                const val = (dataArray[i] - 128) / 128; // 归一化到 -1~1
+            for (let i = 0; i < timeData.length; i++) {
+                const val = (timeData[i] - 128) / 128;
                 sum += val * val;
             }
-            const rms = Math.sqrt(sum / dataArray.length);
-            // 这里可以调整映射关系
-            const mouthOpen = Math.min(1, rms * 8); // 放大到 0~1
-            // 通过统一通道设置嘴巴开合，屏蔽 motion 对嘴巴的控制
-            if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
-                window.LanLan1.setMouth(mouthOpen);
+            const rms = Math.sqrt(sum / timeData.length);
+            
+            // 静音检测
+            if (rms < minThreshold) {
+                // 平滑过渡到闭嘴
+                smoothedMouthOpen = smoothedMouthOpen * 0.85;
+                if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
+                
+                if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                    window.LanLan1.setMouth(smoothedMouthOpen);
+                }
+                animationFrameId = requestAnimationFrame(animate);
+                return;
             }
-
+            
+            // 2. 频段能量分析（区分元音/辅音特征）
+            // 低频段 (100-500Hz): 基频，对应开口大小
+            // 中低频段 (500-1500Hz): 第一共振峰，中文元音特征明显
+            // 中高频段 (1500-3500Hz): 第二共振峰，英文元音区分
+            // 高频段 (3500-8000Hz): 辅音摩擦音
+            
+            const lowBand = getFrequencyBandEnergy(frequencyData, 100, 500, binSize);
+            const midLowBand = getFrequencyBandEnergy(frequencyData, 500, 1500, binSize);
+            const midHighBand = getFrequencyBandEnergy(frequencyData, 1500, 3500, binSize);
+            const highBand = getFrequencyBandEnergy(frequencyData, 3500, 8000, binSize);
+            
+            // 3. 计算开口度 (ParamMouthOpenY)
+            // 元音开口大: 低频+中低频能量高
+            // 辅音开口小: 高频能量占比高
+            const vowelness = (lowBand + midLowBand) / (lowBand + midLowBand + midHighBand + highBand + 0.001);
+            
+            // 基础开口度 = RMS * 放大系数
+            let baseMouthOpen = Math.min(1, rms * 6);
+            
+            // 根据频谱特征调整
+            // 元音（vowelness高）-> 开口更大
+            // 辅音（vowelness低，highBand高）-> 开口更小但更快速
+            let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
+            
+            // 高频摩擦音增强（辅音快速开合）
+            if (highBand > midLowBand * 0.5) {
+                targetMouthOpen = Math.max(targetMouthOpen, baseMouthOpen * 0.4);
+            }
+            
+            // 4. 计算嘴型形状 (ParamMouthForm: -1=悲伤/圆口, 1=微笑/扁口)
+            // 中文: "a,o,e" 偏圆口，"i,u" 偏扁口
+            // 英文: 类似但共振峰位置不同
+            // 通过中高频和中低频比例判断
+            let targetMouthForm = 0;
+            if (midLowBand > 0.1) {
+                // F2/F1 比值高 -> 扁口（前元音 i, e）
+                // F2/F1 比值低 -> 圆口（后元音 o, u）
+                const formantRatio = midHighBand / (midLowBand + 0.001);
+                targetMouthForm = Math.min(1, Math.max(-1, (formantRatio - 1) * 0.5));
+            }
+            
+            // 5. 应用平滑过渡（防止抖动）
+            smoothedMouthOpen += (targetMouthOpen - smoothedMouthOpen) * smoothingFactor;
+            smoothedMouthForm += (targetMouthForm - smoothedMouthForm) * smoothingFactor * 0.5;
+            
+            // 限制范围
+            smoothedMouthOpen = Math.min(1, Math.max(0, smoothedMouthOpen));
+            smoothedMouthForm = Math.min(1, Math.max(-1, smoothedMouthForm));
+            
+            // 6. 设置Live2D参数
+            if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                window.LanLan1.setMouth(smoothedMouthOpen);
+            }
+            
+            // 同时设置嘴型形状（如果模型支持）
+            if (window.LanLan1?.live2dModel?.internalModel?.coreModel) {
+                try {
+                    window.LanLan1.live2dModel.internalModel.coreModel
+                        .setParameterValueById('ParamMouthForm', smoothedMouthForm);
+                } catch (_) {}
+            }
+            
             animationFrameId = requestAnimationFrame(animate);
         }
-
+        
         animate();
+    }
+    
+    // 辅助函数：获取指定频率范围的平均能量
+    function getFrequencyBandEnergy(frequencyData, minFreq, maxFreq, binSize) {
+        const minBin = Math.floor(minFreq / binSize);
+        const maxBin = Math.min(Math.floor(maxFreq / binSize), frequencyData.length - 1);
+        
+        if (minBin >= maxBin) return 0;
+        
+        let sum = 0;
+        let count = 0;
+        for (let i = minBin; i <= maxBin; i++) {
+            sum += frequencyData[i] / 255; // 归一化到 0-1
+            count++;
+        }
+        
+        return count > 0 ? sum / count : 0;
     }
 
     function stopLipSync(model) {
         cancelAnimationFrame(animationFrameId);
+            
+        // 重置平滑变量
+        smoothedMouthOpen = 0;
+        smoothedMouthForm = 0;
+            
         if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
             window.LanLan1.setMouth(0);
-        } else if (model && model.internalModel && model.internalModel.coreModel) {
-            // 兜底
-            try { model.internalModel.coreModel.setParameterValueById("ParamMouthOpenY", 0); } catch (_) {}
+        }
+            
+        // 同时重置嘴型形状
+        if (window.LanLan1?.live2dModel?.internalModel?.coreModel) {
+            try {
+                window.LanLan1.live2dModel.internalModel.coreModel
+                    .setParameterValueById('ParamMouthOpenY', 0);
+                window.LanLan1.live2dModel.internalModel.coreModel
+                    .setParameterValueById('ParamMouthForm', 0);
+            } catch (_) {}
+        } else if (model?.internalModel?.coreModel) {
+            // 兆底
+            try { 
+                model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+                model.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
+            } catch (_) {}
         }
     }
 
@@ -2470,3 +2588,234 @@ const ready = () => {
 document.addEventListener("DOMContentLoaded", ready);
 window.addEventListener("load", ready);
 
+// ========== 外部音频播放接口 ==========
+// 用于 Flutter 等外部应用传入 TTS 音频并播放，同步口型动画
+(function() {
+    let externalAudioContext = null;
+    let externalAnalyser = null;
+    let externalAnimationFrameId = null;
+    let externalSmoothedMouthOpen = 0;
+    let externalSmoothedMouthForm = 0;
+    
+    /**
+     * 从 Base64 编码的音频数据播放并同步口型
+     * @param {string} base64Audio - Base64 编码的音频数据 (MP3/WAV/OGG)
+     * @param {string} format - 音频格式，默认 'mp3'
+     */
+    window.playExternalAudio = async function(base64Audio, format = 'mp3') {
+        try {
+            console.log('[ExternalAudio] 收到外部音频，长度:', base64Audio.length);
+            
+            // 初始化 AudioContext
+            if (!externalAudioContext) {
+                externalAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (externalAudioContext.state === 'suspended') {
+                await externalAudioContext.resume();
+            }
+            
+            // 解码 Base64 到 ArrayBuffer
+            const binaryString = atob(base64Audio);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            // 解码音频
+            const audioBuffer = await externalAudioContext.decodeAudioData(bytes.buffer);
+            
+            // 创建音频源
+            const source = externalAudioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            // 创建分析器用于口型同步
+            externalAnalyser = externalAudioContext.createAnalyser();
+            externalAnalyser.fftSize = 2048;
+            
+            // 连接节点
+            source.connect(externalAnalyser);
+            externalAnalyser.connect(externalAudioContext.destination);
+            
+            // 启动口型同步
+            startExternalLipSync();
+            
+            // 播放音频
+            source.start(0);
+            console.log('[ExternalAudio] 开始播放，时长:', audioBuffer.duration.toFixed(2), '秒');
+            
+            // 播放结束时停止口型同步
+            source.onended = () => {
+                console.log('[ExternalAudio] 播放结束');
+                stopExternalLipSync();
+            };
+            
+            return true;
+        } catch (error) {
+            console.error('[ExternalAudio] 播放失败:', error);
+            return false;
+        }
+    };
+    
+    /**
+     * 从 URL 播放音频并同步口型
+     * @param {string} audioUrl - 音频文件 URL
+     */
+    window.playAudioFromUrl = async function(audioUrl) {
+        try {
+            console.log('[ExternalAudio] 从 URL 加载音频:', audioUrl);
+            
+            const response = await fetch(audioUrl);
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // 初始化 AudioContext
+            if (!externalAudioContext) {
+                externalAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (externalAudioContext.state === 'suspended') {
+                await externalAudioContext.resume();
+            }
+            
+            // 解码音频
+            const audioBuffer = await externalAudioContext.decodeAudioData(arrayBuffer);
+            
+            // 创建音频源
+            const source = externalAudioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            // 创建分析器
+            externalAnalyser = externalAudioContext.createAnalyser();
+            externalAnalyser.fftSize = 2048;
+            
+            source.connect(externalAnalyser);
+            externalAnalyser.connect(externalAudioContext.destination);
+            
+            startExternalLipSync();
+            source.start(0);
+            
+            source.onended = () => {
+                stopExternalLipSync();
+            };
+            
+            return true;
+        } catch (error) {
+            console.error('[ExternalAudio] URL播放失败:', error);
+            return false;
+        }
+    };
+    
+    function startExternalLipSync() {
+        if (!externalAnalyser) return;
+        
+        const frequencyData = new Uint8Array(externalAnalyser.frequencyBinCount);
+        const timeData = new Uint8Array(externalAnalyser.fftSize);
+        const sampleRate = externalAudioContext?.sampleRate || 44100;
+        const binSize = sampleRate / externalAnalyser.fftSize;
+        const smoothingFactor = 0.3;
+        const minThreshold = 0.02;
+        
+        function animate() {
+            externalAnalyser.getByteFrequencyData(frequencyData);
+            externalAnalyser.getByteTimeDomainData(timeData);
+            
+            // RMS音量
+            let sum = 0;
+            for (let i = 0; i < timeData.length; i++) {
+                const val = (timeData[i] - 128) / 128;
+                sum += val * val;
+            }
+            const rms = Math.sqrt(sum / timeData.length);
+            
+            // 静音检测
+            if (rms < minThreshold) {
+                externalSmoothedMouthOpen = externalSmoothedMouthOpen * 0.85;
+                if (externalSmoothedMouthOpen < 0.01) externalSmoothedMouthOpen = 0;
+                
+                if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                    window.LanLan1.setMouth(externalSmoothedMouthOpen);
+                }
+                externalAnimationFrameId = requestAnimationFrame(animate);
+                return;
+            }
+            
+            // 频段分析
+            const lowBand = getBandEnergy(frequencyData, 100, 500, binSize);
+            const midLowBand = getBandEnergy(frequencyData, 500, 1500, binSize);
+            const midHighBand = getBandEnergy(frequencyData, 1500, 3500, binSize);
+            const highBand = getBandEnergy(frequencyData, 3500, 8000, binSize);
+            
+            const vowelness = (lowBand + midLowBand) / (lowBand + midLowBand + midHighBand + highBand + 0.001);
+            
+            let baseMouthOpen = Math.min(1, rms * 6);
+            let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
+            
+            if (highBand > midLowBand * 0.5) {
+                targetMouthOpen = Math.max(targetMouthOpen, baseMouthOpen * 0.4);
+            }
+            
+            let targetMouthForm = 0;
+            if (midLowBand > 0.1) {
+                const formantRatio = midHighBand / (midLowBand + 0.001);
+                targetMouthForm = Math.min(1, Math.max(-1, (formantRatio - 1) * 0.5));
+            }
+            
+            externalSmoothedMouthOpen += (targetMouthOpen - externalSmoothedMouthOpen) * smoothingFactor;
+            externalSmoothedMouthForm += (targetMouthForm - externalSmoothedMouthForm) * smoothingFactor * 0.5;
+            
+            externalSmoothedMouthOpen = Math.min(1, Math.max(0, externalSmoothedMouthOpen));
+            externalSmoothedMouthForm = Math.min(1, Math.max(-1, externalSmoothedMouthForm));
+            
+            if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                window.LanLan1.setMouth(externalSmoothedMouthOpen);
+            }
+            
+            if (window.LanLan1?.live2dModel?.internalModel?.coreModel) {
+                try {
+                    window.LanLan1.live2dModel.internalModel.coreModel
+                        .setParameterValueById('ParamMouthForm', externalSmoothedMouthForm);
+                } catch (_) {}
+            }
+            
+            externalAnimationFrameId = requestAnimationFrame(animate);
+        }
+        
+        animate();
+    }
+    
+    function stopExternalLipSync() {
+        if (externalAnimationFrameId) {
+            cancelAnimationFrame(externalAnimationFrameId);
+            externalAnimationFrameId = null;
+        }
+        
+        externalSmoothedMouthOpen = 0;
+        externalSmoothedMouthForm = 0;
+        
+        if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+            window.LanLan1.setMouth(0);
+        }
+        
+        if (window.LanLan1?.live2dModel?.internalModel?.coreModel) {
+            try {
+                window.LanLan1.live2dModel.internalModel.coreModel
+                    .setParameterValueById('ParamMouthForm', 0);
+            } catch (_) {}
+        }
+    }
+    
+    function getBandEnergy(frequencyData, minFreq, maxFreq, binSize) {
+        const minBin = Math.floor(minFreq / binSize);
+        const maxBin = Math.min(Math.floor(maxFreq / binSize), frequencyData.length - 1);
+        if (minBin >= maxBin) return 0;
+        let sum = 0, count = 0;
+        for (let i = minBin; i <= maxBin; i++) {
+            sum += frequencyData[i] / 255;
+            count++;
+        }
+        return count > 0 ? sum / count : 0;
+    }
+    
+    // 暴露停止函数
+    window.stopExternalAudio = stopExternalLipSync;
+})();

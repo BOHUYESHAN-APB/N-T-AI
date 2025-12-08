@@ -35,7 +35,7 @@ class AiSettings {
   final AiProvider provider;
   final String baseUrl; // 对于 openai 可留空（使用默认），custom 需要填写
   final String apiKey; // 对于 local 可留空
-  final String model;  // 例如 gpt-4o, llama3.1:8b 等
+  final String model; // 例如 gpt-4o, llama3.1:8b 等
 
   const AiSettings({
     this.provider = AiProvider.local,
@@ -50,11 +50,11 @@ class AiSettings {
     String? apiKey,
     String? model,
   }) => AiSettings(
-        provider: provider ?? this.provider,
-        baseUrl: baseUrl ?? this.baseUrl,
-        apiKey: apiKey ?? this.apiKey,
-        model: model ?? this.model,
-      );
+    provider: provider ?? this.provider,
+    baseUrl: baseUrl ?? this.baseUrl,
+    apiKey: apiKey ?? this.apiKey,
+    model: model ?? this.model,
+  );
 }
 
 class AgentConfig {
@@ -75,31 +75,37 @@ class AgentConfig {
   });
 
   factory AgentConfig.fromJson(Map<String, dynamic> json) => AgentConfig(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        providerId: json['providerId'] as String?,
-        description: json['description'] as String? ?? '',
-        enabled: json['enabled'] as bool? ?? true,
-        meta: (json['meta'] as Map?)?.cast<String, dynamic>() ?? {},
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    providerId: json['providerId'] as String?,
+    description: json['description'] as String? ?? '',
+    enabled: json['enabled'] as bool? ?? true,
+    meta: (json['meta'] as Map?)?.cast<String, dynamic>() ?? {},
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'providerId': providerId,
-        'description': description,
-        'enabled': enabled,
-        'meta': meta,
-      };
+    'id': id,
+    'name': name,
+    'providerId': providerId,
+    'description': description,
+    'enabled': enabled,
+    'meta': meta,
+  };
 
-  AgentConfig copyWith({String? name, String? providerId, String? description, bool? enabled, Map<String, dynamic>? meta}) => AgentConfig(
-        id: id,
-        name: name ?? this.name,
-        providerId: providerId ?? this.providerId,
-        description: description ?? this.description,
-        enabled: enabled ?? this.enabled,
-        meta: meta ?? this.meta,
-      );
+  AgentConfig copyWith({
+    String? name,
+    String? providerId,
+    String? description,
+    bool? enabled,
+    Map<String, dynamic>? meta,
+  }) => AgentConfig(
+    id: id,
+    name: name ?? this.name,
+    providerId: providerId ?? this.providerId,
+    description: description ?? this.description,
+    enabled: enabled ?? this.enabled,
+    meta: meta ?? this.meta,
+  );
 }
 
 enum AiProviderCategory { llm, tts, stt, motion, image, video }
@@ -139,10 +145,14 @@ class AiProviderConfig {
     this.capabilities = const [],
   });
 
-  factory AiProviderConfig.fromJson(Map<String, dynamic> json) => AiProviderConfig(
+  factory AiProviderConfig.fromJson(Map<String, dynamic> json) =>
+      AiProviderConfig(
         id: json['id'] as String,
         name: json['name'] as String,
-        kind: AiProvider.values.firstWhere((e) => e.name == json['kind'], orElse: () => AiProvider.local),
+        kind: AiProvider.values.firstWhere(
+          (e) => e.name == json['kind'],
+          orElse: () => AiProvider.local,
+        ),
         baseUrl: json['baseUrl'] as String? ?? '',
         apiKey: json['apiKey'] as String? ?? '',
         model: json['model'] as String? ?? '',
@@ -164,22 +174,22 @@ class AiProviderConfig {
       );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'kind': kind.name,
-        'baseUrl': baseUrl,
-        'apiKey': apiKey,
-        'model': model,
-        'isRoot': isRoot,
-        'enabled': enabled,
-        'orchestrationMode': orchestrationMode.name,
-        'category': category.name,
-        'dailyLimit': dailyLimit,
-        'usageCount': usageCount,
-        'lastUsageDate': lastUsageDate,
-        'meta': meta,
-        'capabilities': capabilities,
-      };
+    'id': id,
+    'name': name,
+    'kind': kind.name,
+    'baseUrl': baseUrl,
+    'apiKey': apiKey,
+    'model': model,
+    'isRoot': isRoot,
+    'enabled': enabled,
+    'orchestrationMode': orchestrationMode.name,
+    'category': category.name,
+    'dailyLimit': dailyLimit,
+    'usageCount': usageCount,
+    'lastUsageDate': lastUsageDate,
+    'meta': meta,
+    'capabilities': capabilities,
+  };
 
   AiProviderConfig copyWith({
     String? name,
@@ -197,22 +207,22 @@ class AiProviderConfig {
     Map<String, dynamic>? meta,
     List<String>? capabilities,
   }) => AiProviderConfig(
-        id: id,
-        name: name ?? this.name,
-        kind: kind ?? this.kind,
-        baseUrl: baseUrl ?? this.baseUrl,
-        apiKey: apiKey ?? this.apiKey,
-        model: model ?? this.model,
-        isRoot: isRoot ?? this.isRoot,
-        enabled: enabled ?? this.enabled,
-        orchestrationMode: orchestrationMode ?? this.orchestrationMode,
-        category: category ?? this.category,
-        dailyLimit: dailyLimit ?? this.dailyLimit,
-        usageCount: usageCount ?? this.usageCount,
-        lastUsageDate: lastUsageDate ?? this.lastUsageDate,
-        meta: meta ?? this.meta,
-        capabilities: capabilities ?? this.capabilities,
-      );
+    id: id,
+    name: name ?? this.name,
+    kind: kind ?? this.kind,
+    baseUrl: baseUrl ?? this.baseUrl,
+    apiKey: apiKey ?? this.apiKey,
+    model: model ?? this.model,
+    isRoot: isRoot ?? this.isRoot,
+    enabled: enabled ?? this.enabled,
+    orchestrationMode: orchestrationMode ?? this.orchestrationMode,
+    category: category ?? this.category,
+    dailyLimit: dailyLimit ?? this.dailyLimit,
+    usageCount: usageCount ?? this.usageCount,
+    lastUsageDate: lastUsageDate ?? this.lastUsageDate,
+    meta: meta ?? this.meta,
+    capabilities: capabilities ?? this.capabilities,
+  );
 }
 
 class McpServerConfig {
@@ -232,7 +242,8 @@ class McpServerConfig {
     this.enabled = true,
   });
 
-  factory McpServerConfig.fromJson(Map<String, dynamic> json) => McpServerConfig(
+  factory McpServerConfig.fromJson(Map<String, dynamic> json) =>
+      McpServerConfig(
         id: json['id'] as String,
         name: json['name'] as String,
         command: json['command'] as String,
@@ -242,14 +253,14 @@ class McpServerConfig {
       );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'command': command,
-        'args': args,
-        'env': env,
-        'enabled': enabled,
-      };
-  
+    'id': id,
+    'name': name,
+    'command': command,
+    'args': args,
+    'env': env,
+    'enabled': enabled,
+  };
+
   McpServerConfig copyWith({
     String? name,
     String? command,
@@ -257,13 +268,13 @@ class McpServerConfig {
     Map<String, String>? env,
     bool? enabled,
   }) => McpServerConfig(
-        id: id,
-        name: name ?? this.name,
-        command: command ?? this.command,
-        args: args ?? this.args,
-        env: env ?? this.env,
-        enabled: enabled ?? this.enabled,
-      );
+    id: id,
+    name: name ?? this.name,
+    command: command ?? this.command,
+    args: args ?? this.args,
+    env: env ?? this.env,
+    enabled: enabled ?? this.enabled,
+  );
 }
 
 class AppSettings {
@@ -278,8 +289,8 @@ class AppSettings {
   // 字体
   final BaseFontModeOption baseFontMode; // 基础字体（是否优先 MiSans）
   final DecorativeFontFamily decoFamily; // 装饰字体家族（FZG / nfdcs / none）
-  final bool decoUseTitles;   // 装饰字体用于标题
-  final bool decoUseBubbles;  // 装饰字体用于聊天气泡
+  final bool decoUseTitles; // 装饰字体用于标题
+  final bool decoUseBubbles; // 装饰字体用于聊天气泡
   final AiSettings ai;
   final List<AiProviderConfig> providers; // 多供应商配置
   final String? activeProviderId; // 选中的 provider id
@@ -293,9 +304,11 @@ class AppSettings {
   final bool showExpressionFace; // 是否在聊天顶部显示动态表情 (Simple Face)
   final bool enableLive2D; // 是否启用 Live2D 渲染 (WebView)
   final bool showLive2D; // 是否在主界面显示 Live2D 形象
+  final bool enableFloatingWindow; // 是否启用独立悬浮窗显示 Live2D
+  final bool live2dDebug; // 是否显示 Live2D 调试信息
   final String? activeExpressionProviderId; // 独立表情推理使用的小模型 provider id
   final String? activeSearchProviderId; // 独立搜索总结使用的模型 provider id
-  
+
   // Agent Tools Configuration
   final bool enableBrowser; // 启用浏览器工具
   final bool enableSearchRetry; // 启用搜索重试 (防止 Token 浪费)
@@ -303,24 +316,24 @@ class AppSettings {
   final bool showAgentThoughts; // 显示 Agent 思考过程
   final List<McpServerConfig> mcpServers; // MCP 服务器列表
   final List<AgentConfig> agents; // 独立 Agent 配置
-  
+
   // Python Backend / Neural Hub Settings
   final bool enablePythonBackend; // 是否启用 Python 后端
   final String pythonBackendUrl; // Python 后端地址
   final bool enableDeepResearch; // 是否启用深度研究 (全自动闭环模式)
   final SearchRegionOption searchRegion; // 搜索区域偏好
-  
+
   // User Preferences
   final String userNickname;
   final double learningProbability;
 
   // Vision (multimodal) defaults
   final String visionPromptTemplate; // 默认视觉提示词
-  final int visionPreferredLength;   // 建议长度（字数）
-  final int visionMaxLength;         // 最大长度（字数）
+  final int visionPreferredLength; // 建议长度（字数）
+  final int visionMaxLength; // 最大长度（字数）
   // Quick action buttons (identifiers) to show near input
   final List<String> quickActions;
-  
+
   // Assistant Identity
   final String assistantName; // 助手名称
   final String systemPrompt; // 自定义系统提示词 (Persona)
@@ -354,6 +367,8 @@ class AppSettings {
     this.showExpressionFace = true,
     this.enableLive2D = true, // Default to true
     this.showLive2D = true, // Default to true
+    this.enableFloatingWindow = false, // Default to false
+    this.live2dDebug = false, // 默认关闭调试信息
     this.activeExpressionProviderId,
     this.activeSearchProviderId,
     this.enableBrowser = false,
@@ -361,17 +376,18 @@ class AppSettings {
     this.enableNoteAccess = false,
     this.showAgentThoughts = false,
     this.mcpServers = const [],
-      this.agents = const [],
+    this.agents = const [],
     this.enablePythonBackend = false,
     this.pythonBackendUrl = 'http://localhost:8000',
     this.enableDeepResearch = false,
     this.searchRegion = SearchRegionOption.auto,
     this.userNickname = '',
     this.learningProbability = 1.0,
-    this.visionPromptTemplate = '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。',
+    this.visionPromptTemplate =
+        '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。',
     this.visionPreferredLength = 120,
     this.visionMaxLength = 500,
-    this.quickActions = const ['attach_image','compress','new_chat'],
+    this.quickActions = const ['attach_image', 'compress', 'new_chat'],
     this.assistantName = 'Firefly',
     this.systemPrompt = '', // Empty means use default from prompts.dart
     this.isFirstRun = true,
@@ -403,6 +419,8 @@ class AppSettings {
     bool? showExpressionFace,
     bool? enableLive2D,
     bool? showLive2D,
+    bool? enableFloatingWindow,
+    bool? live2dDebug,
     bool? enableBrowser,
     bool? enableSearchRetry,
     bool? enableNoteAccess,
@@ -427,64 +445,70 @@ class AppSettings {
     bool? enableTts,
     bool? enableStt,
   }) => AppSettings(
-        themeMode: themeMode ?? this.themeMode,
-        locale: locale ?? this.locale,
-        density: density ?? this.density,
-        textScale: textScale ?? this.textScale,
-        chatBg: chatBg ?? this.chatBg,
-        palette: palette ?? this.palette,
-        uiMode: uiMode ?? this.uiMode,
-        chatMode: chatMode ?? this.chatMode,
-        baseFontMode: baseFontMode ?? this.baseFontMode,
-        decoFamily: decoFamily ?? this.decoFamily,
-        decoUseTitles: decoUseTitles ?? this.decoUseTitles,
-        decoUseBubbles: decoUseBubbles ?? this.decoUseBubbles,
-        ai: ai ?? this.ai,
-        providers: providers ?? this.providers,
-        activeProviderId: activeProviderId ?? this.activeProviderId,
-        activeVisionProviderId: activeVisionProviderId ?? this.activeVisionProviderId,
-        rotationEnabled: rotationEnabled ?? this.rotationEnabled,
-        agentEnabled: agentEnabled ?? this.agentEnabled,
-        useMainVisionIfCapable: useMainVisionIfCapable ?? this.useMainVisionIfCapable,
-        visionFallbackToAgent: visionFallbackToAgent ?? this.visionFallbackToAgent,
-        enableExpressionAgent: enableExpressionAgent ?? this.enableExpressionAgent,
-        showExpressionFace: showExpressionFace ?? this.showExpressionFace,
-        enableLive2D: enableLive2D ?? this.enableLive2D,
-        showLive2D: showLive2D ?? this.showLive2D,
-        enableBrowser: enableBrowser ?? this.enableBrowser,
-        enableSearchRetry: enableSearchRetry ?? this.enableSearchRetry,
-        enableNoteAccess: enableNoteAccess ?? this.enableNoteAccess,
-        showAgentThoughts: showAgentThoughts ?? this.showAgentThoughts,
-        mcpServers: mcpServers ?? this.mcpServers,
-        agents: agents ?? this.agents,
-        enablePythonBackend: enablePythonBackend ?? this.enablePythonBackend,
-        pythonBackendUrl: pythonBackendUrl ?? this.pythonBackendUrl,
-        enableDeepResearch: enableDeepResearch ?? this.enableDeepResearch,
-        searchRegion: searchRegion ?? this.searchRegion,
-        userNickname: userNickname ?? this.userNickname,
-        learningProbability: learningProbability ?? this.learningProbability,
-        visionPromptTemplate: visionPromptTemplate ?? this.visionPromptTemplate,
-        visionPreferredLength: visionPreferredLength ?? this.visionPreferredLength,
-        visionMaxLength: visionMaxLength ?? this.visionMaxLength,
-        activeExpressionProviderId: activeExpressionProviderId ?? this.activeExpressionProviderId,
-        activeSearchProviderId: activeSearchProviderId ?? this.activeSearchProviderId,
-        quickActions: quickActions ?? this.quickActions,
-        assistantName: assistantName ?? this.assistantName,
-        systemPrompt: systemPrompt ?? this.systemPrompt,
-        isFirstRun: isFirstRun ?? this.isFirstRun,
-        enableTts: enableTts ?? this.enableTts,
-        enableStt: enableStt ?? this.enableStt,
-      );
+    themeMode: themeMode ?? this.themeMode,
+    locale: locale ?? this.locale,
+    density: density ?? this.density,
+    textScale: textScale ?? this.textScale,
+    chatBg: chatBg ?? this.chatBg,
+    palette: palette ?? this.palette,
+    uiMode: uiMode ?? this.uiMode,
+    chatMode: chatMode ?? this.chatMode,
+    baseFontMode: baseFontMode ?? this.baseFontMode,
+    decoFamily: decoFamily ?? this.decoFamily,
+    decoUseTitles: decoUseTitles ?? this.decoUseTitles,
+    decoUseBubbles: decoUseBubbles ?? this.decoUseBubbles,
+    ai: ai ?? this.ai,
+    providers: providers ?? this.providers,
+    activeProviderId: activeProviderId ?? this.activeProviderId,
+    activeVisionProviderId:
+        activeVisionProviderId ?? this.activeVisionProviderId,
+    rotationEnabled: rotationEnabled ?? this.rotationEnabled,
+    agentEnabled: agentEnabled ?? this.agentEnabled,
+    useMainVisionIfCapable:
+        useMainVisionIfCapable ?? this.useMainVisionIfCapable,
+    visionFallbackToAgent: visionFallbackToAgent ?? this.visionFallbackToAgent,
+    enableExpressionAgent: enableExpressionAgent ?? this.enableExpressionAgent,
+    showExpressionFace: showExpressionFace ?? this.showExpressionFace,
+    enableLive2D: enableLive2D ?? this.enableLive2D,
+    showLive2D: showLive2D ?? this.showLive2D,
+    enableFloatingWindow: enableFloatingWindow ?? this.enableFloatingWindow,
+    live2dDebug: live2dDebug ?? this.live2dDebug,
+    enableBrowser: enableBrowser ?? this.enableBrowser,
+    enableSearchRetry: enableSearchRetry ?? this.enableSearchRetry,
+    enableNoteAccess: enableNoteAccess ?? this.enableNoteAccess,
+    showAgentThoughts: showAgentThoughts ?? this.showAgentThoughts,
+    mcpServers: mcpServers ?? this.mcpServers,
+    agents: agents ?? this.agents,
+    enablePythonBackend: enablePythonBackend ?? this.enablePythonBackend,
+    pythonBackendUrl: pythonBackendUrl ?? this.pythonBackendUrl,
+    enableDeepResearch: enableDeepResearch ?? this.enableDeepResearch,
+    searchRegion: searchRegion ?? this.searchRegion,
+    userNickname: userNickname ?? this.userNickname,
+    learningProbability: learningProbability ?? this.learningProbability,
+    visionPromptTemplate: visionPromptTemplate ?? this.visionPromptTemplate,
+    visionPreferredLength: visionPreferredLength ?? this.visionPreferredLength,
+    visionMaxLength: visionMaxLength ?? this.visionMaxLength,
+    activeExpressionProviderId:
+        activeExpressionProviderId ?? this.activeExpressionProviderId,
+    activeSearchProviderId:
+        activeSearchProviderId ?? this.activeSearchProviderId,
+    quickActions: quickActions ?? this.quickActions,
+    assistantName: assistantName ?? this.assistantName,
+    systemPrompt: systemPrompt ?? this.systemPrompt,
+    isFirstRun: isFirstRun ?? this.isFirstRun,
+    enableTts: enableTts ?? this.enableTts,
+    enableStt: enableStt ?? this.enableStt,
+  );
 
   ThemeMode get materialThemeMode => switch (themeMode) {
-        ThemeModeOption.light => ThemeMode.light,
-        ThemeModeOption.dark => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
+    ThemeModeOption.light => ThemeMode.light,
+    ThemeModeOption.dark => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
 
   Locale? get materialLocale => switch (locale) {
-        LocaleOption.zh => const Locale('zh'),
-        LocaleOption.en => const Locale('en'),
-        _ => null,
-      };
+    LocaleOption.zh => const Locale('zh'),
+    LocaleOption.en => const Locale('en'),
+    _ => null,
+  };
 }

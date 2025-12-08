@@ -148,35 +148,104 @@ class AudioManager {
         }
       }
 
+    // 增强口型同步 - 支持中英文嘴型匹配
     startLipSync(modelId, analyser) {
         const model = window[modelId].live2dModel;
-        const dataArray = new Uint8Array(analyser.fftSize);
-        const self = this;
+        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+        const timeData = new Uint8Array(analyser.fftSize);
+        const sampleRate = this.ctx?.sampleRate || 44100;
+        const binSize = sampleRate / analyser.fftSize;
+        
+        // 平滑参数
+        let smoothedMouthOpen = 0;
+        let smoothedMouthForm = 0;
+        const smoothingFactor = 0.3;
+        const minThreshold = 0.02;
 
         const animate = () => {
-            analyser.getByteTimeDomainData(dataArray);
-            // 简单求音量（RMS 或最大振幅）
+            analyser.getByteFrequencyData(frequencyData);
+            analyser.getByteTimeDomainData(timeData);
+            
+            // RMS音量
             let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                const val = (dataArray[i] - 128) / 128; // 归一化到 -1~1
+            for (let i = 0; i < timeData.length; i++) {
+                const val = (timeData[i] - 128) / 128;
                 sum += val * val;
             }
-            const rms = Math.sqrt(sum / dataArray.length);
-            // 这里可以调整映射关系
-            const mouthOpen = Math.min(1, rms * 8); // 放大到 0~1
-            // 设置 Live2D 嘴巴参数
-            model.internalModel.coreModel.setParameterValueById("ParamMouthOpenY", Math.max(mouthOpen));
+            const rms = Math.sqrt(sum / timeData.length);
+            
+            // 静音检测
+            if (rms < minThreshold) {
+                smoothedMouthOpen = smoothedMouthOpen * 0.85;
+                if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
+                model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
+                this.models.get(modelId).animationFrameId = requestAnimationFrame(animate);
+                return;
+            }
+            
+            // 频段能量分析
+            const lowBand = this._getBandEnergy(frequencyData, 100, 500, binSize);
+            const midLowBand = this._getBandEnergy(frequencyData, 500, 1500, binSize);
+            const midHighBand = this._getBandEnergy(frequencyData, 1500, 3500, binSize);
+            const highBand = this._getBandEnergy(frequencyData, 3500, 8000, binSize);
+            
+            // 元音特征
+            const vowelness = (lowBand + midLowBand) / (lowBand + midLowBand + midHighBand + highBand + 0.001);
+            
+            // 开口度
+            let baseMouthOpen = Math.min(1, rms * 6);
+            let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
+            if (highBand > midLowBand * 0.5) {
+                targetMouthOpen = Math.max(targetMouthOpen, baseMouthOpen * 0.4);
+            }
+            
+            // 嘴型形状
+            let targetMouthForm = 0;
+            if (midLowBand > 0.1) {
+                const formantRatio = midHighBand / (midLowBand + 0.001);
+                targetMouthForm = Math.min(1, Math.max(-1, (formantRatio - 1) * 0.5));
+            }
+            
+            // 平滑过渡
+            smoothedMouthOpen += (targetMouthOpen - smoothedMouthOpen) * smoothingFactor;
+            smoothedMouthForm += (targetMouthForm - smoothedMouthForm) * smoothingFactor * 0.5;
+            
+            smoothedMouthOpen = Math.min(1, Math.max(0, smoothedMouthOpen));
+            smoothedMouthForm = Math.min(1, Math.max(-1, smoothedMouthForm));
+            
+            // 设置参数
+            model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
+            try {
+                model.internalModel.coreModel.setParameterValueById('ParamMouthForm', smoothedMouthForm);
+            } catch (_) {}
+            
             this.models.get(modelId).animationFrameId = requestAnimationFrame(animate);
         }
 
         animate();
     }
+    
+    // 辅助函数：获取频段能量
+    _getBandEnergy(frequencyData, minFreq, maxFreq, binSize) {
+        const minBin = Math.floor(minFreq / binSize);
+        const maxBin = Math.min(Math.floor(maxFreq / binSize), frequencyData.length - 1);
+        if (minBin >= maxBin) return 0;
+        let sum = 0, count = 0;
+        for (let i = minBin; i <= maxBin; i++) {
+            sum += frequencyData[i] / 255;
+            count++;
+        }
+        return count > 0 ? sum / count : 0;
+    }
 
     stopLipSync(modelId) {
         const model = window[modelId].live2dModel;
         cancelAnimationFrame(this.models.get(modelId).animationFrameId);
-        // 关闭嘴巴
-        model.internalModel.coreModel.setParameterValueById("ParamMouthOpenY", 0);
+        // 关闭嘴巴并重置嘴型
+        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+        try {
+            model.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
+        } catch (_) {}
     }
 }
 

@@ -4,9 +4,13 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
+  desktop_multi_window
+  desktop_webview_window
   record_windows
+  screen_retriever
   url_launcher_windows
   webview_windows
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
