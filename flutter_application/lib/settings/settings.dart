@@ -295,6 +295,10 @@ class AppSettings {
   final List<AiProviderConfig> providers; // 多供应商配置
   final String? activeProviderId; // 选中的 provider id
   final String? activeVisionProviderId; // 视觉中枢选中的 provider id（为空表示跟随主脑）
+  final String? activeExpressionProviderId; // 表情推理选中的 provider id
+  final String? activeSearchProviderId; // 搜索总结选中的 provider id
+  final String? activeMotionProviderId; // Live2D 动作决策选中的 provider id
+  final String live2dModelPath; // Live2D 模型路径
   final bool rotationEnabled; // 启用多平台轮换
   final bool agentEnabled; // 是否启用 Agent 智能体模式 (多模型协作)
   final bool useMainVisionIfCapable; // 主脑具备视觉则优先使用主脑
@@ -304,10 +308,9 @@ class AppSettings {
   final bool showExpressionFace; // 是否在聊天顶部显示动态表情 (Simple Face)
   final bool enableLive2D; // 是否启用 Live2D 渲染 (WebView)
   final bool showLive2D; // 是否在主界面显示 Live2D 形象
+  final bool showLive2DMiniWindow; // 是否在右上角显示内置小窗
   final bool enableFloatingWindow; // 是否启用独立悬浮窗显示 Live2D
   final bool live2dDebug; // 是否显示 Live2D 调试信息
-  final String? activeExpressionProviderId; // 独立表情推理使用的小模型 provider id
-  final String? activeSearchProviderId; // 独立搜索总结使用的模型 provider id
 
   // Agent Tools Configuration
   final bool enableBrowser; // 启用浏览器工具
@@ -359,18 +362,21 @@ class AppSettings {
     this.providers = const [],
     this.activeProviderId,
     this.activeVisionProviderId,
+    this.activeExpressionProviderId,
+    this.activeSearchProviderId,
+    this.activeMotionProviderId,
+    this.live2dModelPath = '',
     this.rotationEnabled = false,
-    this.agentEnabled = false,
+    this.agentEnabled = true,
     this.useMainVisionIfCapable = true,
     this.visionFallbackToAgent = true,
     this.enableExpressionAgent = false,
     this.showExpressionFace = true,
     this.enableLive2D = true, // Default to true
     this.showLive2D = true, // Default to true
+    this.showLive2DMiniWindow = false,
     this.enableFloatingWindow = false, // Default to false
     this.live2dDebug = false, // 默认关闭调试信息
-    this.activeExpressionProviderId,
-    this.activeSearchProviderId,
     this.enableBrowser = false,
     this.enableSearchRetry = true,
     this.enableNoteAccess = false,
@@ -411,6 +417,10 @@ class AppSettings {
     List<AiProviderConfig>? providers,
     String? activeProviderId,
     String? activeVisionProviderId,
+    String? activeExpressionProviderId,
+    String? activeSearchProviderId,
+    String? activeMotionProviderId,
+    String? live2dModelPath,
     bool? rotationEnabled,
     bool? agentEnabled,
     bool? useMainVisionIfCapable,
@@ -419,6 +429,7 @@ class AppSettings {
     bool? showExpressionFace,
     bool? enableLive2D,
     bool? showLive2D,
+    bool? showLive2DMiniWindow,
     bool? enableFloatingWindow,
     bool? live2dDebug,
     bool? enableBrowser,
@@ -437,8 +448,6 @@ class AppSettings {
     int? visionPreferredLength,
     int? visionMaxLength,
     List<String>? quickActions,
-    String? activeExpressionProviderId,
-    String? activeSearchProviderId,
     String? assistantName,
     String? systemPrompt,
     bool? isFirstRun,
@@ -462,6 +471,13 @@ class AppSettings {
     activeProviderId: activeProviderId ?? this.activeProviderId,
     activeVisionProviderId:
         activeVisionProviderId ?? this.activeVisionProviderId,
+    activeExpressionProviderId:
+        activeExpressionProviderId ?? this.activeExpressionProviderId,
+    activeSearchProviderId:
+        activeSearchProviderId ?? this.activeSearchProviderId,
+    activeMotionProviderId:
+        activeMotionProviderId ?? this.activeMotionProviderId,
+    live2dModelPath: live2dModelPath ?? this.live2dModelPath,
     rotationEnabled: rotationEnabled ?? this.rotationEnabled,
     agentEnabled: agentEnabled ?? this.agentEnabled,
     useMainVisionIfCapable:
@@ -471,6 +487,7 @@ class AppSettings {
     showExpressionFace: showExpressionFace ?? this.showExpressionFace,
     enableLive2D: enableLive2D ?? this.enableLive2D,
     showLive2D: showLive2D ?? this.showLive2D,
+    showLive2DMiniWindow: showLive2DMiniWindow ?? this.showLive2DMiniWindow,
     enableFloatingWindow: enableFloatingWindow ?? this.enableFloatingWindow,
     live2dDebug: live2dDebug ?? this.live2dDebug,
     enableBrowser: enableBrowser ?? this.enableBrowser,
@@ -488,10 +505,6 @@ class AppSettings {
     visionPromptTemplate: visionPromptTemplate ?? this.visionPromptTemplate,
     visionPreferredLength: visionPreferredLength ?? this.visionPreferredLength,
     visionMaxLength: visionMaxLength ?? this.visionMaxLength,
-    activeExpressionProviderId:
-        activeExpressionProviderId ?? this.activeExpressionProviderId,
-    activeSearchProviderId:
-        activeSearchProviderId ?? this.activeSearchProviderId,
     quickActions: quickActions ?? this.quickActions,
     assistantName: assistantName ?? this.assistantName,
     systemPrompt: systemPrompt ?? this.systemPrompt,

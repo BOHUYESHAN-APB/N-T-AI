@@ -69,7 +69,7 @@ class _SystemScreenState extends State<SystemScreen> {
             child: SwitchListTile(
               secondary: Icon(Icons.auto_awesome, color: controller.settings.agentEnabled ? Theme.of(context).colorScheme.primary : null),
               title: const Text('启用 Agent 模式', style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('开启后流萤将具备自主思考、视觉识别与工具调用能力'),
+              subtitle: const Text('开启后 Firefly 将具备自主思考、视觉识别与工具调用能力'),
               value: controller.settings.agentEnabled,
               onChanged: (v) => controller.setAgentEnabled(v),
             ),
@@ -326,7 +326,7 @@ class _SystemScreenState extends State<SystemScreen> {
           ListTile(
             leading: const Icon(Icons.memory),
             title: const Text('记忆数据库'),
-            subtitle: const Text('管理流萤的长期记忆'),
+            subtitle: const Text('管理 Firefly 的长期记忆'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const MemoryManagerScreen()));
@@ -344,7 +344,7 @@ class _SystemScreenState extends State<SystemScreen> {
           ListTile(
             leading: const Icon(Icons.face),
             title: const Text('用户昵称'),
-            subtitle: Text(controller.settings.userNickname.isEmpty ? '未设置 (流萤将自行决定)' : controller.settings.userNickname),
+            subtitle: Text(controller.settings.userNickname.isEmpty ? '未设置 (Firefly 将自行决定)' : controller.settings.userNickname),
             onTap: () async {
               final ctl = TextEditingController(text: controller.settings.userNickname);
               final newName = await showDialog<String>(

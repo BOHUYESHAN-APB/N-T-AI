@@ -70,7 +70,7 @@ class BrainService {
     _context = List.from(context);
   }
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  AudioPlayer? _audioPlayer;
 
   Future<void> speak(String text, AiProviderConfig ttsProvider) async {
     // Filter text: remove (...) and [...] and （...）
@@ -89,7 +89,13 @@ class BrainService {
       final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
       await tempFile.writeAsBytes(bytes);
       
-      await _audioPlayer.play(DeviceFileSource(tempFile.path));
+      try {
+        // Lazy initialize audio player to avoid startup crash when plugin isn't registered.
+        _audioPlayer ??= AudioPlayer();
+        await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+      } catch (e) {
+        debugPrint('AudioPlayer error (ignored): $e');
+      }
     } catch (e) {
       print('TTS Error: $e');
     }

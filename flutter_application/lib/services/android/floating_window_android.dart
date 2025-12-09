@@ -27,6 +27,12 @@ class FloatingWindowAndroid implements FloatingWindowService {
   }
 
   @override
+  void setOnCloseCallback(VoidCallback callback) {
+    // Android implementation currently doesn't support external close callback
+    // TODO: Implement MethodChannel callback from Android native side
+  }
+
+  @override
   Future<void> createFloatingWindow({
     required String modelPath,
     required double width,

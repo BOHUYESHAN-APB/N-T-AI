@@ -51,9 +51,13 @@ Our primary goal is to provide a complete, high-performance AI experience on mob
 - **Status**: Functional on Windows/Linux. Android requires a remote backend connection.
 
 #### Phase 2: Feature Migration (In Progress)
+- **Security & Connectivity**:
+  - [x] **Backend HTTPS**: Automatic self-signed certificate generation and rotation (30-day cycle).
+  - [x] **Dynamic Configuration**: Configurable backend URL in Flutter settings, supporting remote connections.
 - **Live2D/3D Rendering**: 
   - [x] **Backend**: Serve static assets via FastAPI.
   - [x] **Frontend**: WebView integration for rendering.
+  - [x] **Mini-Window**: Live2D overlay mode for compact display.
   - [x] **Live2D Import**: Support uploading and managing Live2D models via Flutter UI.
   - [ ] **3D Engine**: Implement Babylon.js renderer based on `dlp3d.ai` architecture (Havok physics, GLB support).
   - [ ] **Standalone**: Bundle assets in Flutter App, remove backend dependency for rendering.
@@ -94,6 +98,28 @@ Our primary goal is to provide a complete, high-performance AI experience on mob
 ### 3. Memory & Personalization
 *   **Long-term Memory**: Remembers user preferences, facts, and past conversations.
 *   **Persona System**: Customizable system prompts and "Thinking" styles (e.g., Firefly persona).
+
+### 4. Display Modes
+*   **Standard Mode**: Full-screen chat interface with Live2D character.
+*   **Mini-Window Mode**: Compact overlay showing only the Live2D character (120x160dp), ideal for multitasking.
+*   **Floating Window (Android)**: System-level floating window that stays on top of other apps (requires `SYSTEM_ALERT_WINDOW` permission).
+
+---
+
+## 🔐 Security & Connectivity
+
+### HTTPS & Certificate Rotation
+To ensure secure communication between the Flutter frontend and Python backend, especially on public networks:
+*   **Auto-Encryption**: The backend (`serve.py`) automatically generates self-signed SSL certificates (`cert.pem`, `key.pem`) in `backend/certs`.
+*   **Rotation**: Certificates are automatically rotated every 30 days to maintain security.
+*   **Seamless Experience**: The Flutter app is configured to accept these self-signed certificates in local/debug modes, removing the need for manual CA installation.
+
+### Remote Connection
+*   **Configurable URL**: You can change the backend URL in **Settings -> AI Settings**.
+*   **Mobile Access**: To use the app on Android with a PC backend:
+    1.  Ensure PC and Phone are on the same Wi-Fi.
+    2.  Find PC's IP (e.g., `192.168.1.x`).
+    3.  Set Backend URL in App to `https://192.168.1.x:8000`.
 
 ---
 

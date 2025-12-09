@@ -31,6 +31,7 @@ class SettingsController extends ChangeNotifier {
   static const _kShowExpressionFace = 'settings.ui.showExpressionFace';
   static const _kEnableLive2D = 'settings.ui.enableLive2D';
   static const _kShowLive2D = 'settings.ui.showLive2D';
+  static const _kShowLive2DMiniWindow = 'settings.ui.live2dMiniWindow';
   static const _kEnableFloatingWindow = 'settings.ui.enableFloatingWindow';
   static const _kLive2dDebug = 'settings.ui.live2dDebug';
   static const _kUserNickname = 'settings.user.nickname';
@@ -42,6 +43,8 @@ class SettingsController extends ChangeNotifier {
   static const _kVisionMaxLen = 'settings.vision.maxLength';
   static const _kExpressionProviderId = 'settings.expression.activeProviderId';
   static const _kSearchProviderId = 'settings.agent.searchProviderId';
+  static const _kMotionProviderId = 'settings.agent.motionProviderId';
+  static const _kLive2dModelPath = 'settings.character.modelPath';
   static const _kQuickActions = 'settings.ui.quickActions';
   static const _kAgents = 'settings.agents';
   static const _kEnablePythonBackend = 'settings.backend.enabled';
@@ -103,6 +106,10 @@ class SettingsController extends ChangeNotifier {
     // load legacy single-AI settings then attempt to load providers list
     final providersRaw = _prefs.getString(_kAiProviders);
     final activeId = _prefs.getString(_kAiActiveId);
+    final activeExpressionProviderId = _prefs.getString(_kExpressionProviderId);
+    final activeSearchProviderId = _prefs.getString(_kSearchProviderId);
+    final activeMotionProviderId = _prefs.getString(_kMotionProviderId);
+    final live2dModelPath = _prefs.getString(_kLive2dModelPath) ?? '';
     final rotationEnabled = _prefs.getBool(_kAiRotationEnabled) ?? false;
     final activeVisionId = _prefs.getString(_kAiActiveVisionId);
     final useMainVisionIfCapable =
@@ -114,11 +121,11 @@ class SettingsController extends ChangeNotifier {
     final showExpressionFace = _prefs.getBool(_kShowExpressionFace) ?? true;
     final enableLive2D = _prefs.getBool(_kEnableLive2D) ?? true;
     final showLive2D = _prefs.getBool(_kShowLive2D) ?? true;
+    final showLive2DMiniWindow =
+        _prefs.getBool(_kShowLive2DMiniWindow) ?? false;
     final enableFloatingWindow =
         _prefs.getBool(_kEnableFloatingWindow) ?? false;
     final live2dDebug = _prefs.getBool(_kLive2dDebug) ?? false;
-    final activeExpressionProviderId = _prefs.getString(_kExpressionProviderId);
-    final activeSearchProviderId = _prefs.getString(_kSearchProviderId);
     final enableBrowser = _prefs.getBool(_kAgentEnableBrowser) ?? false;
     final enableSearchRetry = _prefs.getBool(_kAgentEnableSearchRetry) ?? true;
     final enableNoteAccess = _prefs.getBool(_kEnableNoteAccess) ?? false;
@@ -441,6 +448,7 @@ class SettingsController extends ChangeNotifier {
       showExpressionFace: showExpressionFace,
       enableLive2D: enableLive2D,
       showLive2D: showLive2D,
+      showLive2DMiniWindow: showLive2DMiniWindow,
       enableFloatingWindow: enableFloatingWindow,
       live2dDebug: live2dDebug,
       enableBrowser: enableBrowser,
@@ -484,13 +492,22 @@ class SettingsController extends ChangeNotifier {
   Future<void> setShowExpressionFace(bool v) async {
     // 互斥逻辑：表情系统开启时，关闭 Live2D 侧边栏和悬浮窗
     if (v) {
+      await _setFlagWithoutNotify(
+        _kShowLive2DMiniWindow,
+        false,
+        _settings.showLive2DMiniWindow,
+        (s) => s.copyWith(showLive2DMiniWindow: false),
+      );
       _settings = _settings.copyWith(
         showExpressionFace: true,
         showLive2D: false,
         enableFloatingWindow: false,
+        enableExpressionAgent:
+            true, // Sync logic: Enable agent when UI is shown
       );
       await _prefs.setBool(_kShowLive2D, false);
       await _prefs.setBool(_kEnableFloatingWindow, false);
+      await _prefs.setBool(_kEnableExpressionAgent, true);
     } else {
       _settings = _settings.copyWith(showExpressionFace: false);
     }
@@ -499,6 +516,14 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setEnableLive2D(bool v) async {
+    if (!v) {
+      await _setFlagWithoutNotify(
+        _kShowLive2DMiniWindow,
+        false,
+        _settings.showLive2DMiniWindow,
+        (s) => s.copyWith(showLive2DMiniWindow: false),
+      );
+    }
     _settings = _settings.copyWith(enableLive2D: v);
     await _prefs.setBool(_kEnableLive2D, v);
     notifyListeners();
@@ -507,6 +532,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setShowLive2D(bool v) async {
     // 互斥逻辑：Live2D 侧边栏开启时，关闭表情系统
     if (v) {
+      await _setFlagWithoutNotify(
+        _kShowLive2DMiniWindow,
+        false,
+        _settings.showLive2DMiniWindow,
+        (s) => s.copyWith(showLive2DMiniWindow: false),
+      );
       _settings = _settings.copyWith(
         showLive2D: true,
         showExpressionFace: false,
@@ -524,6 +555,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setEnableFloatingWindow(bool v) async {
     // 互斥逻辑：悬浮窗开启时，关闭表情系统和侧边栏
     if (v) {
+      await _setFlagWithoutNotify(
+        _kShowLive2DMiniWindow,
+        false,
+        _settings.showLive2DMiniWindow,
+        (s) => s.copyWith(showLive2DMiniWindow: false),
+      );
       _settings = _settings.copyWith(
         enableFloatingWindow: true,
         showExpressionFace: false,
@@ -535,6 +572,39 @@ class SettingsController extends ChangeNotifier {
       _settings = _settings.copyWith(enableFloatingWindow: false);
     }
     await _prefs.setBool(_kEnableFloatingWindow, v);
+    notifyListeners();
+  }
+
+  Future<void> setShowLive2DMiniWindow(bool v) async {
+    if (v) {
+      await _setFlagWithoutNotify(
+        _kShowExpressionFace,
+        false,
+        _settings.showExpressionFace,
+        (s) => s.copyWith(showExpressionFace: false),
+      );
+      await _setFlagWithoutNotify(
+        _kShowLive2D,
+        false,
+        _settings.showLive2D,
+        (s) => s.copyWith(showLive2D: false),
+      );
+      await _setFlagWithoutNotify(
+        _kEnableFloatingWindow,
+        false,
+        _settings.enableFloatingWindow,
+        (s) => s.copyWith(enableFloatingWindow: false),
+      );
+      _settings = _settings.copyWith(
+        showLive2DMiniWindow: true,
+        enableLive2D: true,
+      );
+      await _prefs.setBool(_kShowLive2DMiniWindow, true);
+      await _prefs.setBool(_kEnableLive2D, true);
+    } else {
+      _settings = _settings.copyWith(showLive2DMiniWindow: false);
+      await _prefs.setBool(_kShowLive2DMiniWindow, false);
+    }
     notifyListeners();
   }
 
@@ -588,10 +658,37 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setActiveMotionProvider(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_kMotionProviderId);
+    } else {
+      await _prefs.setString(_kMotionProviderId, id);
+    }
+    _settings = _settings.copyWith(activeMotionProviderId: id);
+    notifyListeners();
+  }
+
+  Future<void> setLive2dModelPath(String path) async {
+    await _prefs.setString(_kLive2dModelPath, path);
+    _settings = _settings.copyWith(live2dModelPath: path);
+    notifyListeners();
+  }
+
   int safeIndex(int? i, int len, {required int fallback}) {
     if (i == null) return fallback;
     if (i < 0 || i >= len) return fallback;
     return i;
+  }
+
+  Future<void> _setFlagWithoutNotify(
+    String key,
+    bool value,
+    bool currentValue,
+    AppSettings Function(AppSettings) apply,
+  ) async {
+    if (currentValue == value) return;
+    _settings = apply(_settings);
+    await _prefs.setBool(key, value);
   }
 
   Future<void> setThemeMode(ThemeModeOption mode) async {

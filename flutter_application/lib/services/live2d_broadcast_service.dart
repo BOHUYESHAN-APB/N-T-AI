@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Live2D 广播服务
 /// 将表情/动作指令广播到后端 WebSocket，所有 Live2D 客户端都会收到
@@ -8,7 +9,22 @@ class Live2DBroadcastService {
   static final Live2DBroadcastService _instance =
       Live2DBroadcastService._internal();
   factory Live2DBroadcastService() => _instance;
-  Live2DBroadcastService._internal();
+  Live2DBroadcastService._internal() {
+    _loadPersistedBackendUrl();
+  }
+
+  // Attempt to load persisted backend URL asynchronously
+  void _loadPersistedBackendUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _backendUrl = prefs.getString('settings.backend.url') ?? _backendUrl;
+      debugPrint('[Live2DBroadcast] Loaded backend URL: $_backendUrl');
+    } catch (e) {
+      debugPrint('[Live2DBroadcast] Failed to load backend URL: $e');
+    }
+  }
+
+  // Deprecated ctor left intentionally out; initialization runs in _internal
 
   String _backendUrl = 'http://localhost:8000';
   bool _enabled = false;

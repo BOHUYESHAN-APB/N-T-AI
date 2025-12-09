@@ -22,6 +22,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
     }
 
     private var pendingAction: String? = null
+    private var backendUrl: String = "http://localhost:8000"
 
     fun setupChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
@@ -48,6 +49,12 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
     private fun handleInitialize(call: MethodCall, result: MethodChannel.Result) {
         try {
             Log.d(TAG, "Initialize called")
+            // Accept backendUrl from Flutter side for WebView content
+            val provided = call.argument<String>("backendUrl")
+            if (provided != null && provided.isNotEmpty()) {
+                backendUrl = provided
+                Log.d(TAG, "Backend URL set to $backendUrl")
+            }
             // 检查是否需要权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (!Settings.canDrawOverlays(activity)) {
@@ -81,8 +88,8 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
                 }
             }
 
-            // 启动浮窗服务
-            FloatingWindowService.startService(activity, modelPath)
+            // 启动浮窗服务，并传入 backendUrl
+            FloatingWindowService.startService(activity, modelPath, backendUrl)
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Create floating window error", e)

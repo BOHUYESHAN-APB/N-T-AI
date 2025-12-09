@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -9,9 +10,14 @@ import 'settings/settings_controller.dart';
 import 'settings/settings_scope.dart';
 import 'licenses/register_licenses.dart';
 import 'services/logger_service.dart';
+import 'services/live2d_broadcast_service.dart';
+import 'utils/http_overrides.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Allow self-signed certificates for local development/usage
+  HttpOverrides.global = SelfSignedHttpOverrides();
   
   logger.info("Starting N-T-AI Application...");
 
@@ -24,6 +30,10 @@ Future<void> main() async {
 
   final controller = SettingsController();
   await controller.load();
+  // Propagate configured backend URL to services that need it
+  try {
+    Live2DBroadcastService().setBackendUrl(controller.settings.pythonBackendUrl);
+  } catch (_) {}
   await registerThirdPartyLicenses();
   runApp(NTApp(controller: controller));
 }

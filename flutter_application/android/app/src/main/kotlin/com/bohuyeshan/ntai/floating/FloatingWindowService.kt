@@ -1,8 +1,12 @@
 package com.bohuyeshan.ntai.floating
 
 import android.app.Service
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
@@ -24,9 +28,10 @@ class FloatingWindowService : Service() {
         private const val TAG = "FloatingWindowService"
         private const val NOTIFICATION_ID = 1001
 
-        fun startService(context: Context, modelPath: String) {
+        fun startService(context: Context, modelPath: String, backendUrl: String) {
             val intent = Intent(context, FloatingWindowService::class.java)
             intent.putExtra("modelPath", modelPath)
+            intent.putExtra("backendUrl", backendUrl)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -60,14 +65,15 @@ class FloatingWindowService : Service() {
         Log.d(TAG, "FloatingWindowService started")
 
         val modelPath = intent?.getStringExtra("modelPath") ?: ""
-        
+        val backendUrl = intent?.getStringExtra("backendUrl") ?: "http://localhost:8000"
+
         // 创建浮窗
-        createFloatingWindow(modelPath)
+        createFloatingWindow(modelPath, backendUrl)
 
         return START_STICKY
     }
 
-    private fun createFloatingWindow(modelPath: String) {
+    private fun createFloatingWindow(modelPath: String, backendUrl: String) {
         if (isInitialized) return
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -79,6 +85,25 @@ class FloatingWindowService : Service() {
                 stopSelf()
                 return
             }
+        }
+
+        // 启动前台服务通知 (Android 8.0+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelId = "floating_window_channel"
+            val channelName = "Floating Window Service"
+            val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_LOW)
+            channel.lightColor = Color.BLUE
+            channel.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+
+            val notification = Notification.Builder(this, channelId)
+                .setContentTitle("N-T-AI Floating Window")
+                .setContentText("Running...")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .build()
+
+            startForeground(NOTIFICATION_ID, notification)
         }
 
         // 创建容器 FrameLayout
@@ -114,8 +139,8 @@ class FloatingWindowService : Service() {
                 WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
             }
             format = PixelFormat.RGBA_8888
+            // Removed FLAG_NOT_TOUCHABLE to allow touch events
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
             width = 600
             height = 800
@@ -128,7 +153,8 @@ class FloatingWindowService : Service() {
         windowManager?.addView(floatingView, params)
 
         // 加载 Web 页面
-        val url = "http://localhost:8000/static/live2d/index.html?model=$modelPath&floating=true"
+        val base = backendUrl.trimEnd('/')
+        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true"
         webView?.loadUrl(url)
 
         // 设置触摸事件

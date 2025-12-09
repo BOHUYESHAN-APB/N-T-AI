@@ -11,6 +11,7 @@ import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
 import '../widgets/expressive_face.dart';
 import '../widgets/character_display.dart';
+import '../widgets/live2d_controller.dart';
 import '../widgets/glass.dart';
 import '../widgets/message_bubble.dart';
 import '../data/mock_data.dart'; // Import for ChatMessage
@@ -57,6 +58,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
   // Floating window service
   FloatingWindowService? _floatingWindowService;
   bool _floatingWindowEnabled = false;
+  bool _miniExpanded = false;
+  // Mini-window control state
+  Timer? _floatingControlsHideTimer;
+  bool _floatingControlsVisible = false;
+  final Live2DController _live2dController = Live2DController();
 
   @override
   void initState() {
@@ -778,6 +784,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   ),
                 ),
               ),
+              // Mini Live2D overlay (left-side arrow + expandable controls)
+              if (settings.enableLive2D && settings.showLive2DMiniWindow)
+                _buildLive2DMiniWindowOverlay(context, settings),
             ],
           ),
         ),
@@ -862,9 +871,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
               // Live2D 侧边栏
               settingsController.setShowLive2D(true);
               break;
-            case 'floating':
-              // Live2D 悬浮窗
+            case 'floating_native':
+              // 原生/独立悬浮窗
               settingsController.setEnableFloatingWindow(true);
+              break;
+            case 'floating_mini':
+              // 内置的小窗（应用内右上小窗）
+              settingsController.setShowLive2DMiniWindow(true);
               break;
             case 'hide':
               settingsController.setShowLive2D(false);
@@ -905,7 +918,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
           PopupMenuItem(
-            value: 'floating',
+            value: 'floating_native',
             child: Row(
               children: [
                 Icon(
@@ -915,7 +928,22 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       : null,
                 ),
                 const SizedBox(width: 12),
-                const Text('Live2D 悬浮窗'),
+                const Text('Live2D 原生悬浮窗'),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'floating_mini',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.open_in_new,
+                  color: settings.showLive2DMiniWindow
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                const Text('Live2D 应用内小窗'),
               ],
             ),
           ),
@@ -939,6 +967,192 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLive2DMiniWindowOverlay(BuildContext context, AppSettings settings) {
+    const double width = 120;
+    const double height = 160;
+    const borderRadius = BorderRadius.all(Radius.circular(16));
+
+    // Controls placed to the left of the mini window.
+    final isAndroid = Platform.isAndroid;
+    const double btnSize = 48.0;
+
+    return Positioned(
+      top: 12,
+      // Shift the mini-window left to avoid overlapping the top-right menu
+      right: 84,
+      child: SafeArea(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MouseRegion(
+              onEnter: (_) {
+                if (!isAndroid) {
+                  _floatingControlsHideTimer?.cancel();
+                  setState(() => _floatingControlsVisible = true);
+                }
+              },
+              onExit: (_) {
+                if (!isAndroid) {
+                  _floatingControlsHideTimer?.cancel();
+                  _floatingControlsHideTimer = Timer(const Duration(seconds: 2), () {
+                    if (mounted) setState(() => _floatingControlsVisible = false);
+                  });
+                }
+              },
+              child: GestureDetector(
+                onTap: () => setState(() => _miniExpanded = !_miniExpanded),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  width: _miniExpanded || _floatingControlsVisible ? 84 : 36,
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 8, offset: const Offset(0,4)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _miniExpanded ? Icons.arrow_back_ios_new : Icons.arrow_forward_ios,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      const SizedBox(height: 8),
+                      if (_miniExpanded || _floatingControlsVisible)
+                        Builder(builder: (ctx) {
+                          Future<void> _evalJs(String js) async {
+                            try {
+                              if (settings.enableFloatingWindow && _floatingWindowService != null) {
+                                await _floatingWindowService!.executeJavaScript(js);
+                              } else {
+                                // Use CharacterDisplay controller if attached
+                                // Note: controller attach is handled elsewhere when CharacterDisplay is created
+                                final controller = _live2dController;
+                                await controller.executeJs(js);
+                              }
+                            } catch (e) {
+                              debugPrint('[MiniLeftBar] JS exec failed: $e');
+                            }
+                          }
+
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: btnSize,
+                                height: btnSize,
+                                child: IconButton(
+                                  tooltip: 'Settings',
+                                  icon: const Icon(Icons.settings, size: 20),
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => AlertDialog(
+                                        title: const Text('Live2D Settings'),
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            StatefulBuilder(
+                                              builder: (context, setState) {
+                                                return SwitchListTile(
+                                                  title: const Text('Follow Mouse'),
+                                                  value: true,
+                                                  onChanged: (val) {
+                                                    _evalJs("if(window.live2dManager) { window.live2dManager.mouseTrackingEnabled = $val; }");
+                                                    Navigator.pop(context);
+                                                  },
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: btnSize,
+                                height: btnSize,
+                                child: IconButton(
+                                  tooltip: 'Lock/Unlock',
+                                  icon: const Icon(Icons.lock_outline, size: 20),
+                                  onPressed: () async {
+                                    await _live2dController.executeJs("window.dispatchEvent(new CustomEvent('live2d-lock-click')); ");
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: btnSize,
+                                height: btnSize,
+                                child: IconButton(
+                                  tooltip: 'Reload',
+                                  icon: const Icon(Icons.refresh, size: 20),
+                                  onPressed: () async {
+                                    await _live2dController.executeJs("window.location.reload();");
+                                  },
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: btnSize,
+                                height: btnSize,
+                                child: IconButton(
+                                  tooltip: 'Close',
+                                  icon: const Icon(Icons.close, size: 20),
+                                  onPressed: () {
+                                    final settingsController = SettingsScope.of(context);
+                                    settingsController.setShowLive2DMiniWindow(false);
+                                  },
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: borderRadius,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: borderRadius,
+                child: SizedBox(
+                  width: width,
+                  height: height,
+                  child: CharacterDisplay(
+                    backendUrl: 'http://localhost:8000',
+                    expressionAgent: _brain.expressionAgent,
+                    controller: _live2dController,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1031,6 +1245,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
         ),
+        if (settings.enableLive2D && settings.showLive2DMiniWindow)
+          _buildLive2DMiniWindowOverlay(context, settings),
 
         // 当历史面板打开时，添加一个透明遮罩，点击遮罩可关闭面板
         if (_historyOpen)

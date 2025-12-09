@@ -64,7 +64,7 @@ class _HomeShellState extends State<HomeShell> {
                     NavigationRailDestination(
                       icon: Icon(Icons.chat_bubble_outlined),
                       selectedIcon: Icon(Icons.chat_bubble),
-                      label: Text('流萤'),
+                      label: Text('Firefly'),
                     ),
                     NavigationRailDestination(
                       icon: Icon(Icons.psychology_outlined),
@@ -108,7 +108,24 @@ class _HomeShellState extends State<HomeShell> {
                   ),
                 ),
                 const VerticalDivider(width: 1, thickness: 1),
-                Expanded(child: content),
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.all(12.0),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(25),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: content,
+                  ),
+                ),
               ],
             ),
           );
@@ -119,7 +136,7 @@ class _HomeShellState extends State<HomeShell> {
               selectedIndex: _selectedIndex,
               onDestinationSelected: _onItemTapped,
               destinations: const [
-                NavigationDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: '流萤'),
+                NavigationDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: 'Firefly'),
                 NavigationDestination(icon: Icon(Icons.psychology_outlined), selectedIcon: Icon(Icons.psychology), label: '记忆'),
                 NavigationDestination(icon: Icon(Icons.edit_note_outlined), selectedIcon: Icon(Icons.edit_note), label: '笔记'),
                 NavigationDestination(icon: Icon(Icons.style_outlined), selectedIcon: Icon(Icons.style), label: '塔罗'),

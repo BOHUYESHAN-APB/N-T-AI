@@ -7,17 +7,20 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart';
 import '../core/services/expression_agent_service.dart';
 import '../widgets/expressive_face.dart'; // For ExpressionData
+import 'live2d_controller.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CharacterDisplay extends StatefulWidget {
   final String backendUrl; // e.g. http://localhost:8000
   final ExpressionAgentService? expressionAgent;
+  final Live2DController? controller;
 
   const CharacterDisplay({
     Key? key,
     required this.backendUrl,
     this.expressionAgent,
+    this.controller,
   }) : super(key: key);
 
   @override
@@ -48,6 +51,26 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         _onMotionRequest,
       );
     }
+
+    // Attach controller
+    if (widget.controller != null) {
+      widget.controller!.attach((js) async {
+        _runJavascript(js);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _expressionSub?.cancel();
+    _motionSub?.cancel();
+    if (widget.controller != null) {
+      widget.controller!.detach();
+    }
+    if (Platform.isWindows) {
+      _windowsController.dispose();
+    }
+    super.dispose();
   }
 
   Future<String> _getModelUrl() async {
@@ -102,15 +125,6 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
     if (mounted) setState(() {});
   }
 
-  @override
-  void dispose() {
-    _expressionSub?.cancel();
-    _motionSub?.cancel();
-    if (Platform.isWindows) {
-      _windowsController.dispose();
-    }
-    super.dispose();
-  }
 
   void _onExpressionUpdate(ExpressionData data) {
     // Convert ExpressionData to JSON for JS

@@ -66,6 +66,12 @@ class Live2DManager {
 
         // [Parameter Override System]
         this.parameterOverrides = {}; // Stores active overrides: { "ParamName": value }
+
+        // Listen for lock toggle from Flutter
+        window.addEventListener('live2d-lock-click', () => {
+            this.isLocked = !this.isLocked;
+            console.log('[Live2D] Lock toggled via Flutter:', this.isLocked);
+        });
     }
 
     // 从 FileReferences 推导 EmotionMapping（用于兼容历史数据）
@@ -1946,6 +1952,10 @@ class Live2DManager {
 
     // 设置浮动按钮系统（新的控制面板）
     setupFloatingButtons(model) {
+        // 检查 URL 参数以识别是否处于独立浮窗模式，但允许在应用内也显示 JS 按钮
+        const urlParams = new URLSearchParams(window.location.search);
+        const isFloating = urlParams.get('floating') === 'true';
+
         const container = document.getElementById('live2d-canvas');
         
         // 在 l2d_manager 等页面不显示 (通过检测特定元素或URL判断)
@@ -1960,31 +1970,40 @@ class Live2DManager {
         // 创建按钮容器
         const buttonsContainer = document.createElement('div');
         buttonsContainer.id = 'live2d-floating-buttons';
+        // 基础样式（交互由内部按钮接管 pointer-events）
         Object.assign(buttonsContainer.style, {
             position: 'fixed',
             zIndex: '30',
             pointerEvents: 'none',
             display: 'none', // 初始隐藏，鼠标靠近时才显示
-            flexDirection: 'row', // 改为横向排列
             gap: '12px',
-            top: '20px', // 顶部固定
-            left: '50%', // 水平居中
-            transform: 'translateX(-50%)',
             padding: '10px',
             borderRadius: '30px',
-            // background: 'rgba(255, 255, 255, 0.2)', // 可选：添加淡淡的背景条
-            // backdropFilter: 'blur(5px)'
         });
+
+        // 响应式布局：窄窗口时改为竖向靠右显示，宽窗口时居中横向显示
+        if (window.innerWidth <= 420) {
+            buttonsContainer.style.flexDirection = 'column';
+            buttonsContainer.style.top = '12px';
+            buttonsContainer.style.right = '12px';
+            buttonsContainer.style.left = 'auto';
+            buttonsContainer.style.transform = 'none';
+        } else {
+            buttonsContainer.style.flexDirection = 'row';
+            buttonsContainer.style.top = '20px';
+            buttonsContainer.style.left = '50%';
+            buttonsContainer.style.transform = 'translateX(-50%)';
+        }
         document.body.appendChild(buttonsContainer);
         this._floatingButtonsContainer = buttonsContainer;
 
-        // 定义按钮配置（从上到下：设置、锁定、重载、睡觉）
+        // 定义按钮配置（从上到下：设置、锁定、重载）
         // 移除了 N.E.K.O. 项目特定的云服务功能（麦克风、屏幕分享、Agent工具）
+        // 移除了关闭按钮，使用 Windows 原生关闭
         const buttonConfigs = [
             { id: 'settings', emoji: '⚙️', title: '设置', hasPopup: true, popupToggle: true },
             { id: 'lock', emoji: this.isLocked ? '🔒' : '🔓', title: '锁定位置', hasPopup: false },
-            { id: 'reload', emoji: '🔄', title: '重载模型', hasPopup: false },
-            { id: 'goodbye', emoji: '💤', title: '隐藏模型', hasPopup: false }
+            { id: 'reload', emoji: '🔄', title: '重载模型', hasPopup: false }
         ];
 
         // 创建主按钮
@@ -2158,6 +2177,19 @@ class Live2DManager {
                         window.location.reload();
                         return;
                     }
+                    if (config.id === 'goodbye') {
+                        // 尝试关闭窗口 (针对独立悬浮窗)
+                        // 1. 尝试标准 window.close()
+                        window.close();
+                        // 2. 尝试 WebView2 postMessage (针对 desktop_webview_window)
+                        if (window.chrome && window.chrome.webview) {
+                            window.chrome.webview.postMessage('close');
+                        }
+                        // 3. 发送事件给 Flutter (作为后备)
+                        const event = new CustomEvent('live2d-close-window');
+                        window.dispatchEvent(event);
+                        return;
+                    }
                     if (config.id === 'lock') {
                         this.isLocked = !this.isLocked;
                         btn.innerText = this.isLocked ? '🔒' : '🔓';
@@ -2240,7 +2272,15 @@ class Live2DManager {
 
         // 根据不同按钮创建不同的弹出内容
         if (buttonId === 'settings') {
-            // 设置菜单
+            // 检查是否在独立悬浮窗模式
+            const urlParams = new URLSearchParams(window.location.search);
+            const isFloating = urlParams.get('floating') === 'true';
+
+            // 如果不是独立悬浮窗（即在软件内），点击设置应跳转到软件设置
+            // 但由于这是 Web 内部的 popup 创建逻辑，我们可以在按钮点击时拦截
+            // 见 setupFloatingButtons 中的 click handler
+            
+            // 设置菜单内容构建...
             
             // 先添加 Focus 模式、主动搭话、眼神跟随开关
             const settingsToggles = [
@@ -2519,7 +2559,7 @@ class Live2DManager {
                 }
             } else {
                 this._isMouseInToolbarArea = false;
-                // 离开区域后延迟隐藏
+                // 离开区域后延迟隐藏（延迟改为1秒以匹配 UX 需求）
                 if (!hideButtonsTimer) {
                     hideButtonsTimer = setTimeout(() => {
                         // 再次检查，防止在延迟期间鼠标又移回去了
@@ -2532,7 +2572,7 @@ class Live2DManager {
                             floatingButtons.style.display = 'none';
                         }
                         hideButtonsTimer = null;
-                    }, 500);
+                    }, 1000);
                 }
             }
         });

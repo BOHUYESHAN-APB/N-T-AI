@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import '../floating_window_service.dart';
@@ -19,6 +20,7 @@ class FloatingWindowWindows implements FloatingWindowService {
   bool _isInitialized = false;
   bool _isVisible = false;
   Webview? _webview;
+  VoidCallback? _onCloseCallback;
 
   FloatingWindowWindows({required this.backendUrl});
 
@@ -26,6 +28,11 @@ class FloatingWindowWindows implements FloatingWindowService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
+  }
+
+  @override
+  void setOnCloseCallback(VoidCallback callback) {
+    _onCloseCallback = callback;
   }
 
   @override
@@ -92,7 +99,23 @@ class FloatingWindowWindows implements FloatingWindowService {
         SharedPreferences.getInstance().then((prefs) {
           prefs.setBool('floating.window.enabled', false);
         });
+        // 通知外部回调
+        if (_onCloseCallback != null) {
+          _onCloseCallback!();
+        }
       });
+
+      // 监听来自 JS 的消息 (用于关闭窗口等交互)
+      // TODO: desktop_webview_window 0.2.3 可能不支持 onMessage，暂时注释掉
+      // 需要确认如何从 JS 发送消息到 Dart
+      /*
+      _webview!.onMessage.listen((message) {
+        if (message == 'close') {
+          debugPrint('[FloatingWindowWindows] Received close message from JS');
+          closeFloatingWindow();
+        }
+      });
+      */
 
       _isVisible = true;
       debugPrint(
@@ -100,6 +123,22 @@ class FloatingWindowWindows implements FloatingWindowService {
       );
     } catch (e) {
       debugPrint('[FloatingWindowWindows] Create window failed: $e');
+      // If the desktop webview plugin is not available at runtime (MissingPluginException),
+      // fail gracefully instead of rethrowing so the main app can continue running.
+      try {
+        if (e is MissingPluginException) {
+          debugPrint('[FloatingWindowWindows] Missing plugin detected, skipping floating window creation.');
+          // Persist disabled state so UI can reflect inability to create floating window
+          SharedPreferences.getInstance().then((prefs) {
+            prefs.setBool('floating.window.enabled', false);
+          });
+          _webview = null;
+          _isVisible = false;
+          return;
+        }
+      } catch (_) {
+        // ignore errors during exception handling
+      }
       rethrow;
     }
   }

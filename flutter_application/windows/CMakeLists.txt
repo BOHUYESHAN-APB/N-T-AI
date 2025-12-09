@@ -8,7 +8,21 @@ set(BINARY_NAME "flutter_application")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
-cmake_policy(VERSION 3.14...3.25)
+cmake_policy(VERSION 3.14...3.26)
+
+# Ensure newer CMake policies are enabled for plugin add_custom_command usage
+# Policy CMP0175 was introduced in CMake 3.26 and controls argument validation
+# for add_custom_command(TARGET). Some plugin CMake files use newer keywords
+# which can trigger warnings with older policy defaults. Opt-in to the newer
+# behavior to suppress warnings and allow those plugin commands to work.
+if(POLICY CMP0175)
+  cmake_policy(SET CMP0175 NEW)
+endif()
+
+# Suppress developer-mode warnings from CMake to avoid noisy output
+# when plugin CMake files use newer keywords; this does not hide build
+# errors, only developer warnings emitted by CMake itself.
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1)
 
 # Define build configuration option.
 get_property(IS_MULTICONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)

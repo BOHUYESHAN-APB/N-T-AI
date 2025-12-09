@@ -1,5 +1,56 @@
 # 更新日志 (Changelog)
 
+## [0.3.4-beta] - 2025-12-08
+
+### 新增 (Added)
+- **表情系统与 Live2D 互斥模式**:
+    - 实现表情系统（灵动岛）与 Live2D 完全互斥，二者仅能启用其一。
+    - `settings_controller.dart` 新增互斥开关逻辑：启用表情系统时自动关闭 Live2D（侧边栏/悬浮窗）。
+    - 右上角显示模式菜单新增"表情系统（灵动岛）"选项，共支持四种模式：表情系统 / Live2D侧边栏 / Live2D悬浮窗 / 全部隐藏。
+
+- **设置界面 UI 重构**:
+    - `capabilities_tab.dart` 分离"表情 Agent"和"Live2D 显示"为两个独立分区，解决 UI 分类混淆问题。
+    - "表情 Agent" 分区：启用表情 Agent、显示动态表情（灵动岛）、表情推理模型选择。
+    - "Live2D 显示" 分区：启用 Live2D 侧边栏、启用 Live2D 悬浮窗。
+
+- **安卓端 Live2D 显示适配规划**:
+    - 原独立窗口改为系统级悬浮窗，支持在其他应用之上置顶显示。
+    - 主界面侧边栏布局改为右上角内置小窗（约 120x160 dp）。
+    - 完整的适配方案已记录在交接文档中。
+
+- **HTTP 加密传输方案规划**:
+    - 识别到安卓端 WebView 因 `ERR_CLEARTEXT_NOT_PERMITTED` 无法加载 `http://localhost:8000`。
+    - 用户在家庭网络 + 端口映射场景下需要加密传输，但不应强制用户申请 SSL 证书。
+    - **推荐方案**：自签名证书 + 证书指纹固定 - 后端启动时自动生成自签名证书，APP 内置证书指纹验证，用户无感知。
+    - 备选方案：Cloudflare Tunnel、应用层 AES-256 加密、Tailscale/ZeroTier。
+
+### 优化 (Changed)
+- **Token 节约优化**:
+    - 验证现有逻辑已正确实现：未开启 Agent 时不会触发 LLM 调用。
+    - `enableExpressionAgent` 控制表情推理 LLM 调用，`enableLive2D` 控制 Motion Agent 触发。
+
+### 修复 (Fixed)
+- **Kotlin 编译错误修复**:
+    - `FloatingWindowChannelHandler.kt` 修复 `MethodCall` 类型错误，添加缺失导入 `import io.flutter.plugin.common.MethodCall`。
+    - 所有方法签名从 `MethodChannel.MethodCallHandler.MethodCall` 更正为 `MethodCall`。
+
+### ⚠️ 已知限制 (Known Limitations)
+
+**不推荐在 Android 端使用此项目** 
+
+原因：
+- 项目逻辑复杂度高，涉及多个交互系统（表情系统、Live2D、音频服务、Agent 协调）。
+- AI 编程在完整理解架构设计上存在困难，导致重复创建已有功能并频繁修改接口变量。
+- 当前已产生多项由 AI 造成的逻辑问题，正在人工逐一修复。
+- Android 平台特有问题（WebView HTTPS、悬浮窗权限、小屏幕适配）需要额外的架构调整。
+
+**建议用途**：
+- 桌面平台（Windows、Linux、macOS）是主要开发和测试目标。
+- Android 适配工作建议交由有完整项目上下文的人工开发者。
+- 如需在 Android 上使用，请耐心等待稳定版本发布。
+
+---
+
 ## [0.3.3-beta] - 2025-12-06
 
 ### 新增 (Added)

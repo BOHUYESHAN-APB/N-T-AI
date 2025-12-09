@@ -154,7 +154,7 @@ class _FirstRunDialogState extends State<FirstRunDialog> {
                 children: [
                   TextButton(
                     onPressed: _useDefaultPersona,
-                    child: const Text('Use Default (Firefly) / 使用默认流萤'),
+                    child: const Text('Use Default (Firefly) / 使用默认 Firefly'),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(

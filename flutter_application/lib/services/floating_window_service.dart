@@ -1,7 +1,12 @@
+import 'dart:ui';
+
 /// 浮窗服务基础接口
 abstract class FloatingWindowService {
   /// 初始化浮窗服务
   Future<void> initialize();
+
+  /// 设置窗口关闭回调
+  void setOnCloseCallback(VoidCallback callback);
 
   /// 创建浮窗
   /// [modelPath] - Live2D 模型路径

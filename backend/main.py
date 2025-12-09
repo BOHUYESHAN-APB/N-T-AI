@@ -26,6 +26,35 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+
+# --- Certificate Info Endpoint (for clients to fetch current cert/fingerprint)
+@app.get("/internal/certificates")
+async def get_certificates():
+    """Return current server certificate PEM and SHA256 fingerprint(s).
+    Use this to allow clients to perform certificate pinning.
+    """
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+    except Exception:
+        return {"error": "cryptography not installed"}
+
+    cert_path = settings.SSL_CERT_PATH
+    if not cert_path or not os.path.exists(cert_path):
+        return {"error": "no_certificate"}
+
+    try:
+        with open(cert_path, "rb") as f:
+            pem = f.read()
+        cert = x509.load_pem_x509_certificate(pem)
+        fp = cert.fingerprint(hashes.SHA256())
+        # Fingerprint as hex colon-separated
+        fp_hex = ':'.join(['%02X' % b for b in fp])
+        return {"pem": pem.decode('utf-8'), "sha256_fingerprint": fp_hex}
+    except Exception as e:
+        logger.error(f"Failed to read cert: {e}")
+        return {"error": str(e)}
+
 # Include Memory Dashboard Routes
 app.include_router(memory_routes.router)
 app.include_router(model_routes.router)

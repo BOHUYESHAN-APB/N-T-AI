@@ -70,14 +70,14 @@ dependency_overrides:
 
 flutter_native_splash:
   color: "#ffffff"
-  image: assets/images/splash_1.png
+  image: assets/images/logo.png
   color_dark: "#1a1a1a"
-  image_dark: assets/images/splash_2.png
+  image_dark: assets/images/logo.png
 
   android_12:
-    image: assets/images/splash_1.png
+    image: assets/images/logo.png
     icon_background_color: "#ffffff"
-    image_dark: assets/images/splash_2.png
+    image_dark: assets/images/logo.png
     icon_background_color_dark: "#1a1a1a"
 
   web: false
