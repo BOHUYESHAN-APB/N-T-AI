@@ -1,5 +1,19 @@
 # 更新日志 (Changelog)
 
+## [0.3.5-beta] - 2025-12-09
+
+### 新增 (Added)
+- **Live2D 前端与 Flutter 集成改进**:
+    - 在内置 WebView 中也显示 Live2D 浮动工具栏（Settings / Lock / Reload），并将工具栏在鼠标移开后的隐藏延迟调整为 1 秒（之前为 500ms）。
+    - 新增 `Live2DController`（`lib/widgets/live2d_controller.dart`），用于在 Flutter 中统一向 WebView 注入并执行 Live2D 相关的 JS 调用（lock/toggle/reload/setMouseTracking 等）。
+    - `CharacterDisplay` 新增 `floatingUi` 参数；当为 `true` 时构造的模型页面会带上 `floating=true` 参数以启用页面内工具栏。
+    - 小窗控件移动到小窗左侧，默认收起为箭头，展开为竖排大按钮；Android 平台因无 hover 行为改为点击展开或不显示悬浮按钮。
+    - 修复小窗锁定按钮无效的问题；移除独立浮窗内多余的 JS “Close” 按钮；将 Settings 功能改为切换模型是否跟随鼠标（`mouseTrackingEnabled`）。
+
+- **脚本与构建**:
+    - 新增/使用 `scripts/update_version.ps1`，用于从根目录 `CHANGELOG.md` 解析最新版本并更新 `flutter_application/pubspec.yaml` 的 `version:` 字段，同时复制 `CHANGELOG.md` 至 `flutter_application/CHANGELOG.md`。
+
+
 ## [0.3.4-beta] - 2025-12-08
 
 ### 新增 (Added)

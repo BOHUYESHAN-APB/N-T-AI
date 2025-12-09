@@ -1,5 +1,70 @@
 # 更新日志 (Changelog)
 
+## [0.3.5-beta] - 2025-12-09
+
+### 新增 (Added)
+- **Live2D 前端与 Flutter 集成改进**:
+    - 在内置 WebView 中也显示 Live2D 浮动工具栏（Settings / Lock / Reload），并将工具栏在鼠标移开后的隐藏延迟调整为 1 秒（之前为 500ms）。
+    - 新增 `Live2DController`（`lib/widgets/live2d_controller.dart`），用于在 Flutter 中统一向 WebView 注入并执行 Live2D 相关的 JS 调用（lock/toggle/reload/setMouseTracking 等）。
+    - `CharacterDisplay` 新增 `floatingUi` 参数；当为 `true` 时构造的模型页面会带上 `floating=true` 参数以启用页面内工具栏。
+    - 小窗控件移动到小窗左侧，默认收起为箭头，展开为竖排大按钮；Android 平台因无 hover 行为改为点击展开或不显示悬浮按钮。
+    - 修复小窗锁定按钮无效的问题；移除独立浮窗内多余的 JS “Close” 按钮；将 Settings 功能改为切换模型是否跟随鼠标（`mouseTrackingEnabled`）。
+
+- **脚本与构建**:
+    - 新增/使用 `scripts/update_version.ps1`，用于从根目录 `CHANGELOG.md` 解析最新版本并更新 `flutter_application/pubspec.yaml` 的 `version:` 字段，同时复制 `CHANGELOG.md` 至 `flutter_application/CHANGELOG.md`。
+
+
+## [0.3.4-beta] - 2025-12-08
+
+### 新增 (Added)
+- **表情系统与 Live2D 互斥模式**:
+    - 实现表情系统（灵动岛）与 Live2D 完全互斥，二者仅能启用其一。
+    - `settings_controller.dart` 新增互斥开关逻辑：启用表情系统时自动关闭 Live2D（侧边栏/悬浮窗）。
+    - 右上角显示模式菜单新增"表情系统（灵动岛）"选项，共支持四种模式：表情系统 / Live2D侧边栏 / Live2D悬浮窗 / 全部隐藏。
+
+- **设置界面 UI 重构**:
+    - `capabilities_tab.dart` 分离"表情 Agent"和"Live2D 显示"为两个独立分区，解决 UI 分类混淆问题。
+    - "表情 Agent" 分区：启用表情 Agent、显示动态表情（灵动岛）、表情推理模型选择。
+    - "Live2D 显示" 分区：启用 Live2D 侧边栏、启用 Live2D 悬浮窗。
+
+- **安卓端 Live2D 显示适配规划**:
+    - 原独立窗口改为系统级悬浮窗，支持在其他应用之上置顶显示。
+    - 主界面侧边栏布局改为右上角内置小窗（约 120x160 dp）。
+    - 完整的适配方案已记录在交接文档中。
+
+- **HTTP 加密传输方案规划**:
+    - 识别到安卓端 WebView 因 `ERR_CLEARTEXT_NOT_PERMITTED` 无法加载 `http://localhost:8000`。
+    - 用户在家庭网络 + 端口映射场景下需要加密传输，但不应强制用户申请 SSL 证书。
+    - **推荐方案**：自签名证书 + 证书指纹固定 - 后端启动时自动生成自签名证书，APP 内置证书指纹验证，用户无感知。
+    - 备选方案：Cloudflare Tunnel、应用层 AES-256 加密、Tailscale/ZeroTier。
+
+### 优化 (Changed)
+- **Token 节约优化**:
+    - 验证现有逻辑已正确实现：未开启 Agent 时不会触发 LLM 调用。
+    - `enableExpressionAgent` 控制表情推理 LLM 调用，`enableLive2D` 控制 Motion Agent 触发。
+
+### 修复 (Fixed)
+- **Kotlin 编译错误修复**:
+    - `FloatingWindowChannelHandler.kt` 修复 `MethodCall` 类型错误，添加缺失导入 `import io.flutter.plugin.common.MethodCall`。
+    - 所有方法签名从 `MethodChannel.MethodCallHandler.MethodCall` 更正为 `MethodCall`。
+
+### ⚠️ 已知限制 (Known Limitations)
+
+**不推荐在 Android 端使用此项目** 
+
+原因：
+- 项目逻辑复杂度高，涉及多个交互系统（表情系统、Live2D、音频服务、Agent 协调）。
+- AI 编程在完整理解架构设计上存在困难，导致重复创建已有功能并频繁修改接口变量。
+- 当前已产生多项由 AI 造成的逻辑问题，正在人工逐一修复。
+- Android 平台特有问题（WebView HTTPS、悬浮窗权限、小屏幕适配）需要额外的架构调整。
+
+**建议用途**：
+- 桌面平台（Windows、Linux、macOS）是主要开发和测试目标。
+- Android 适配工作建议交由有完整项目上下文的人工开发者。
+- 如需在 Android 上使用，请耐心等待稳定版本发布。
+
+---
+
 ## [0.3.3-beta] - 2025-12-06
 
 ### 新增 (Added)

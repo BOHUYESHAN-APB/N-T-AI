@@ -807,6 +807,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
             child: CharacterDisplay(
               backendUrl: 'http://localhost:8000',
               expressionAgent: _brain.expressionAgent,
+              controller: _live2dController,
+              floatingUi: true,
             ),
           ),
       ],
@@ -1147,6 +1149,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     backendUrl: 'http://localhost:8000',
                     expressionAgent: _brain.expressionAgent,
                     controller: _live2dController,
+                    floatingUi: true,
                   ),
                 ),
               ),

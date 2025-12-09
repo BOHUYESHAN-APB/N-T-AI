@@ -15,12 +15,14 @@ class CharacterDisplay extends StatefulWidget {
   final String backendUrl; // e.g. http://localhost:8000
   final ExpressionAgentService? expressionAgent;
   final Live2DController? controller;
+  final bool floatingUi;
 
   const CharacterDisplay({
     Key? key,
     required this.backendUrl,
     this.expressionAgent,
     this.controller,
+    this.floatingUi = false,
   }) : super(key: key);
 
   @override
@@ -79,7 +81,12 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
     final path = prefs.getString('settings.character.modelPath') ?? '';
     // 从设置读取调试开关，默认关闭
     final debug = prefs.getBool('settings.ui.live2dDebug') ?? false;
-    return '${widget.backendUrl}/static/live2d/index.html?model=$path&debug=$debug';
+    final params = <String>[];
+    params.add('model=${Uri.encodeComponent(path)}');
+    if (debug) params.add('debug=true');
+    if (widget.floatingUi) params.add('floating=true');
+    final query = params.join('&');
+    return '${widget.backendUrl}/static/live2d/index.html?$query';
   }
 
   Future<void> _initWebView() async {
