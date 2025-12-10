@@ -578,17 +578,131 @@ abstract class AppLocalizations {
   /// **'Show Live2D character in chat'**
   String get generalShowLive2D;
 
+  /// No description provided for @generalShowLive2DHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Live2D on Home'**
+  String get generalShowLive2DHome;
+
+  /// No description provided for @generalShowLive2DHomeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show Live2D character in main chat view'**
+  String get generalShowLive2DHomeSubtitle;
+
+  /// No description provided for @generalFloatingWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'Floating Window'**
+  String get generalFloatingWindow;
+
+  /// No description provided for @generalFloatingWindowSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Create independent window (OBS compatible)'**
+  String get generalFloatingWindowSubtitle;
+
+  /// No description provided for @generalLive2dDebug.
+  ///
+  /// In en, this message translates to:
+  /// **'Live2D Debug'**
+  String get generalLive2dDebug;
+
+  /// No description provided for @generalLive2dDebugSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show debug info on Live2D page'**
+  String get generalLive2dDebugSubtitle;
+
   /// No description provided for @generalExpressionSync.
   ///
   /// In en, this message translates to:
   /// **'Expression Sync'**
   String get generalExpressionSync;
 
-  /// No description provided for @generalSyncExpressions.
+  /// No description provided for @generalExpressionIsland.
   ///
   /// In en, this message translates to:
-  /// **'Sync facial expressions with AI'**
-  String get generalSyncExpressions;
+  /// **'Show Expression Island'**
+  String get generalExpressionIsland;
+
+  /// No description provided for @generalExpressionIslandSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show dynamic expression island (independent of Live2D)'**
+  String get generalExpressionIslandSubtitle;
+
+  /// No description provided for @generalVoiceInteraction.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice Interaction'**
+  String get generalVoiceInteraction;
+
+  /// No description provided for @generalEnableTts.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable TTS'**
+  String get generalEnableTts;
+
+  /// No description provided for @generalEnableTtsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow model to speak responses'**
+  String get generalEnableTtsSubtitle;
+
+  /// No description provided for @generalEnableStt.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable STT'**
+  String get generalEnableStt;
+
+  /// No description provided for @generalEnableSttSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow voice input'**
+  String get generalEnableSttSubtitle;
+
+  /// No description provided for @generalChatMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat Mode'**
+  String get generalChatMode;
+
+  /// No description provided for @generalChatModePersona.
+  ///
+  /// In en, this message translates to:
+  /// **'Persona'**
+  String get generalChatModePersona;
+
+  /// No description provided for @generalChatModePersonaDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Bubbles, natural conversation'**
+  String get generalChatModePersonaDesc;
+
+  /// No description provided for @generalChatModeStandard.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard'**
+  String get generalChatModeStandard;
+
+  /// No description provided for @generalChatModeStandardDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Strict Markdown, productivity'**
+  String get generalChatModeStandardDesc;
+
+  /// No description provided for @generalRestartOnboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart Onboarding'**
+  String get generalRestartOnboarding;
+
+  /// No description provided for @generalRestartOnboardingSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset assistant persona and system prompt'**
+  String get generalRestartOnboardingSubtitle;
 }
 
 class _AppLocalizationsDelegate

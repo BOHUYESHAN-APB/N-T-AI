@@ -357,26 +357,21 @@ class AiClient {
     // Determine effective voice
     String effectiveVoice = voice ?? 'alex';
     
-    // Fallback for SiliconFlow if no voice provided
-    if (base.contains('siliconflow') && (voice == null || voice.isEmpty)) {
+    // Fallback for SiliconFlow if no voice provided or needs adjustment
+    if (base.contains('siliconflow')) {
        // Check model to decide fallback
-       if (config.model.contains('fish-speech')) {
-         // Fish Speech usually requires a reference ID. 
-         // If none provided, we can't easily guess one that works for everyone without a public shared ID.
-         // However, we can try a known public ID if available, or just let it fail with a clearer error.
-         // Or, we can fallback to a different model if possible? No, that's too magic.
-         // Let's try to use a generic placeholder or just keep 'alex' which might fail but is standard.
-         // Actually, SiliconFlow's Fish Speech might accept 'speech_01' or similar if they have system presets.
-         // But based on docs, it often needs a specific ID.
-         // Let's assume the user wants us to "adjust it up" means handle the null case.
-         // We will try to use a default system voice if we can find one, otherwise we warn.
-         // For now, let's use a hardcoded fallback that might work for CosyVoice.
-       } else if (config.model.contains('CosyVoice')) {
-         // CosyVoice has presets like '中文女', '中文男', '日语男', '英文女' etc.
-         effectiveVoice = '中文女'; 
-       } else if (config.model.contains('MOSS') || config.model.contains('moss')) {
+       // if (config.model.contains('CosyVoice')) {
+       //   // CosyVoice requires 'model:voice' format usually.
+       //   // If voice is simple 'alex' or 'benjamin', prepend model.
+       //   if (effectiveVoice == 'alex' || !effectiveVoice.contains(':')) {
+       //      effectiveVoice = '${config.model}:$effectiveVoice';
+       //   }
+       // } else 
+       if (config.model.contains('MOSS') || config.model.contains('moss')) {
          // MOSS-TTSD-v0.5 defaults
-         effectiveVoice = 'fnlp/MOSS-TTSD-v0.5:anna';
+         if (effectiveVoice == 'alex' || !effectiveVoice.contains(':')) {
+             effectiveVoice = 'fnlp/MOSS-TTSD-v0.5:anna';
+         }
        }
     }
 

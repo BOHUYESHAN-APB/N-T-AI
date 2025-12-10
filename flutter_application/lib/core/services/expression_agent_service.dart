@@ -39,11 +39,15 @@ class ExpressionAgentService {
   }
 
   /// Request the Motion Agent to decide on an action
-  void requestMotion(String userText, String aiText) {
+  void requestMotion(String userText, String aiText, {List<Map<String, String>>? history}) {
     _motionStreamCtrl.add(MotionRequest(userText, aiText));
 
     // 同时广播到所有 Live2D 客户端
-    _broadcast.broadcastMotion(userText: userText, aiText: aiText);
+    _broadcast.broadcastMotion(
+      userText: userText, 
+      aiText: aiText,
+      history: history,
+    );
   }
 
   /// Apply expression from map (already parsed or raw JSON).

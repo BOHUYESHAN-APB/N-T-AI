@@ -49,6 +49,7 @@ class MotionRequest(BaseModel):
     ai_text: str
     emotion: str
     capabilities: Dict[str, List[str]] # {'motions': [], 'expressions': []}
+    history: Optional[List[Dict[str, str]]] = None # Context history
 
 class IdleRequest(BaseModel):
     emotion: str
@@ -68,6 +69,11 @@ class MotionBroadcastRequest(BaseModel):
     """动作请求广播"""
     userText: str
     aiText: str
+    history: Optional[List[Dict[str, str]]] = None
+
+class AudioBroadcastRequest(BaseModel):
+    """音频广播请求"""
+    audio: str # Base64 encoded audio
 
 # Initialize services
 # Note: In a real app, use dependency injection
@@ -78,16 +84,22 @@ motion_agent = MotionAgentService(llm_service)
 async def decide_motion(
     request: MotionRequest,
     api_key: Optional[str] = Header(None, alias="X-Motion-Api-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     base_url: Optional[str] = Header(None, alias="X-Motion-Base-Url"),
     model: Optional[str] = Header(None, alias="X-Motion-Model")
 ):
+    final_api_key = api_key
+    if not final_api_key and authorization and authorization.startswith("Bearer "):
+        final_api_key = authorization.replace("Bearer ", "")
+
     try:
         result = await motion_agent.decide_motion(
             user_text=request.user_text,
             ai_text=request.ai_text,
             emotion=request.emotion,
             capabilities=request.capabilities,
-            api_key=api_key,
+            history=request.history,
+            api_key=final_api_key,
             base_url=base_url,
             model=model
         )
@@ -99,14 +111,19 @@ async def decide_motion(
 async def decide_idle(
     request: IdleRequest,
     api_key: Optional[str] = Header(None, alias="X-Motion-Api-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
     base_url: Optional[str] = Header(None, alias="X-Motion-Base-Url"),
     model: Optional[str] = Header(None, alias="X-Motion-Model")
 ):
+    final_api_key = api_key
+    if not final_api_key and authorization and authorization.startswith("Bearer "):
+        final_api_key = authorization.replace("Bearer ", "")
+
     try:
         result = await motion_agent.decide_idle_motion(
             emotion=request.emotion,
             capabilities=request.capabilities,
-            api_key=api_key,
+            api_key=final_api_key,
             base_url=base_url,
             model=model
         )
@@ -131,12 +148,18 @@ async def live2d_websocket(websocket: WebSocket):
                 action = message.get('action')
                 if action == 'ping':
                     await websocket.send_text(json.dumps({"type": "pong"}))
+                else:
+                    print(f"[Live2D WS] Received message: {action}")
             except json.JSONDecodeError:
+                print(f"[Live2D WS] Invalid JSON received: {data}")
                 pass
-    except WebSocketDisconnect:
+    except WebSocketDisconnect as e:
+        print(f"[Live2D WS] Disconnect code: {e.code}, reason: {e.reason}")
         manager.disconnect(websocket)
     except Exception as e:
         print(f"[Live2D WS] Error: {e}")
+        import traceback
+        traceback.print_exc()
         manager.disconnect(websocket)
 
 # ========== 广播 HTTP 端点 ==========
@@ -161,16 +184,45 @@ async def broadcast_expression(request: ExpressionBroadcastRequest):
     return {"status": "ok", "clients": len(manager.active_connections)}
 
 @router.post("/broadcast/motion")
-async def broadcast_motion(request: MotionBroadcastRequest):
+async def broadcast_motion(
+    request: MotionBroadcastRequest,
+    api_key: Optional[str] = Header(None, alias="X-Motion-Api-Key"),
+    base_url: Optional[str] = Header(None, alias="X-Motion-Base-Url"),
+    model: Optional[str] = Header(None, alias="X-Motion-Model")
+):
     """
     广播动作请求到所有 Live2D 客户端
     客户端会调用 Motion Agent 决策
     """
+    data = {
+        "userText": request.userText,
+        "aiText": request.aiText,
+        "history": request.history or [],
+    }
+    
+    # 将配置信息透传给前端
+    if api_key:
+        data["apiKey"] = api_key
+    if base_url:
+        data["baseUrl"] = base_url
+    if model:
+        data["model"] = model
+        
     await manager.broadcast({
         "type": "motion_request",
+        "data": data
+    })
+    return {"status": "ok", "clients": len(manager.active_connections)}
+
+@router.post("/broadcast/audio")
+async def broadcast_audio(request: AudioBroadcastRequest):
+    """
+    广播音频数据到所有 Live2D 客户端用于口型同步和播放
+    """
+    await manager.broadcast({
+        "type": "audio",
         "data": {
-            "userText": request.userText,
-            "aiText": request.aiText,
+            "audio": request.audio
         }
     })
     return {"status": "ok", "clients": len(manager.active_connections)}

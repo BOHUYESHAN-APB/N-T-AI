@@ -77,6 +77,12 @@ Our primary goal is to provide a complete, high-performance AI experience on mob
 - **Local LLM**: Support running small LLMs (e.g., Llama-3-8B-Quantized) directly on Android via MLC-LLM or MediaPipe.
 - **Result**: A fully offline-capable, privacy-focused AI companion app.
 
+### 🔮 Future Research: Autonomous Motion & Cognitive Model
+> **Research Goal**: We are aiming to replicate **Neuro-sama's** autonomous behavior system, moving away from rigid presets to a fully model-driven approach.
+> *   **Motion System**: Developing a non-deterministic 3D/Live2D motion control system using visual feedback loops (2nd/3rd perspective models).
+> *   **Cognitive Architecture**: Researching novel architectures beyond traditional Transformers/Diffusion for behavioral modeling. We are currently curating a self-supervised dataset to train a specialized model that achieves higher personality consistency and organic interaction.
+> *   **Timeline**: This is a long-term R&D phase (~3 months) involving experimental architecture design.
+
 ---
 
 ## 🚀 Core Features
@@ -327,7 +333,7 @@ If no one is available to assist, I will handle this myself after purchasing an 
 - [ ] **Local Model Adaptation**:
     - Create "One-Click Start Packages" for open-source STT/TTS models (e.g., CosyVoice, SenseVoice) which are complex to configure compared to standard LLMs.
     - Distribute these packages via cloud storage for easy deployment.
-- [ ] **Enhanced Live2D**: Improve character expressions, motions, and emotional feedback loops.
+- [x] **Enhanced Live2D**: Optimized character expressions, motions, and emotional feedback loops, including smooth animation transitions, rich natural micro-motions, smart parameter overlay system, and model loading fallback mechanism.
 - [ ] **3D Engine**: Implement Babylon.js renderer for 3D avatars (Havok Physics) - *In Development*.
 
 ### Phase 3: General AI Agent & Advanced Capabilities
@@ -394,8 +400,8 @@ flutter build apk --release
 
 This project stands on the shoulders of giants. We gratefully acknowledge the following open-source projects and tools:
 
-*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**: 
-    *   Provided inspiration for **Live2D interaction logic** and **WebRTC-based screen sharing/audio processing** modules.
+*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**:
+    *   Thanks for the valuable inspiration for **Live2D interaction logic** (including smart parameter overlay and model loading fallback mechanism) and **WebRTC screen sharing/audio processing** modules.
     *   *License*: MIT License.
 *   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**:
     *   Providing architectural inspiration for our upcoming **3D rendering engine** (currently in progress).

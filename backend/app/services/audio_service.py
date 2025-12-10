@@ -36,9 +36,14 @@ class AudioService:
                 file=(filename, file_obj)
             )
             return transcript.text
+        except openai.APIStatusError as e:
+            print(f"[AudioService] STT API Error: {e.status_code} - {e.response.text}")
+            raise e
         except Exception as e:
             print(f"[AudioService] STT Error: {e}")
             raise e
+        finally:
+            await client.close()
 
     async def generate_speech(self, 
                               text: str, 
@@ -53,6 +58,9 @@ class AudioService:
         """
         client = self._get_client(api_key, base_url)
         
+        print(f"[AudioService] Calling TTS API: {base_url}/audio/speech")
+        print(f"[AudioService] Params: model={model}, voice={voice}, speed={speed}, input_len={len(text)}")
+
         try:
             # Note: SiliconFlow might use 'voice' parameter for voice style ID
             response = await client.audio.speech.create(
@@ -63,9 +71,14 @@ class AudioService:
                 speed=speed
             )
             return response.content
+        except openai.APIStatusError as e:
+            print(f"[AudioService] TTS API Error: {e.status_code} - {e.response.text}")
+            raise e
         except Exception as e:
             print(f"[AudioService] TTS Error: {e}")
             raise e
+        finally:
+            await client.close()
 
     # --- SiliconFlow Specific Custom Endpoints ---
 

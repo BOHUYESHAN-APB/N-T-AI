@@ -609,8 +609,9 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setLive2dDebug(bool v) async {
+    // Deprecated, do nothing or keep internal state if needed
     _settings = _settings.copyWith(live2dDebug: v);
-    await _prefs.setBool(_kLive2dDebug, v);
+    // await _prefs.setBool(_kLive2dDebug, v); // No longer persisting
     notifyListeners();
   }
 
@@ -1249,4 +1250,6 @@ class SettingsController extends ChangeNotifier {
     await addOrUpdateProvider(provider.copyWith(meta: meta));
     return uri;
   }
+
+
 }

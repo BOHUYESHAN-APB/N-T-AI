@@ -2761,21 +2761,26 @@ window.addEventListener("load", ready);
             }
             
             externalSmoothedMouthOpen += (targetMouthOpen - externalSmoothedMouthOpen) * smoothingFactor;
-            externalSmoothedMouthForm += (targetMouthForm - externalSmoothedMouthForm) * smoothingFactor * 0.5;
+            // Disable ParamMouthForm override to allow Motion Agent to control mouth shape (e.g. Sad/Happy)
+            // externalSmoothedMouthForm += (targetMouthForm - externalSmoothedMouthForm) * smoothingFactor * 0.5;
             
             externalSmoothedMouthOpen = Math.min(1, Math.max(0, externalSmoothedMouthOpen));
-            externalSmoothedMouthForm = Math.min(1, Math.max(-1, externalSmoothedMouthForm));
+            // externalSmoothedMouthForm = Math.min(1, Math.max(-1, externalSmoothedMouthForm));
             
             if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
                 window.LanLan1.setMouth(externalSmoothedMouthOpen);
             }
             
+            /* 
+            // Disable aggressive ParamMouthForm overwrite. 
+            // This prevents the lip-sync from canceling out the "Sad" (-1) or "Happy" (1) mouth forms set by the Motion Agent.
             if (window.LanLan1?.live2dModel?.internalModel?.coreModel) {
                 try {
                     window.LanLan1.live2dModel.internalModel.coreModel
                         .setParameterValueById('ParamMouthForm', externalSmoothedMouthForm);
                 } catch (_) {}
             }
+            */
             
             externalAnimationFrameId = requestAnimationFrame(animate);
         }

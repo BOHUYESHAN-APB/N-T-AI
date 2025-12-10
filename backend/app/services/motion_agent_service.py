@@ -93,6 +93,27 @@ ACTION_TRIGGERS = {
         'expression': None,
         'parameters': {}
     },
+    # 寻找/观察
+    'search': {
+        'keywords': ['看看', '找找', 'look around', 'search', 'where', 'finding', '观察'],
+        'motion': 'Search',
+        'expression': None,
+        'parameters': {}
+    },
+    # 左右摇摆
+    'sway': {
+        'keywords': ['摇摆', '晃动', 'sway', 'shake body', '晃晃'],
+        'motion': 'Sway',
+        'expression': None,
+        'parameters': {}
+    },
+    # 鼓起脸颊
+    'puff_cheeks': {
+        'keywords': ['鼓脸', '鼓起脸颊', 'puff cheeks', 'pout cheeks', '卖萌'],
+        'motion': 'PuffCheeks',
+        'expression': None,
+        'parameters': {}
+    },
 }
 
 class MotionAgentService:
@@ -172,6 +193,7 @@ class MotionAgentService:
         return params
 
     async def decide_motion(self, user_text: str, ai_text: str, emotion: str, capabilities: dict, 
+                          history: list = None,
                           api_key: str = None, base_url: str = None, model: str = None) -> dict:
         """
         Decides the best motion and expression based on context using an LLM Agent.
@@ -181,6 +203,7 @@ class MotionAgentService:
             ai_text: What the AI replied.
             emotion: The current emotion tag (e.g., 'happy', 'sad').
             capabilities: A dict containing 'motions' (list) and 'expressions' (list).
+            history: Optional list of conversation history [{'role': 'user', 'content': '...'}, ...].
             api_key: Optional API Key for the LLM.
             base_url: Optional Base URL for the LLM.
             model: Optional Model name for the LLM.
@@ -233,8 +256,16 @@ class MotionAgentService:
             direct_motion = "Sleepy"
         elif "开心" in user_text_lower or "happy" in user_text_lower or "跳" in user_text_lower:
             direct_motion = "HappyBounce"
+        elif "摇摆" in user_text_lower or "sway" in user_text_lower:
+            direct_motion = "Sway"
+        elif "鼓脸" in user_text_lower or "puff cheeks" in user_text_lower:
+            direct_motion = "PuffCheeks"
         
         # 视线方向
+        elif "左看看" in user_text_lower and "右看看" in user_text_lower:
+             direct_motion = "Search"
+        elif "look around" in user_text_lower:
+             direct_motion = "Search"
         elif "左看" in user_text_lower or "look left" in user_text_lower:
             direct_look_at = {"x": -1.0, "y": 0.0}
             direct_parameters = {"ParamAngleX": -30.0, "ParamEyeBallX": -1.0}
@@ -310,12 +341,31 @@ class MotionAgentService:
         motions_str = ", ".join(motions) if motions else "None (Generic motions only)"
         expressions_str = ", ".join(expressions) if expressions else "None (Generic expressions only)"
 
+        # Process history for context
+        history_str = ""
+        if history:
+            # Take last 5 turns to keep context relevant but concise
+            recent_history = history[-10:] 
+            history_lines = []
+            for msg in recent_history:
+                role = "User" if msg.get('role') == 'user' else "Character"
+                content = msg.get('content', '')
+                # Truncate long messages
+                if len(content) > 50:
+                    content = content[:50] + "..."
+                history_lines.append(f"{role}: {content}")
+            history_str = "\n".join(history_lines)
+
         prompt = f"""You are the Motion Director for a lively, expressive Live2D character.
 Your job is to make the character feel ALIVE and ENGAGING through motions, expressions, and body language.
 
 **BE PROACTIVE** - Always choose meaningful actions. A character that just stands still is boring!
 
 Context:
+Conversation History:
+{history_str}
+
+Current Turn:
 User said: "{user_text}"
 Character replied: "{ai_text}"
 Current Emotion: "{emotion}"
@@ -324,7 +374,7 @@ Available Motions: [{motions_str}]
 Available Expressions: [{expressions_str}]
 
 Standard Actions (Use if no specific file matches):
-- Procedural Motions: [Wink, CuteWink, ShyBlush, HeadTilt, Giggle, Curious, Nod, HeadShake, ThinkingPose, Surprised, HappyBounce, Pout, Sleepy]
+- Procedural Motions: [Wink, CuteWink, ShyBlush, HeadTilt, Giggle, Curious, Nod, HeadShake, ThinkingPose, Surprised, HappyBounce, Pout, Sleepy, Search, Sway, PuffCheeks]
 - Expressions: [Happy, Sad, Angry, Surprise, Shy, Thinking, Smug, Worried, Excited, Relaxed]
 
 Motion Descriptions:
@@ -341,6 +391,9 @@ Motion Descriptions:
 - HappyBounce: 开心跳跃 + 笑脸 + 小幅度上下跳动
 - Pout: 嘘嘴/不满 + 略微转头
 - Sleepy: 困倦 + 缓慢眨眼 + 低头
+- Search: 左看看右看看 (用于寻找、观察、不知所措)
+- Sway: 左右摇摆身体 (用于开心、悠闲、撒娇、得意)
+- PuffCheeks: 鼓起脸颊 (用于卖萌、生气、调皮)
 
 Live2D Parameters (for fine-grained control, ALWAYS use some for natural movement):
 - Head: ParamAngleX (-30~30), ParamAngleY (-30~30), ParamAngleZ (-30~30)

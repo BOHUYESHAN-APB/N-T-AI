@@ -11,9 +11,15 @@ import 'settings/settings_scope.dart';
 import 'licenses/register_licenses.dart';
 import 'services/logger_service.dart';
 import 'services/live2d_broadcast_service.dart';
+import 'services/diagnostics_service.dart';
 import 'utils/http_overrides.dart';
 
-Future<void> main() async {
+import 'package:desktop_webview_window/desktop_webview_window.dart';
+
+Future<void> main(List<String> args) async {
+  if (runWebViewTitleBarWidget(args)) {
+    return;
+  }
   WidgetsFlutterBinding.ensureInitialized();
   
   // Allow self-signed certificates for local development/usage
@@ -30,6 +36,10 @@ Future<void> main() async {
 
   final controller = SettingsController();
   await controller.load();
+  
+  // Run Diagnostics
+  await DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
+
   // Propagate configured backend URL to services that need it
   try {
     Live2DBroadcastService().setBackendUrl(controller.settings.pythonBackendUrl);

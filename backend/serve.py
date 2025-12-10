@@ -10,6 +10,10 @@ This script will generate certs at the configured paths if they don't exist.
 import os
 import sys
 import logging
+import warnings
+# Suppress websockets deprecation warning
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="remove second argument of ws_handler")
+
 from datetime import datetime, timedelta
 
 from app.core.config import settings

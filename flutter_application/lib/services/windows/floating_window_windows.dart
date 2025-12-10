@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -53,6 +55,27 @@ class FloatingWindowWindows implements FloatingWindowService {
       return; // 达到上限，不创建新窗口
     }
 
+    // Auto-select model if path is empty (consistent with CharacterDisplay)
+    if (modelPath.isEmpty) {
+      try {
+        final uri = Uri.parse('$backendUrl/v1/models/list');
+        final resp = await http.get(uri);
+        if (resp.statusCode == 200) {
+          final json = jsonDecode(resp.body);
+          final models = json['models'] as List;
+          if (models.isNotEmpty) {
+            final first = models.first;
+            modelPath = first['path'];
+            debugPrint('[FloatingWindowWindows] Auto-selected model: $modelPath');
+          } else {
+            debugPrint('[FloatingWindowWindows] No models found on backend.');
+          }
+        }
+      } catch (e) {
+        debugPrint('[FloatingWindowWindows] Failed to auto-select model: $e');
+      }
+    }
+
     try {
       // 如果当前实例已经存在浮窗，先关闭
       if (_webview != null) {
@@ -68,10 +91,10 @@ class FloatingWindowWindows implements FloatingWindowService {
         await prefs.setString('floating.window.modelPath', modelPath);
       }
 
-      // 构建 Live2D URL，从设置读取调试开关
-      final debug = prefs.getBool('settings.ui.live2dDebug') ?? false;
+      // 构建 Live2D URL，强制关闭调试模式
+      const debug = false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true';
+          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=true';
 
       // 创建独立 WebView 窗口（隐藏标题栏和工具栏，只显示纯 WebView 内容）
       _webview = await WebviewWindow.create(

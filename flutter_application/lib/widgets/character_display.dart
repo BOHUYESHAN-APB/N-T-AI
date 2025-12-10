@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -16,6 +17,7 @@ class CharacterDisplay extends StatefulWidget {
   final ExpressionAgentService? expressionAgent;
   final Live2DController? controller;
   final bool floatingUi;
+  final bool showControls;
 
   const CharacterDisplay({
     Key? key,
@@ -23,6 +25,7 @@ class CharacterDisplay extends StatefulWidget {
     this.expressionAgent,
     this.controller,
     this.floatingUi = false,
+    this.showControls = true,
   }) : super(key: key);
 
   @override
@@ -37,22 +40,18 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   final _windowsController = WebviewController();
   bool _isWindowsInitialized = false;
 
-  StreamSubscription? _expressionSub;
-  StreamSubscription? _motionSub;
+  // StreamSubscription? _expressionSub; // Removed
+  // StreamSubscription? _motionSub;     // Removed
 
   @override
   void initState() {
     super.initState();
     _initWebView();
 
-    if (widget.expressionAgent != null) {
-      _expressionSub = widget.expressionAgent!.stream.listen(
-        _onExpressionUpdate,
-      );
-      _motionSub = widget.expressionAgent!.motionStream.listen(
-        _onMotionRequest,
-      );
-    }
+    // NOTE: We no longer listen to streams here for local injection.
+    // Instead, we rely on the Unified WebSocket Broadcast (handled by ExpressionAgentService -> Backend -> WebSocket).
+    // This ensures consistent behavior across Sidebar, Mini Window, and Floating Window modes.
+    // However, we still need to inject the *initial* expression state once the view loads.
 
     // Attach controller
     if (widget.controller != null) {
@@ -64,8 +63,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
 
   @override
   void dispose() {
-    _expressionSub?.cancel();
-    _motionSub?.cancel();
+    // _expressionSub and _motionSub are removed
     if (widget.controller != null) {
       widget.controller!.detach();
     }
@@ -78,13 +76,38 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   Future<String> _getModelUrl() async {
     final prefs = await SharedPreferences.getInstance();
     // Default to empty if no model is selected. User must upload/select one.
-    final path = prefs.getString('settings.character.modelPath') ?? '';
-    // 从设置读取调试开关，默认关闭
-    final debug = prefs.getBool('settings.ui.live2dDebug') ?? false;
+    String path = prefs.getString('settings.character.modelPath') ?? '';
+    
+    // Auto-select if empty by fetching list from backend
+    if (path.isEmpty) {
+      try {
+        final uri = Uri.parse('${widget.backendUrl}/v1/models/list');
+        final resp = await http.get(uri);
+        if (resp.statusCode == 200) {
+          final json = jsonDecode(resp.body);
+          final models = json['models'] as List;
+          if (models.isNotEmpty) {
+            // Auto-pick the first one
+            final first = models.first;
+            path = first['path']; // e.g. /static/live2d/Name/file.model3.json
+            await prefs.setString('settings.character.modelPath', path);
+            print('[CharacterDisplay] Auto-selected model: $path');
+          } else {
+             print('[CharacterDisplay] No models found on backend.');
+          }
+        }
+      } catch (e) {
+        print('[CharacterDisplay] Failed to auto-select model: $e');
+      }
+    }
+
+    // Force debug false
+    const debug = false;
     final params = <String>[];
     params.add('model=${Uri.encodeComponent(path)}');
     if (debug) params.add('debug=true');
     if (widget.floatingUi) params.add('floating=true');
+    params.add('controls=${widget.showControls}');
     final query = params.join('&');
     return '${widget.backendUrl}/static/live2d/index.html?$query';
   }
@@ -111,9 +134,21 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         setState(() {
           _isWindowsInitialized = true;
         });
+        // Inject initial expression state (sync with current mood)
+        _injectInitialExpression();
       }
     } catch (e) {
       print("Error initializing Windows WebView: $e");
+      if (mounted) {
+        // Show error in UI
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Live2D WebView Init Failed: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -125,6 +160,8 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         NavigationDelegate(
           onPageFinished: (String url) {
             print('Page finished loading: $url');
+            // Inject initial expression state
+            _injectInitialExpression();
           },
         ),
       )
@@ -133,7 +170,10 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   }
 
 
-  void _onExpressionUpdate(ExpressionData data) {
+  void _injectInitialExpression() {
+    if (widget.expressionAgent == null) return;
+    final data = widget.expressionAgent!.current;
+
     // Convert ExpressionData to JSON for JS
     final map = {
       'mouth': data.mouth,
@@ -148,19 +188,11 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
     final js =
         "if (window.live2dManager) window.live2dManager.updateParameters($jsonStr);";
 
+    print('[CharacterDisplay] Injecting initial expression: $jsonStr');
     _runJavascript(js);
   }
 
-  void _onMotionRequest(MotionRequest req) {
-    // Escape strings for JS
-    final u = jsonEncode(req.userText);
-    final a = jsonEncode(req.aiText);
-    final js =
-        "if (window.LanLan1 && window.LanLan1.askMotionAgent) window.LanLan1.askMotionAgent($u, $a);";
-
-    print('[CharacterDisplay] Triggering Motion Agent: $u');
-    _runJavascript(js);
-  }
+  // _onMotionRequest is removed as we use WebSocket broadcast now.
 
   void _runJavascript(String js) {
     if (Platform.isWindows && _isWindowsInitialized) {

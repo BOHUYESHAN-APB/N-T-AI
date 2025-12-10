@@ -36,14 +36,21 @@ class AudioManager {
         if (this.models.has(modelId)) return;
 
         // 先占个坑，真正的节点等 unlock 后再补
-        this.models.set(modelId, {
+        const modelState = {
             gain: null,
             analyser: null,
             queue: [],
             nextTime: 0,
             playingSources: new Set(),
             animationFrameId: null,
-        });
+        };
+        this.models.set(modelId, modelState);
+
+        // [Fix] If context is already unlocked, build nodes immediately!
+        if (this.ctx && this.ctx.state !== 'closed') {
+             const {gain, analyser} = this._buildNodes();
+             Object.assign(modelState, {gain, analyser});
+        }
     }
 
     /** 内部小工具：生成 Gain + Analyser */
@@ -72,7 +79,7 @@ class AudioManager {
         const m = this.models.get(modelId);
         m.schedulingLoop = true;
         const lookAhead = 4;               // 4 s 预调度
-        const fadeTime = 0.0; // 20ms淡入淡出时间
+        const fadeTime = 0.05; // 50ms淡入淡出时间 (Increased for smoothness)
         const loop = () => {
             const tNow = this.ctx.currentTime;
 
@@ -92,14 +99,24 @@ class AudioManager {
                 fadeGain.gain.setValueAtTime(1, m.nextTime + buffer.duration - fadeTime);
                 fadeGain.gain.linearRampToValueAtTime(0, m.nextTime + buffer.duration);
 
+                // Resolve Model Object
+                let model = null;
+                if (window.live2dManager && window.live2dManager.currentModel) {
+                    model = window.live2dManager.currentModel;
+                } else if (window[modelId] && window[modelId].live2dModel) {
+                    model = window[modelId].live2dModel; // Legacy fallback
+                }
+
                 // 口型
-                if (window[modelId] && window[modelId].live2dModel) {
-                    this.startLipSync(modelId, m.analyser); // 你已有的实现
+                if (model) {
+                    this.startLipSync(model, m.analyser, modelId);
                 }
 
                 src.onended = () => {
                     m.playingSources.delete(src);
-                    if (m.playingSources.size === 0) this.stopLipSync(modelId);
+                    if (m.playingSources.size === 0) {
+                        this.stopLipSync(model, modelId);
+                    }
                     this._updateDuck();          // 有可能释放优先级
                     this._checkFinished(modelId);
                 };
@@ -149,8 +166,9 @@ class AudioManager {
       }
 
     // 增强口型同步 - 支持中英文嘴型匹配
-    startLipSync(modelId, analyser) {
-        const model = window[modelId].live2dModel;
+    startLipSync(model, analyser, modelId) {
+        if (!model || !model.internalModel || !model.internalModel.coreModel) return;
+
         const frequencyData = new Uint8Array(analyser.frequencyBinCount);
         const timeData = new Uint8Array(analyser.fftSize);
         const sampleRate = this.ctx?.sampleRate || 44100;
@@ -163,23 +181,44 @@ class AudioManager {
         const minThreshold = 0.02;
 
         const animate = () => {
+            // Check if still playing
+            const m = this.models.get(modelId);
+            if (!m || m.playingSources.size === 0) return;
+
             analyser.getByteFrequencyData(frequencyData);
             analyser.getByteTimeDomainData(timeData);
             
             // RMS音量
-            let sum = 0;
-            for (let i = 0; i < timeData.length; i++) {
-                const val = (timeData[i] - 128) / 128;
-                sum += val * val;
-            }
-            const rms = Math.sqrt(sum / timeData.length);
-            
-            // 静音检测
+                let sum = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    const val = (timeData[i] - 128) / 128;
+                    sum += val * val;
+                }
+                const rms = Math.sqrt(sum / timeData.length);
+                
+                // Debug log for RMS and Lip Sync (throttled)
+                if (Math.random() < 0.01) {
+                    console.log(`[AudioLoader] RMS: ${rms.toFixed(4)}, SmoothedMouth: ${smoothedMouthOpen.toFixed(4)}`);
+                    try {
+                         // Check available parameters if possible or just log attempt
+                         // console.log('Setting ParamMouthOpenY to', smoothedMouthOpen);
+                    } catch(e) {}
+                }
+                
+                // 静音检测
             if (rms < minThreshold) {
                 smoothedMouthOpen = smoothedMouthOpen * 0.85;
                 if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
-                model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
-                this.models.get(modelId).animationFrameId = requestAnimationFrame(animate);
+                
+                if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
+                    window.live2dManager.setMouth(smoothedMouthOpen);
+                } else {
+                    try {
+                        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
+                    } catch(e) {}
+                }
+                
+                m.animationFrameId = requestAnimationFrame(animate);
                 return;
             }
             
@@ -213,13 +252,56 @@ class AudioManager {
             smoothedMouthOpen = Math.min(1, Math.max(0, smoothedMouthOpen));
             smoothedMouthForm = Math.min(1, Math.max(-1, smoothedMouthForm));
             
+            // [Feature] 说话时增加身体和头部摆动
+            // Add sway motion when speaking (RMS/MouthOpen driven)
+            // Use setSwayParams for Motion Stacking (Smart Overlay)
+            if (window.live2dManager && smoothedMouthOpen > 0.05) {
+                const t = Date.now() / 1000;
+                // Amplitude proportional to mouth opening (speech intensity)
+                const swayAmp = smoothedMouthOpen * 5.0; 
+                
+                // Calculate sway angles
+                const swayParams = {
+                    ParamAngleX: Math.sin(t * 3.5) * 3.0 * swayAmp, // Head shake (Left/Right)
+                    ParamAngleY: Math.sin(t * 2.0) * 2.0 * swayAmp, // Head nod (Up/Down)
+                    ParamAngleZ: Math.sin(t * 1.5) * 1.5 * swayAmp, // Head tilt
+                    ParamBodyAngleX: Math.sin(t * 1.0) * 2.0 * swayAmp  // Body sway
+                };
+
+                try {
+                    // Install core override if not already installed (for stacking support)
+                    if (window.live2dManager.installCoreOverride && !window.live2dManager._coreOverrideInstalled) {
+                        window.live2dManager.installCoreOverride();
+                    }
+                    
+                    if (typeof window.live2dManager.setSwayParams === 'function') {
+                        window.live2dManager.setSwayParams(swayParams);
+                    } else {
+                        // Fallback if live2dManager update not applied yet
+                        model.internalModel.coreModel.setParameterValueById('ParamAngleX', swayParams.ParamAngleX);
+                        model.internalModel.coreModel.setParameterValueById('ParamAngleY', swayParams.ParamAngleY);
+                        model.internalModel.coreModel.setParameterValueById('ParamAngleZ', swayParams.ParamAngleZ);
+                        model.internalModel.coreModel.setParameterValueById('ParamBodyAngleX', swayParams.ParamBodyAngleX);
+                    }
+                } catch (_) {}
+            } else {
+                // Clear sway if mouth closed
+                if (window.live2dManager && typeof window.live2dManager.setSwayParams === 'function') {
+                    window.live2dManager.setSwayParams({});
+                }
+            }
+
             // 设置参数
-            model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
             try {
+                if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
+                    window.live2dManager.setMouth(smoothedMouthOpen);
+                } else {
+                    model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
+                }
                 model.internalModel.coreModel.setParameterValueById('ParamMouthForm', smoothedMouthForm);
             } catch (_) {}
             
-            this.models.get(modelId).animationFrameId = requestAnimationFrame(animate);
+            m.animationFrameId = requestAnimationFrame(animate);
         }
 
         animate();
@@ -238,13 +320,23 @@ class AudioManager {
         return count > 0 ? sum / count : 0;
     }
 
-    stopLipSync(modelId) {
-        const model = window[modelId].live2dModel;
-        cancelAnimationFrame(this.models.get(modelId).animationFrameId);
+    stopLipSync(model, modelId) {
+        if (!model) return;
+        const m = this.models.get(modelId);
+        if (m && m.animationFrameId) {
+            cancelAnimationFrame(m.animationFrameId);
+        }
+        
         // 关闭嘴巴并重置嘴型
-        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
         try {
-            model.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
+            if (model.internalModel && model.internalModel.coreModel) {
+                if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
+                    window.live2dManager.setMouth(0);
+                } else {
+                    model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', 0);
+                }
+                model.internalModel.coreModel.setParameterValueById('ParamMouthForm', 0);
+            }
         } catch (_) {}
     }
 }
@@ -260,15 +352,53 @@ function unlockAudio() {
     }
 }
 
+/**
+ * Handle audio blob (support MP3/WAV/etc via decodeAudioData)
+ */
 function handleAudioBlobFor(id, blob, seq) {
-    blob.arrayBuffer().then(pcm => {
-        const int16 = new Int16Array(pcm);
-        const float32 = Float32Array.from(int16, v => v / 32768);
-        const sr = window.AM.ctx.sampleRate;
-        const audioBuf = window.AM.ctx.createBuffer(1, float32.length, sr);
-        audioBuf.copyToChannel(float32, 0);
-        window.AM.enqueue(id, audioBuf, seq);
+    blob.arrayBuffer().then(arrayBuffer => {
+        const ctx = window.AM.ensureCtx();
+        ctx.decodeAudioData(arrayBuffer).then(audioBuffer => {
+            window.AM.enqueue(id, audioBuffer, seq);
+        }).catch(e => {
+            console.error("Error decoding audio data:", e);
+             // Try to read as text to see if it's an error message
+             blob.text().then(text => {
+                  console.error("Content that failed to decode:", text.substring(0, 200));
+             });
+        });
     });
+}
+
+/**
+ * Play audio from Base64 string (called from Flutter via WebSocket)
+ */
+function playAudioBase64(base64String) {
+    try {
+        const binaryString = window.atob(base64String);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Dynamic Model Resolution
+        let modelId = 'default_model';
+        if (window.live2dManager && window.live2dManager.modelName) {
+            modelId = window.live2dManager.modelName;
+        }
+        
+        // Ensure registered
+        if (!window.AM.models.has(modelId)) {
+             window.AM.register(modelId);
+        }
+
+        console.log(`[Audio] Received audio for model: ${modelId}`);
+        handleAudioBlobFor(modelId, new Blob([bytes]), Date.now());
+        
+    } catch (e) {
+        console.error("[Audio] Failed to process base64 audio:", e);
+    }
 }
 
 window.AM = new AudioManager();

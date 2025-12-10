@@ -67,6 +67,7 @@ class _FloatingWindowEntryState extends State<FloatingWindowEntry> {
               child: CharacterDisplay(
                 backendUrl: widget.backendUrl,
                 expressionAgent: _expressionAgent,
+                showControls: true, // 明确启用悬浮工具栏
               ),
             ),
           ],

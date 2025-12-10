@@ -9,6 +9,7 @@ from app.services.expression_service import ExpressionService
 from app.services.search_service import SearchService
 from app.core.prompts import FIREFLY_PERSONA, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
 from app.core.logger import logger
+from fastapi import BackgroundTasks
 
 from typing import Union, List, Dict, Any
 import re
@@ -32,7 +33,8 @@ class ChatService:
                             enable_search: bool = False,
                             search_region: str = "zh-CN",
                             vision_config: Dict[str, Any] = None,
-                            temperature: float = 0.7) -> str:
+                            temperature: float = 0.7,
+                            background_tasks: BackgroundTasks = None) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
 
@@ -226,14 +228,19 @@ class ChatService:
             session.commit()
 
         # 7. Post-Processing (Learning & Mood Update)
-        await self._learn_from_interaction(text_content, user_id, target_api_key, target_base_url, target_model)
-        await self.mood_service.update_mood(
-            user_id, 
-            [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}],
-            target_api_key,
-            target_base_url,
-            target_model
-        )
+        if background_tasks:
+            background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
+            background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}], target_api_key, target_base_url, target_model)
+        else:
+            # Fallback for when no background_tasks context is provided
+            await self._learn_from_interaction(text_content, user_id, target_api_key, target_base_url, target_model)
+            await self.mood_service.update_mood(
+                user_id, 
+                [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}],
+                target_api_key,
+                target_base_url,
+                target_model
+            )
 
         return final_response_text
 

@@ -140,8 +140,7 @@ class FloatingWindowService : Service() {
             }
             format = PixelFormat.RGBA_8888
             // Removed FLAG_NOT_TOUCHABLE to allow touch events
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            flags = WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
             width = 600
             height = 800
             x = 100
@@ -154,7 +153,7 @@ class FloatingWindowService : Service() {
 
         // 加载 Web 页面
         val base = backendUrl.trimEnd('/')
-        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true"
+        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true&controls=true"
         webView?.loadUrl(url)
 
         // 设置触摸事件

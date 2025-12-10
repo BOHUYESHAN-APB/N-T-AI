@@ -83,14 +83,52 @@ class Live2DBroadcastService {
   Future<void> broadcastMotion({
     required String userText,
     required String aiText,
+    List<Map<String, String>>? history,
   }) async {
     if (!_enabled) return;
 
     try {
+      final headers = {'Content-Type': 'application/json'};
+      
+      // Attempt to load Motion Agent configuration
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final motionProviderId = prefs.getString('settings.agent.motionProviderId');
+        
+        if (motionProviderId != null && motionProviderId.isNotEmpty) {
+          final providersJson = prefs.getString('settings.ai.providers');
+          if (providersJson != null) {
+            final List<dynamic> providersList = jsonDecode(providersJson);
+            final providerData = providersList.firstWhere(
+              (p) => p['id'] == motionProviderId,
+              orElse: () => null,
+            );
+            
+            if (providerData != null) {
+              final apiKey = providerData['apiKey'] as String? ?? '';
+              final baseUrl = providerData['baseUrl'] as String? ?? '';
+              final model = providerData['model'] as String? ?? '';
+              
+              if (apiKey.isNotEmpty) headers['X-Motion-Api-Key'] = apiKey;
+              if (baseUrl.isNotEmpty) headers['X-Motion-Base-Url'] = baseUrl;
+              if (model.isNotEmpty) headers['X-Motion-Model'] = model;
+              
+              debugPrint('[Live2DBroadcast] Attached Motion Agent headers for model: $model');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[Live2DBroadcast] Failed to load Motion Agent config: $e');
+      }
+
       final response = await http.post(
         Uri.parse('$_backendUrl/api/live2d/broadcast/motion'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'userText': userText, 'aiText': aiText}),
+        headers: headers,
+        body: jsonEncode({
+          'userText': userText, 
+          'aiText': aiText,
+          'history': history ?? [],
+        }),
       );
 
       if (response.statusCode != 200) {

@@ -199,9 +199,17 @@ flutter build apk --release
 - [ ] **多模型架构**: 协调大参数量模型与多个小参数量专用模型/Agent 协同工作。
 
 ### 第四阶段：工具链与生态
-- [ ] **Open Code CLI 集成**:
+- [ ] **Open Code CLI 集成**：
     - 集成 [open-code-cli](https://opencode.ai/) (MIT License) 的自定义分支，提供类似 Claude Code CLI 的高级命令行能力 (跳过 MCP)。
-- [ ] **自定义 Agent**: 支持用户配置的 AI Agent 正确添加到项目中，实现更完善的 Function Call 和 Tools Use。
+- [ ] **自定义 Agent**：支持用户配置的 AI Agent 正确添加到项目中，实现更完善的 Function Call 和 Tools Use。
+
+---
+
+### 🔮 未来研究：自主运动与认知模型
+> **研究目标**：我们旨在复刻 **Neuro-sama** 的自主行为系统，从僵化的预设转向完全由模型驱动的方法。
+> *   **运动系统**：开发一个使用视觉反馈循环（第二/第三视角模型）的非确定性 3D/Live2D 运动控制系统。
+> *   **认知架构**：研究超越传统 Transformer/Diffusion 的新型架构，用于行为建模。我们目前正在整理一个自监督数据集，以训练一个专门模型，实现更高的人格一致性和有机交互。
+> *   **时间线**：这是一个长期研发阶段（约 3 个月），涉及实验性架构设计。
 
 ---
 
@@ -210,7 +218,7 @@ flutter build apk --release
 本项目站在巨人的肩膀上。我们衷心感谢以下开源项目和工具提供的灵感与支持：
 
 *   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**:
-    *   感谢其为 **Live2D 交互逻辑** 以及 **WebRTC 屏幕共享/音频处理** 模块提供的灵感。
+    *   感谢其为 **Live2D 交互逻辑**（包括智能参数叠加、模型加载回退机制）以及 **WebRTC 屏幕共享/音频处理** 模块提供的宝贵灵感。
     *   *许可证*: MIT License.
 *   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**:
     *   感谢其为我们正在制作中的 **3D 渲染引擎** 提供的架构灵感。

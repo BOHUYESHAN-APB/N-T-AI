@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
@@ -89,6 +90,38 @@ class BrainService {
       final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
       await tempFile.writeAsBytes(bytes);
       
+      // Broadcast to Live2D via Backend (for ALL windows including floating/mini)
+      // This is preferred over local AudioPlaybackBus because independent windows run in separate isolates.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+        // Normalize URL
+        final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
+        
+        print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
+        final response = await http.post(
+          Uri.parse('$urlStr/api/live2d/broadcast/audio'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'audio': base64Encode(bytes)}),
+        );
+        
+        if (response.statusCode == 200) {
+           final json = jsonDecode(response.body);
+           final clientCount = json['clients'] as int;
+           if (clientCount > 0) {
+             print('[BrainService] Audio broadcasted to $clientCount Live2D clients. Skipping local playback.');
+             return; // Success! Live2D will play it.
+           } else {
+             print('[BrainService] No Live2D clients connected. Falling back to local playback.');
+           }
+        } else {
+          print('[BrainService] Audio broadcast failed: ${response.statusCode}');
+        }
+      } catch (e) {
+        print('[BrainService] Audio broadcast error: $e');
+      }
+
+      // Fallback: Local Playback if broadcast failed or no clients
       try {
         // Lazy initialize audio player to avoid startup crash when plugin isn't registered.
         _audioPlayer ??= AudioPlayer();
@@ -161,6 +194,24 @@ class BrainService {
     debugPrint("[BRAIN] Backend Enabled: $backendEnabled");
     debugPrint("[BRAIN] Provider Mode: ${providerConfig?.orchestrationMode}");
     debugPrint("[BRAIN] Selected Mode: ${isServerMode ? 'SERVER' : 'CLIENT'}");
+
+    // Early Motion Agent Trigger: Allow Motion Agent to perceive user input simultaneously/before Main Brain
+    // This supports the "Smart Motion Agent" architecture where the agent reacts to user input autonomously.
+    if (enableExpressionAgent) {
+      unawaited(() async {
+        try {
+          debugPrint("[BRAIN] Triggering early motion request for user input...");
+          // Send user message with empty AI response initially, plus context history
+          _expressionAgent.requestMotion(
+            userMessage, 
+            "", 
+            history: List.from(_context), // Pass copy of current history (excluding current msg)
+          );
+        } catch (e) {
+          debugPrint("[BRAIN] Early motion request failed: $e");
+        }
+      }());
+    }
 
     // 1. Add User Message to Context
     if (_context.isEmpty || _context.last['content'] != userMessage) {
@@ -261,6 +312,41 @@ class BrainService {
     systemPrompt = systemPrompt.replaceAll('{{USER_NICKNAME_SECTION}}', 
       userNickname.isNotEmpty ? "用户的昵称是：$userNickname。请在对话中自然地使用这个称呼。" : ""
     );
+
+    // Dynamic Capabilities Injection based on active avatar system
+    final showExpressionFace = prefs.getBool('settings.ui.showExpressionFace') ?? true;
+    final showLive2D = prefs.getBool('settings.ui.showLive2D') ?? false;
+    // Future: final showLive3D = prefs.getBool('settings.ui.showLive3D') ?? false;
+
+    String capabilitiesText = "";
+    if (showExpressionFace) {
+       capabilitiesText = """
+**表情系统限制**：
+*   你当前连接的是【简易表情系统】。
+*   你只能展示基本的静态表情（如开心、悲伤、生气、惊讶）。
+*   **请务必不要**描述复杂的身体动作（如“挥手”、“转圈”、“左右看”），因为你的形象无法执行这些动作。
+*   请专注于语言本身的表达。
+""";
+    } else if (showLive2D) {
+       capabilitiesText = """
+**Live2D 形象能力**：
+*   你当前拥有一个灵动的【Live2D 形象】。
+*   支持的动作：点头、摇头、歪头、眨眼、以及丰富的面部表情（开心、悲伤、生气、惊讶等）。
+*   **高阶动作**：你可以尝试描述“左看看右看看”（观察周围）、“叹气”、“害羞”等。
+*   **物理限制**：虽然你可以动，但你无法在空间中移动（如“走到你面前”），也无法与现实物体交互（如“拿起杯子”），**且无法做出复杂的手势**（如“比耶”、“点赞”）。请避免描述此类不可能的动作。
+*   Motion Agent 会实时分析你的回复并驱动模型做出动作，你只需自然地在括号中描述动作即可，例如“(歪头思考) 嗯，让我想想...”。
+""";
+    } else {
+       // Default/Text Only or 3D placeholder
+       capabilitiesText = """
+**形象状态**：
+*   你当前处于纯文本模式或未连接可视化形象。
+*   请主要通过文字内容来表达你的情感。
+""";
+    }
+    
+    systemPrompt = systemPrompt.replaceAll('{{CAPABILITIES_SECTION}}', capabilitiesText);
+
     // Enforce strict output format: do NOT output JSON, code fences, or structured data.
     systemPrompt += '\n\n重要：请不要在任何情况下输出 JSON、代码块、或任何机器可解析的结构化数据（例如使用 ``` 或 { }). 仅以自然语言完整回答。不要包含示例 JSON 或带有字段的代码块。';
     if (memoryContext.isNotEmpty) {

@@ -85,10 +85,17 @@ class _FireflyScreenState extends State<FireflyScreen> {
     super.didChangeDependencies();
     // Check floating window setting and update accordingly
     final settings = SettingsScope.of(context).settings;
-    _updateFloatingWindow(settings.enableFloatingWindow);
+    _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
+    
+    // Unify Broadcast Logic: Enable if ANY Live2D mode is active
+    // This ensures Sidebar and Mini Window also receive WebSocket events
+    final anyLive2D = settings.enableFloatingWindow || 
+                      settings.showLive2D || 
+                      settings.showLive2DMiniWindow;
+    _brain.expressionAgent.setBroadcastEnabled(anyLive2D);
   }
 
-  Future<void> _updateFloatingWindow(bool enabled) async {
+  Future<void> _updateFloatingWindow(bool enabled, String backendUrl) async {
     if (enabled == _floatingWindowEnabled) return;
     _floatingWindowEnabled = enabled;
 
@@ -105,7 +112,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         final modelPath = prefs.getString('settings.character.modelPath') ?? '';
 
         _floatingWindowService ??= FloatingWindowServiceFactory.getInstance(
-          backendUrl: 'http://localhost:8000',
+          backendUrl: backendUrl,
         );
         await _floatingWindowService!.initialize();
         await _floatingWindowService!.createFloatingWindow(
@@ -805,10 +812,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
               ),
             ),
             child: CharacterDisplay(
-              backendUrl: 'http://localhost:8000',
+              backendUrl: settings.pythonBackendUrl,
               expressionAgent: _brain.expressionAgent,
               controller: _live2dController,
               floatingUi: true,
+              showControls: true, // 明确启用侧边栏的悬浮工具栏
             ),
           ),
       ],
@@ -864,27 +872,27 @@ class _FireflyScreenState extends State<FireflyScreen> {
           ),
         ),
         onSelected: (value) {
+          // Mutually exclusive logic: Disable all first
+          settingsController.setShowExpressionFace(false);
+          settingsController.setShowLive2D(false);
+          settingsController.setEnableFloatingWindow(false);
+          settingsController.setShowLive2DMiniWindow(false);
+
           switch (value) {
             case 'expression':
-              // 表情系统（灵动岛）
               settingsController.setShowExpressionFace(true);
               break;
             case 'sidebar':
-              // Live2D 侧边栏
               settingsController.setShowLive2D(true);
               break;
             case 'floating_native':
-              // 原生/独立悬浮窗
               settingsController.setEnableFloatingWindow(true);
               break;
             case 'floating_mini':
-              // 内置的小窗（应用内右上小窗）
               settingsController.setShowLive2DMiniWindow(true);
               break;
             case 'hide':
-              settingsController.setShowLive2D(false);
-              settingsController.setEnableFloatingWindow(false);
-              settingsController.setShowExpressionFace(false);
+              // All disabled above
               break;
           }
         },
@@ -1146,10 +1154,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   width: width,
                   height: height,
                   child: CharacterDisplay(
-                    backendUrl: 'http://localhost:8000',
+                    backendUrl: settings.pythonBackendUrl,
                     expressionAgent: _brain.expressionAgent,
                     controller: _live2dController,
                     floatingUi: true,
+                    showControls: false,
                   ),
                 ),
               ),
@@ -1178,7 +1187,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             width: 400,
             height: 600,
             child: CharacterDisplay(
-              backendUrl: 'http://localhost:8000',
+              backendUrl: settings.pythonBackendUrl,
               expressionAgent: _brain.expressionAgent,
             ),
           ),
@@ -1534,6 +1543,23 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   ),
                 );
               }).toList(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: IconButton(
+                  icon: Icon(
+                    settings.enableTts
+                        ? Icons.record_voice_over
+                        : Icons.voice_over_off,
+                  ),
+                  tooltip: settings.enableTts ? 'TTS On' : 'TTS Off',
+                  onPressed: () {
+                    settingsController.setEnableTts(!settings.enableTts);
+                  },
+                  color: settings.enableTts
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+              ),
               const SizedBox(width: 4),
               IconButton(
                 icon: Icon(

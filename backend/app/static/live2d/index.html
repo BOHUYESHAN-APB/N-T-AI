@@ -63,6 +63,9 @@
     <!-- Load pixi-live2d-display v0.5.0-ls-6 (RaSan147 fork) -->
     <script src="/static/live2d/libs/pixi-live2d-display-rasan.min.js"></script>
     
+    <!-- Audio Support -->
+    <script src="/static/live2d/audio-loader.js"></script>
+
     <script>
         // Debug: Check if PIXI.live2d was attached
         console.log('[PIXI Setup] PIXI.live2d available:', !!PIXI.live2d);
@@ -177,10 +180,25 @@
                 // 动作请求
                 console.log('[Live2D WS] Motion request:', data);
                 logToScreen(`Motion request: ${data.userText?.substring(0, 20)}...`);
+                
+                // Extract config
+                const config = {
+                    apiKey: data.apiKey,
+                    baseUrl: data.baseUrl,
+                    model: data.model,
+                    history: data.history // Pass history
+                };
+
                 if (window.LanLan1 && window.LanLan1.askMotionAgent) {
-                    window.LanLan1.askMotionAgent(data.userText, data.aiText);
+                    window.LanLan1.askMotionAgent(data.userText, data.aiText, config);
                 } else if (window.live2dManager && window.live2dManager.askMotionAgent) {
-                    window.live2dManager.askMotionAgent(data.userText, data.aiText);
+                    window.live2dManager.askMotionAgent(data.userText, data.aiText, config);
+                }
+            } else if (type === 'audio') {
+                // Audio data (base64)
+                console.log('[Live2D WS] Audio received, playing...');
+                if (window.playAudioBase64) {
+                    window.playAudioBase64(data.audio);
                 }
             }
         }

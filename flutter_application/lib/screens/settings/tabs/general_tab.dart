@@ -78,33 +78,25 @@ class GeneralTab extends StatelessWidget {
         ),
         SwitchListTile(
           secondary: const Icon(Icons.visibility),
-          title: const Text('主页显示 Live2D'),
-          subtitle: const Text('在主聊天界面显示 Live2D 形象'),
+          title: Text(l10n.generalShowLive2DHome),
+          subtitle: Text(l10n.generalShowLive2DHomeSubtitle),
           value: s.showLive2D,
           onChanged: s.enableLive2D ? (v) => controller.setShowLive2D(v) : null,
         ),
         SwitchListTile(
           secondary: const Icon(Icons.open_in_new),
-          title: const Text('独立悬浮窗显示'),
-          subtitle: const Text('创建独立窗口显示 Live2D（可被 OBS 捕获）'),
+          title: Text(l10n.generalFloatingWindow),
+          subtitle: Text(l10n.generalFloatingWindowSubtitle),
           value: s.enableFloatingWindow,
           onChanged: s.enableLive2D
               ? (v) => controller.setEnableFloatingWindow(v)
               : null,
         ),
-        SwitchListTile(
-          secondary: const Icon(Icons.bug_report_outlined),
-          title: const Text('Live2D 调试模式'),
-          subtitle: const Text('显示 Live2D 页面调试信息'),
-          value: s.live2dDebug,
-          onChanged: s.enableLive2D
-              ? (v) => controller.setLive2dDebug(v)
-              : null,
-        ),
+        // Live2D Debug removed as requested
         SwitchListTile(
           secondary: const Icon(Icons.face_retouching_natural),
-          title: Text(l10n.generalExpressionSync),
-          subtitle: const Text('显示动态表情岛（与 Live2D 独立）'),
+          title: Text(l10n.generalExpressionIsland),
+          subtitle: Text(l10n.generalExpressionIslandSubtitle),
           value: s.showExpressionFace && s.enableExpressionAgent,
           onChanged: (v) {
             controller.setShowExpressionFace(v);
@@ -113,18 +105,18 @@ class GeneralTab extends StatelessWidget {
         ),
 
         const SizedBox(height: 24),
-        _buildSectionHeader(context, '语音交互 (Voice Interaction)'),
+        _buildSectionHeader(context, l10n.generalVoiceInteraction),
         SwitchListTile(
           secondary: const Icon(Icons.record_voice_over),
-          title: const Text('启用语音合成 (TTS)'),
-          subtitle: const Text('允许模型朗读回复内容'),
+          title: Text(l10n.generalEnableTts),
+          subtitle: Text(l10n.generalEnableTtsSubtitle),
           value: s.enableTts,
           onChanged: (v) => controller.setEnableTts(v),
         ),
         SwitchListTile(
           secondary: const Icon(Icons.hearing),
-          title: const Text('启用语音识别 (STT)'),
-          subtitle: const Text('允许使用语音输入'),
+          title: Text(l10n.generalEnableStt),
+          subtitle: Text(l10n.generalEnableSttSubtitle),
           value: s.enableStt,
           onChanged: (v) => controller.setEnableStt(v),
         ),

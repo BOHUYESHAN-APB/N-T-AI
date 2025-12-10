@@ -253,8 +253,65 @@ class AppLocalizationsZh extends AppLocalizations {
   String get generalShowLive2D => '在聊天中显示 Live2D 角色';
 
   @override
+  String get generalShowLive2DHome => '主页显示 Live2D';
+
+  @override
+  String get generalShowLive2DHomeSubtitle => '在主聊天界面显示 Live2D 形象';
+
+  @override
+  String get generalFloatingWindow => '独立悬浮窗显示';
+
+  @override
+  String get generalFloatingWindowSubtitle => '创建独立窗口显示 Live2D（可被 OBS 捕获）';
+
+  @override
+  String get generalLive2dDebug => 'Live2D 调试模式';
+
+  @override
+  String get generalLive2dDebugSubtitle => '显示 Live2D 页面调试信息';
+
+  @override
   String get generalExpressionSync => '表情同步';
 
   @override
-  String get generalSyncExpressions => '与 AI 同步面部表情';
+  String get generalExpressionIsland => '显示动态表情岛';
+
+  @override
+  String get generalExpressionIslandSubtitle => '显示动态表情岛（与 Live2D 独立）';
+
+  @override
+  String get generalVoiceInteraction => '语音交互 (Voice Interaction)';
+
+  @override
+  String get generalEnableTts => '启用语音合成 (TTS)';
+
+  @override
+  String get generalEnableTtsSubtitle => '允许模型朗读回复内容';
+
+  @override
+  String get generalEnableStt => '启用语音识别 (STT)';
+
+  @override
+  String get generalEnableSttSubtitle => '允许使用语音输入';
+
+  @override
+  String get generalChatMode => '聊天模式 (Chat Mode)';
+
+  @override
+  String get generalChatModePersona => '拟人 (Persona)';
+
+  @override
+  String get generalChatModePersonaDesc => '分段气泡，自然对话';
+
+  @override
+  String get generalChatModeStandard => '标准 (Standard)';
+
+  @override
+  String get generalChatModeStandardDesc => '严格Markdown，生产力';
+
+  @override
+  String get generalRestartOnboarding => '重新运行向导';
+
+  @override
+  String get generalRestartOnboardingSubtitle => '重置助手人设与系统提示词';
 }

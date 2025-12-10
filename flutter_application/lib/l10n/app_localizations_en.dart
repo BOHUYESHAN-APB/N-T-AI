@@ -254,8 +254,69 @@ class AppLocalizationsEn extends AppLocalizations {
   String get generalShowLive2D => 'Show Live2D character in chat';
 
   @override
+  String get generalShowLive2DHome => 'Show Live2D on Home';
+
+  @override
+  String get generalShowLive2DHomeSubtitle =>
+      'Show Live2D character in main chat view';
+
+  @override
+  String get generalFloatingWindow => 'Floating Window';
+
+  @override
+  String get generalFloatingWindowSubtitle =>
+      'Create independent window (OBS compatible)';
+
+  @override
+  String get generalLive2dDebug => 'Live2D Debug';
+
+  @override
+  String get generalLive2dDebugSubtitle => 'Show debug info on Live2D page';
+
+  @override
   String get generalExpressionSync => 'Expression Sync';
 
   @override
-  String get generalSyncExpressions => 'Sync facial expressions with AI';
+  String get generalExpressionIsland => 'Show Expression Island';
+
+  @override
+  String get generalExpressionIslandSubtitle =>
+      'Show dynamic expression island (independent of Live2D)';
+
+  @override
+  String get generalVoiceInteraction => 'Voice Interaction';
+
+  @override
+  String get generalEnableTts => 'Enable TTS';
+
+  @override
+  String get generalEnableTtsSubtitle => 'Allow model to speak responses';
+
+  @override
+  String get generalEnableStt => 'Enable STT';
+
+  @override
+  String get generalEnableSttSubtitle => 'Allow voice input';
+
+  @override
+  String get generalChatMode => 'Chat Mode';
+
+  @override
+  String get generalChatModePersona => 'Persona';
+
+  @override
+  String get generalChatModePersonaDesc => 'Bubbles, natural conversation';
+
+  @override
+  String get generalChatModeStandard => 'Standard';
+
+  @override
+  String get generalChatModeStandardDesc => 'Strict Markdown, productivity';
+
+  @override
+  String get generalRestartOnboarding => 'Restart Onboarding';
+
+  @override
+  String get generalRestartOnboardingSubtitle =>
+      'Reset assistant persona and system prompt';
 }

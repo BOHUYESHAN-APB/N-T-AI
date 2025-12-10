@@ -39,6 +39,8 @@ class Live2DManager {
         this.mouseTrackingEnabled = false; // 默认关闭眼神跟随 (Default: false)
         this.onModelLoaded = null;
         this.onStatusUpdate = null;
+        this.idleMotionTimer = null; // 待机随机动作定时器
+        this.isIdleMotionPlaying = false; // 防止待机动作重叠
         this.modelName = null; // 记录当前模型目录名
         this.modelRootPath = null; // 记录当前模型根路径，如 /static/<modelName>
         
@@ -127,78 +129,193 @@ class Live2DManager {
             ...options
         });
 
-        // [Parameter Override System]
-        // Add a ticker to apply parameter overrides every frame
-        // this.parameterOverrides is initialized in constructor now
-        
-        // Use a VERY low priority ticker to ensure we override AFTER the internal motion update AND EyeBlink
-        // EyeBlink might be running at 0 or slightly lower. We go to -1000 to be safe.
-        const priority = -1000; 
-        const overrideFn = () => {
-            this._applyParameterOverrides();
-        };
-        
-        this.pixi_app.ticker.add(overrideFn, null, priority);
-        
-        // [Safety] Also try adding to shared ticker if it's different, just in case the model is updated there
-        try {
-            if (PIXI.Ticker.shared && PIXI.Ticker.shared !== this.pixi_app.ticker) {
-                 PIXI.Ticker.shared.add(overrideFn, null, priority);
-            }
-        } catch (e) {}
+        // [Updated] Removed old external ticker for parameter overrides.
+            // We now use installCoreOverride() which hooks into the model's internal update loop.
+            // This prevents "this._applyParameterOverrides is not a function" errors and provides better motion stacking.
+            console.log('[Live2D] PIXI Initialized. Ticker started:', this.pixi_app.ticker.started);
 
-        this.isInitialized = true;
-        return this.pixi_app;
-    }
-
-    // [Parameter Override System] Apply overrides every frame
-    _applyParameterOverrides() {
-        if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
-        if (!this.parameterOverrides) return;
-        
-        const core = this.currentModel.internalModel.coreModel;
-        const keys = Object.keys(this.parameterOverrides);
-        
-        if (keys.length === 0) {
-            // If no overrides, ensure EyeBlink is enabled (if we disabled it)
-            if (this.currentModel.internalModel.eyeBlink) {
-                // Try to re-enable if we can find a way, or just let it be.
-                // Usually it's always enabled unless we stop it.
-            }
-            return;
+            this.isInitialized = true;
+            return this.pixi_app;
         }
 
-        // [DEBUG] Log once per second if overrides are active
-        if (!this._lastOverrideLog || Date.now() - this._lastOverrideLog > 2000) {
-             // console.log('[Override] Active:', this.parameterOverrides);
-             this._lastOverrideLog = Date.now();
-        }
+    // [Parameter Override System] Apply overrides every frame - IMPROVED VERSION
+    // Combined "Smart Overlay" (Motion Stacking) and "Core Override" (Force Override)
+    installCoreOverride() {
+        if (!this.currentModel || !this.currentModel.internalModel) return;
 
-        // [Core Override System handles conflicts now]
-        // We no longer need to manually disable EyeBlink update because installCoreOverride()
-        // intercepts all parameter setting calls at the lowest level.
+        const internalModel = this.currentModel.internalModel;
+        const coreModel = internalModel.coreModel;
+        const motionManager = internalModel.motionManager;
 
-        keys.forEach(key => {
-            const value = this.parameterOverrides[key];
-            if (value !== null && value !== undefined) {
-                try {
-                    // Force set the parameter
-                    core.setParameterValueById(key, value);
-                    // Also try to update the internal model's parameter cache if it exists (pixi-live2d-display specific)
-                    if (this.currentModel.internalModel.parameters && this.currentModel.internalModel.parameters[key]) {
-                         this.currentModel.internalModel.parameters[key].update(value);
-                    }
-                    
-                    // [DEBUG] Log if we are overriding eyes
-                    if (key.includes('Eye') && Math.random() < 0.01) {
-                        console.log(`[Override] Setting ${key} to ${value}`);
-                    }
-                } catch (e) {
-                    // Suppress errors to avoid console spam in loop
-                }
-            }
+        if (!coreModel) return;
+
+        // Prevent double installation
+        if (this._coreOverrideInstalled) return;
+
+        console.log('[Live2D] Installing Core Override System for Motion Stacking');
+        
+        // Cache indices
+        const mouthIds = ['ParamMouthOpenY', 'ParamO'];
+        const mouthIndices = {};
+        mouthIds.forEach(id => {
+             try {
+                 const idx = coreModel.getParameterIndex(id);
+                 if (idx >= 0) mouthIndices[id] = idx;
+             } catch (_) {}
         });
+
+        // 1. Capture original update methods
+        const origMotionManagerUpdate = motionManager.update ? motionManager.update.bind(motionManager) : null;
+        const origCoreModelUpdate = coreModel.update ? coreModel.update.bind(coreModel) : null;
+
+        // 2. Override MotionManager.update (The "Smart Overlay" Layer)
+        // This runs AFTER motion has applied its values, but BEFORE physics/pose.
+        if (motionManager) {
+            motionManager.update = (...args) => {
+                try {
+                    if (!this.currentModel || !this.currentModel.internalModel) return;
+
+                    // A. Capture pre-update parameters
+                    const preUpdateParams = {};
+                    // Capture audio sway params
+                    if (this.audioSwayParams) {
+                        for (const key in this.audioSwayParams) {
+                            try {
+                                const idx = coreModel.getParameterIndex(key);
+                                if (idx >= 0) preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
+                            } catch (_) {}
+                        }
+                    }
+                    // Capture general overrides
+                    if (this.parameterOverrides) {
+                         for (const key in this.parameterOverrides) {
+                            // Skip mouth/visibility
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = coreModel.getParameterIndex(key);
+                                if (idx >= 0) {
+                                    // Only capture if not already captured
+                                    if (preUpdateParams[key] === undefined) {
+                                        preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
+                                    }
+                                }
+                            } catch (_) {}
+                        }
+                    }
+
+                    // B. Run original motion update
+                    if (origMotionManagerUpdate) {
+                        try { origMotionManagerUpdate(...args); } catch (e) {}
+                    }
+
+                    // C. Apply Smart Overlay (Stacking)
+                    
+                    // 1. Apply Audio Sway Stacking
+                    if (this.audioSwayParams) {
+                        for (const [key, value] of Object.entries(this.audioSwayParams)) {
+                            try {
+                                const idx = coreModel.getParameterIndex(key);
+                                if (idx >= 0) {
+                                    const currentVal = coreModel.getParameterValueByIndex(idx);
+                                    
+                                    // Always stack sway (add to current)
+                                    // Logic: Sway is an OFFSET. So we always ADD it.
+                                    coreModel.setParameterValueByIndex(idx, currentVal + value);
+                                }
+                            } catch (_) {}
+                        }
+                    }
+
+                    // 2. Apply Parameter Overrides Stacking (Smart Overlay)
+                    if (this.parameterOverrides) {
+                        for (const [key, value] of Object.entries(this.parameterOverrides)) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            if (value === null) continue;
+
+                            try {
+                                const idx = coreModel.getParameterIndex(key);
+                                if (idx >= 0) {
+                                    const currentVal = coreModel.getParameterValueByIndex(idx);
+                                    const preVal = preUpdateParams[key] !== undefined ? preUpdateParams[key] : currentVal;
+                                    const defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
+                                    const offset = value - defaultVal; // Calculate desired offset from default
+
+                                    // If motion changed the value, we add our offset (stacking)
+                                    if (Math.abs(currentVal - preVal) > 0.001) {
+                                        coreModel.setParameterValueByIndex(idx, currentVal + offset);
+                                    } else {
+                                        // Motion didn't touch it, enforce our value
+                                        coreModel.setParameterValueByIndex(idx, value);
+                                    }
+                                }
+                            } catch (_) {}
+                        }
+                    }
+                } catch (err) {
+                    console.error('[Live2D] Error in MotionManager.update override:', err);
+                    // Fallback: try to run original update at least
+                    if (origMotionManagerUpdate) {
+                        try { origMotionManagerUpdate(...args); } catch (e) {}
+                    }
+                }
+            };
+        }
+
+        // 3. Override CoreModel.update (The "Force Override" Layer)
+        // This runs LAST, just before rendering. Good for Lip Sync.
+        coreModel.update = () => {
+            try {
+                // A. Force Lip Sync (Priority 1)
+                if (this.mouthValue > 0 || this.mouthOverrideActive) {
+                    for (const [id, idx] of Object.entries(mouthIndices)) {
+                         try { coreModel.setParameterValueByIndex(idx, this.mouthValue); } catch (_) {}
+                    }
+                }
+            } catch (e) {}
+
+            // C. Run original update
+            if (origCoreModelUpdate) {
+                try { origCoreModelUpdate(); } catch (e) { console.error(e); }
+            }
+        };
+
+        this._coreOverrideInstalled = true;
     }
+
+    // Set Audio Sway Parameters (for stacking)
+    setSwayParams(params) {
+        this.audioSwayParams = params; // { ParamAngleX: 0.5, ... }
+    }
+
+    // Set Mouth Value (0-1)
+    setMouth(value) {
+        this.mouthValue = Math.max(0, Math.min(1, Number(value) || 0));
+        this.mouthOverrideActive = true; // Flag to indicate we are actively controlling mouth
+    }
+
+    // [New] Set Parameter Override (for procedural stacking)
+    setParameterOverride(id, value) {
+        if (!this.parameterOverrides) this.parameterOverrides = {};
+        
+        // Model Compatibility Check: Only set if model supports it
+        if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel) {
+            try {
+                const idx = this.currentModel.internalModel.coreModel.getParameterIndex(id);
+                if (idx < 0) {
+                    // console.warn(`Model does not support parameter: ${id}`);
+                    return; // Skip unsupported parameters
+                }
+            } catch (e) { return; }
+        }
+        
+        this.parameterOverrides[id] = value;
+    }
+    
+    // [New] Clear Parameter Overrides
+    clearParameterOverrides() {
+        this.parameterOverrides = {};
+    }
+
 
     // 加载用户偏好
     async loadUserPreferences() {
@@ -246,6 +363,9 @@ class Live2DManager {
 
     // 清除expression到默认状态（使用官方API）
     clearExpression() {
+        // [New] Clear procedural overrides
+        this.clearParameterOverrides();
+
         if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.motionManager && this.currentModel.internalModel.motionManager.expressionManager) {
             try {
                 this.currentModel.internalModel.motionManager.expressionManager.stopAllExpressions();
@@ -260,6 +380,72 @@ class Live2DManager {
 
         // 如存在常驻表情，清除后立即重放常驻，保证不被清掉
         this.applyPersistentExpressionsNative();
+    }
+
+    // 程序化表情 fallback
+    playProceduralExpression(emotion) {
+        if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
+        
+        console.log(`应用程序化表情 (Stacked): ${emotion}`);
+        
+        // Clear previous overrides first to avoid mixing conflicting emotions?
+        // For now, let's just overwrite.
+        
+        const setParam = (id, value) => {
+            this.setParameterOverride(id, value);
+        };
+
+        switch(emotion.toLowerCase()) {
+            case 'sad':
+                setParam('ParamMouthForm', -0.8);
+                setParam('ParamBrowLY', -0.4);
+                setParam('ParamBrowRY', -0.4);
+                setParam('ParamEyeLOpen', 0.9);
+                setParam('ParamEyeROpen', 0.9);
+                setParam('ParamAngleZ', -2.0); // Slight tilt
+                break;
+            case 'happy':
+            case 'smile':
+                setParam('ParamMouthForm', 1.0);
+                setParam('ParamCheek', 0.5);
+                setParam('ParamEyeLOpen', 1.0);
+                setParam('ParamEyeROpen', 1.0);
+                break;
+            case 'angry':
+                setParam('ParamMouthForm', -0.5);
+                setParam('ParamBrowLY', -0.6);
+                setParam('ParamBrowRY', -0.6);
+                setParam('ParamBrowLAngle', 0.5);
+                setParam('ParamBrowRAngle', 0.5);
+                break;
+            case 'surprise':
+            case 'surprised':
+                setParam('ParamMouthOpenY', 0.4);
+                setParam('ParamEyeLOpen', 1.2);
+                setParam('ParamEyeROpen', 1.2);
+                setParam('ParamBrowLY', 0.3);
+                setParam('ParamBrowRY', 0.3);
+                break;
+            case 'shy':
+            case 'shyblush':
+                setParam('ParamCheek', 0.8);
+                setParam('ParamMouthForm', 0.3);
+                setParam('ParamEyeBallX', -0.3);
+                setParam('ParamEyeBallY', -0.2);
+                break;
+            case 'thinking':
+            case 'thinkingpose':
+                setParam('ParamBrowLY', 0.2);
+                setParam('ParamBrowRY', 0.2);
+                setParam('ParamMouthForm', -0.2);
+                // Maybe tilt head a bit?
+                setParam('ParamAngleZ', 5.0); 
+                break;
+            default:
+                // Neutral - clear overrides
+                this.clearParameterOverrides();
+                break;
+        }
     }
 
     // 播放表情（优先使用 EmotionMapping.expressions）
@@ -279,7 +465,8 @@ class Live2DManager {
         }
 
         if (!expressionFiles || expressionFiles.length === 0) {
-            console.log(`未找到情感 ${emotion} 对应的表情，将跳过表情播放`);
+            console.log(`未找到情感 ${emotion} 对应的表情文件，尝试程序化表情`);
+            this.playProceduralExpression(emotion);
             return;
         }
 
@@ -406,7 +593,13 @@ class Live2DManager {
 
     // 参数插值动画 helper
     tweenParameters(targetParams, duration, easingFunc = (t) => t) {
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
+            // Check cancellation token
+            if (this.cancelProceduralMotion) {
+                reject('Cancelled');
+                return;
+            }
+
             const startParams = {};
             const keys = Object.keys(targetParams);
             
@@ -424,8 +617,16 @@ class Live2DManager {
             });
 
             const startTime = performance.now();
+            let frameId = null;
 
             const animate = (currentTime) => {
+                // Check cancellation
+                if (this.cancelProceduralMotion) {
+                    cancelAnimationFrame(frameId);
+                    reject('Cancelled');
+                    return;
+                }
+
                 const elapsed = currentTime - startTime;
                 const progress = Math.min(elapsed / duration, 1);
                 const easedProgress = easingFunc(progress);
@@ -443,14 +644,14 @@ class Live2DManager {
                 this.applyParameters(currentFrameParams, true); // Silent update
 
                 if (progress < 1) {
-                    requestAnimationFrame(animate);
+                    frameId = requestAnimationFrame(animate);
                 } else {
                     // Ensure final state is applied exactly (handles nulls/releases)
                     this.applyParameters(targetParams, true);
                     resolve();
                 }
             };
-            requestAnimationFrame(animate);
+            frameId = requestAnimationFrame(animate);
         });
     }
 
@@ -461,256 +662,229 @@ class Live2DManager {
             return;
         }
 
+        // Cancel previous procedural motion & smooth release
+        this.cancelProceduralMotion = true;
+        await new Promise(r => setTimeout(r, 10));
+        this.cancelProceduralMotion = false;
+        
+        // Release existing overrides to prevent frozen state
+        if (this.parameterOverrides && Object.keys(this.parameterOverrides).length > 0) {
+             this.releaseParametersSmoothly(Object.keys(this.parameterOverrides), 300);
+        }
+
         const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
         const easeInCubic = t => t * t * t;
         const easeInOutQuad = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
-        // ========== 程序化动画库 ==========
+        try {
+            // ========== New Micro-Motions ==========
+            
+            if (emotion === 'SlightSmile' || emotion === 'Smile') {
+                await this.tweenParameters({
+                    'ParamMouthForm': 0.5, 'ParamAngleZ': 3.0, 'ParamEyeLOpen': 0.95, 'ParamEyeROpen': 0.95
+                }, 400, easeOutCubic);
+                await new Promise(r => setTimeout(r, 1500));
+                await this.releaseParametersSmoothly(['ParamMouthForm', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen'], 500);
+                return;
+            }
+
+            if (emotion === 'MicroBodySway') {
+                await this.tweenParameters({'ParamBodyAngleZ': 1.0}, 1000, easeInOutQuad);
+                await this.tweenParameters({'ParamBodyAngleZ': -1.0}, 1000, easeInOutQuad);
+                await this.tweenParameters({'ParamBodyAngleZ': 0.0}, 1000, easeInOutQuad);
+                await this.releaseParametersSmoothly(['ParamBodyAngleZ'], 1000);
+                return;
+            }
+
+            if (emotion === 'BreathSigh' || emotion === 'Sigh') {
+                await this.tweenParameters({'ParamBodyAngleY': 2.0, 'ParamAngleX': 2.0, 'ParamMouthForm': -0.3}, 800, easeOutCubic);
+                await new Promise(r => setTimeout(r, 200));
+                await this.tweenParameters({'ParamBodyAngleY': -2.0, 'ParamAngleX': -3.0, 'ParamMouthForm': 0.0}, 1200, easeOutCubic);
+                await new Promise(r => setTimeout(r, 500));
+                await this.releaseParametersSmoothly(['ParamBodyAngleY', 'ParamAngleX', 'ParamMouthForm'], 800);
+                return;
+            }
+
+            if (emotion === 'EyeTwitch') {
+                await this.tweenParameters({'ParamEyeLOpen': 0.0}, 50, easeOutCubic);
+                await this.tweenParameters({'ParamEyeLOpen': 1.0}, 50, easeInCubic);
+                await new Promise(r => setTimeout(r, 50));
+                await this.tweenParameters({'ParamEyeLOpen': 0.0}, 50, easeOutCubic);
+                await this.tweenParameters({'ParamEyeLOpen': 1.0}, 50, easeInCubic);
+                await this.releaseParametersSmoothly(['ParamEyeLOpen'], 200);
+                return;
+            }
+
+            // ========== 程序化动画库 ==========
         
         // [Wink] 歪头眨眼 + 微笑 + 脸红
         if (emotion === 'Wink') {
             console.log('[Motion] Triggering procedural Wink animation');
             const winkParams = {
-                'ParamEyeLOpen': 0.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleZ': 10.0,
-                'ParamMouthForm': 1.0,
-                'ParamCheek': 0.8
+                'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 1.0, 'ParamAngleZ': 10.0, 'ParamMouthForm': 1.0, 'ParamCheek': 0.8
             };
             await this.tweenParameters(winkParams, 200, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 400));
             const neutralParams = {
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleZ': 0.0,
-                'ParamMouthForm': 0.0,
-                'ParamCheek': 0.0
+                'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0, 'ParamAngleZ': 0.0, 'ParamMouthForm': 0.0, 'ParamCheek': 0.0
             };
             await this.tweenParameters(neutralParams, 200, easeInCubic);
-            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleZ': null, 'ParamMouthForm': null, 'ParamCheek': null}, true);
+            await this.releaseParametersSmoothly(['ParamEyeLOpen', 'ParamEyeROpen', 'ParamAngleZ', 'ParamMouthForm', 'ParamCheek'], 300);
             return;
         }
 
         // [CuteWink] 可爱眨眼 - 歪头 + 单眼闭 + 大笑脸 + 脸红
         if (emotion === 'CuteWink') {
             console.log('[Motion] Triggering procedural CuteWink animation');
-            // Phase 1: 歪头 + 闭眼 + 笑脸 + 脸红
             await this.tweenParameters({
-                'ParamEyeLOpen': 0.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleZ': 15.0,
-                'ParamAngleX': 8.0,
-                'ParamMouthForm': 1.0,
-                'ParamMouthOpenY': 0.2,
-                'ParamCheek': 1.0,
-                'ParamBrowLY': 0.3,
-                'ParamBrowRY': 0.3
+                'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 1.0, 'ParamAngleZ': 15.0, 'ParamAngleX': 8.0,
+                'ParamMouthForm': 1.0, 'ParamMouthOpenY': 0.2, 'ParamCheek': 1.0, 'ParamBrowLY': 0.3, 'ParamBrowRY': 0.3
             }, 250, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 500));
-            // Phase 2: 恢复
             await this.tweenParameters({
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleZ': 0.0,
-                'ParamAngleX': 0.0,
-                'ParamMouthForm': 0.3,
-                'ParamMouthOpenY': 0.0,
-                'ParamCheek': 0.3,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0
+                'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0, 'ParamAngleZ': 0.0, 'ParamAngleX': 0.0,
+                'ParamMouthForm': 0.3, 'ParamMouthOpenY': 0.0, 'ParamCheek': 0.3, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0
             }, 300, easeInCubic);
             await new Promise(resolve => setTimeout(resolve, 200));
-            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleZ': null, 'ParamAngleX': null, 'ParamMouthForm': null, 'ParamMouthOpenY': null, 'ParamCheek': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            await this.releaseParametersSmoothly(['ParamEyeLOpen', 'ParamEyeROpen', 'ParamAngleZ', 'ParamAngleX', 'ParamMouthForm', 'ParamMouthOpenY', 'ParamCheek', 'ParamBrowLY', 'ParamBrowRY'], 300);
             return;
         }
 
-        // [ShyBlush] 害羞脸红 - 低头 + 脸红 + 眼球往旁边看 + 微笑
+        // [ShyBlush] 害羞脸红
         if (emotion === 'ShyBlush') {
             console.log('[Motion] Triggering procedural ShyBlush animation');
             await this.tweenParameters({
-                'ParamAngleY': -12.0,
-                'ParamAngleZ': -8.0,
-                'ParamCheek': 1.0,
-                'ParamEyeBallX': -0.5,
-                'ParamEyeBallY': -0.2,
-                'ParamMouthForm': 0.4,
-                'ParamBrowLY': -0.2,
-                'ParamBrowRY': -0.2
+                'ParamAngleY': -12.0, 'ParamAngleZ': -8.0, 'ParamCheek': 1.0, 'ParamEyeBallX': -0.5, 'ParamEyeBallY': -0.2,
+                'ParamMouthForm': 0.4, 'ParamBrowLY': -0.2, 'ParamBrowRY': -0.2
             }, 400, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 800));
             await this.tweenParameters({
-                'ParamAngleY': 0.0,
-                'ParamAngleZ': 0.0,
-                'ParamCheek': 0.3,
-                'ParamEyeBallX': 0.0,
-                'ParamEyeBallY': 0.0,
-                'ParamMouthForm': 0.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0
+                'ParamAngleY': 0.0, 'ParamAngleZ': 0.0, 'ParamCheek': 0.3, 'ParamEyeBallX': 0.0, 'ParamEyeBallY': 0.0,
+                'ParamMouthForm': 0.0, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0
             }, 400, easeInCubic);
-            this.applyParameters({'ParamAngleY': null, 'ParamAngleZ': null, 'ParamCheek': null, 'ParamEyeBallX': null, 'ParamEyeBallY': null, 'ParamMouthForm': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            await this.releaseParametersSmoothly(['ParamAngleY', 'ParamAngleZ', 'ParamCheek', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthForm', 'ParamBrowLY', 'ParamBrowRY'], 400);
             return;
         }
 
-        // [HeadTilt] 歪头 - 好奇地歪头 + 睁大眼睛
+        // [HeadTilt] 歪头
         if (emotion === 'HeadTilt') {
             console.log('[Motion] Triggering procedural HeadTilt animation');
             const direction = Math.random() > 0.5 ? 1 : -1;
             await this.tweenParameters({
-                'ParamAngleZ': 12.0 * direction,
-                'ParamAngleX': 5.0 * direction,
-                'ParamEyeLOpen': 1.1,
-                'ParamEyeROpen': 1.1,
-                'ParamBrowLY': 0.4,
-                'ParamBrowRY': 0.4
-            }, 300, easeOutCubic);
-            await new Promise(resolve => setTimeout(resolve, 600));
+                'ParamAngleZ': 8.0 * direction, 'ParamAngleX': 3.0 * direction,
+                'ParamEyeLOpen': 1.1, 'ParamEyeROpen': 1.1, 'ParamBrowLY': 0.3, 'ParamBrowRY': 0.3
+            }, 600, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 800));
             await this.tweenParameters({
-                'ParamAngleZ': 0.0,
-                'ParamAngleX': 0.0,
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0
-            }, 300, easeInCubic);
-            this.applyParameters({'ParamAngleZ': null, 'ParamAngleX': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+                'ParamAngleZ': 0.0, 'ParamAngleX': 0.0,
+                'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0
+            }, 500, easeInCubic);
+            await this.releaseParametersSmoothly(['ParamAngleZ', 'ParamAngleX', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamBrowLY', 'ParamBrowRY'], 500);
             return;
         }
 
-        // [Giggle] 咯咯笑 - 笑脸 + 脸红 + 轻微摇动
+        // [Giggle] 咯咯笑
         if (emotion === 'Giggle') {
             console.log('[Motion] Triggering procedural Giggle animation');
-            // 笑脸 + 脸红
             await this.tweenParameters({
-                'ParamMouthForm': 1.0,
-                'ParamMouthOpenY': 0.3,
-                'ParamCheek': 0.7,
-                'ParamEyeLOpen': 0.8,
-                'ParamEyeROpen': 0.8
+                'ParamMouthForm': 1.0, 'ParamMouthOpenY': 0.3, 'ParamCheek': 0.7, 'ParamEyeLOpen': 0.8, 'ParamEyeROpen': 0.8
             }, 200, easeOutCubic);
-            // 轻微摇动 3 次
             for (let i = 0; i < 3; i++) {
                 await this.tweenParameters({'ParamAngleZ': 5.0, 'ParamAngleY': 3.0}, 100, easeInOutQuad);
                 await this.tweenParameters({'ParamAngleZ': -5.0, 'ParamAngleY': -3.0}, 100, easeInOutQuad);
             }
             await this.tweenParameters({
-                'ParamAngleZ': 0.0,
-                'ParamAngleY': 0.0,
-                'ParamMouthForm': 0.3,
-                'ParamMouthOpenY': 0.0,
-                'ParamCheek': 0.2,
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0
+                'ParamAngleZ': 0.0, 'ParamAngleY': 0.0, 'ParamMouthForm': 0.3, 'ParamMouthOpenY': 0.0, 'ParamCheek': 0.2, 'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0
             }, 300, easeInCubic);
-            this.applyParameters({'ParamAngleZ': null, 'ParamAngleY': null, 'ParamMouthForm': null, 'ParamMouthOpenY': null, 'ParamCheek': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null}, true);
+            await this.releaseParametersSmoothly(['ParamAngleZ', 'ParamAngleY', 'ParamMouthForm', 'ParamMouthOpenY', 'ParamCheek', 'ParamEyeLOpen', 'ParamEyeROpen'], 300);
             return;
         }
 
-        // [Curious] 好奇 - 歪头 + 睁大眼睛 + 扬眉
+        // [Curious] 好奇
         if (emotion === 'Curious') {
             console.log('[Motion] Triggering procedural Curious animation');
             await this.tweenParameters({
-                'ParamAngleZ': 10.0,
-                'ParamAngleY': 5.0,
-                'ParamEyeLOpen': 1.2,
-                'ParamEyeROpen': 1.2,
-                'ParamBrowLY': 0.5,
-                'ParamBrowRY': 0.5,
-                'ParamEyeBallY': 0.2
+                'ParamAngleZ': 10.0, 'ParamAngleY': 5.0, 'ParamEyeLOpen': 1.2, 'ParamEyeROpen': 1.2,
+                'ParamBrowLY': 0.5, 'ParamBrowRY': 0.5, 'ParamEyeBallY': 0.2
             }, 300, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 700));
             await this.tweenParameters({
-                'ParamAngleZ': 0.0,
-                'ParamAngleY': 0.0,
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0,
-                'ParamEyeBallY': 0.0
+                'ParamAngleZ': 0.0, 'ParamAngleY': 0.0, 'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0,
+                'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0, 'ParamEyeBallY': 0.0
             }, 300, easeInCubic);
-            this.applyParameters({'ParamAngleZ': null, 'ParamAngleY': null, 'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamEyeBallY': null}, true);
+            await this.releaseParametersSmoothly(['ParamAngleZ', 'ParamAngleY', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamBrowLY', 'ParamBrowRY', 'ParamEyeBallY'], 300);
             return;
         }
 
-        // [Nod] 点头 - 用于认同/确认
+        // [Nod] 点头
         if (emotion === 'Nod') {
             console.log('[Motion] Triggering procedural Nod animation');
             for (let i = 0; i < 2; i++) {
-                await this.tweenParameters({'ParamAngleY': -10.0}, 150, easeOutCubic);
-                await this.tweenParameters({'ParamAngleY': 5.0}, 150, easeInCubic);
+                await this.tweenParameters({'ParamAngleY': -8.0}, 500, easeOutCubic);
+                await this.tweenParameters({'ParamAngleY': 4.0}, 500, easeInCubic);
             }
-            await this.tweenParameters({'ParamAngleY': 0.0}, 100, easeInCubic);
-            this.applyParameters({'ParamAngleY': null}, true);
+            await this.tweenParameters({'ParamAngleY': 0.0}, 300, easeInCubic);
+            await this.releaseParametersSmoothly(['ParamAngleY'], 300);
             return;
         }
 
-        // [HeadShake] 摇头 - 用于否认/不同意
+        // [HeadShake] 摇头
         if (emotion === 'HeadShake') {
             console.log('[Motion] Triggering procedural HeadShake animation');
             for (let i = 0; i < 2; i++) {
-                await this.tweenParameters({'ParamAngleX': 15.0}, 120, easeOutCubic);
-                await this.tweenParameters({'ParamAngleX': -15.0}, 120, easeInCubic);
+                await this.tweenParameters({'ParamAngleX': 10.0}, 600, easeOutCubic);
+                await this.tweenParameters({'ParamAngleX': -10.0}, 600, easeInCubic);
             }
-            await this.tweenParameters({'ParamAngleX': 0.0}, 100, easeInCubic);
-            this.applyParameters({'ParamAngleX': null}, true);
+            await this.tweenParameters({'ParamAngleX': 0.0}, 300, easeInCubic);
+            await this.releaseParametersSmoothly(['ParamAngleX'], 300);
             return;
         }
 
-        // [ThinkingPose] 思考姿态 - 抬头看上方 + 眉头微皙
+        // [Search] 左看看右看看
+        if (emotion === 'Search' || emotion === 'LookAround') {
+            console.log('[Motion] Triggering procedural Search/LookAround animation');
+            await this.tweenParameters({'ParamAngleX': -15.0, 'ParamEyeBallX': -0.8, 'ParamAngleZ': -3.0}, 1200, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 800));
+            await this.tweenParameters({'ParamAngleX': 15.0, 'ParamEyeBallX': 0.8, 'ParamAngleZ': 3.0}, 2000, easeInOutQuad);
+            await new Promise(resolve => setTimeout(resolve, 800));
+            await this.tweenParameters({'ParamAngleX': 0.0, 'ParamEyeBallX': 0.0, 'ParamAngleZ': 0.0}, 1000, easeInCubic);
+            await this.releaseParametersSmoothly(['ParamAngleX', 'ParamEyeBallX', 'ParamAngleZ'], 500);
+            return;
+        }
+
+        // [ThinkingPose] 思考姿态
         if (emotion === 'ThinkingPose') {
             console.log('[Motion] Triggering procedural ThinkingPose animation');
             await this.tweenParameters({
-                'ParamAngleY': 12.0,
-                'ParamAngleX': 5.0,
-                'ParamEyeBallY': 0.5,
-                'ParamEyeBallX': 0.3,
-                'ParamBrowLY': 0.3,
-                'ParamBrowRY': 0.3,
-                'ParamBrowLAngle': 0.3,
-                'ParamBrowRAngle': 0.3
+                'ParamAngleY': 12.0, 'ParamAngleX': 5.0, 'ParamEyeBallY': 0.5, 'ParamEyeBallX': 0.3,
+                'ParamBrowLY': 0.3, 'ParamBrowRY': 0.3, 'ParamBrowLAngle': 0.3, 'ParamBrowRAngle': 0.3
             }, 400, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 1000));
             await this.tweenParameters({
-                'ParamAngleY': 0.0,
-                'ParamAngleX': 0.0,
-                'ParamEyeBallY': 0.0,
-                'ParamEyeBallX': 0.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0,
-                'ParamBrowLAngle': 0.0,
-                'ParamBrowRAngle': 0.0
+                'ParamAngleY': 0.0, 'ParamAngleX': 0.0, 'ParamEyeBallY': 0.0, 'ParamEyeBallX': 0.0,
+                'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0, 'ParamBrowLAngle': 0.0, 'ParamBrowRAngle': 0.0
             }, 400, easeInCubic);
-            this.applyParameters({'ParamAngleY': null, 'ParamAngleX': null, 'ParamEyeBallY': null, 'ParamEyeBallX': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamBrowLAngle': null, 'ParamBrowRAngle': null}, true);
+            await this.releaseParametersSmoothly(['ParamAngleY', 'ParamAngleX', 'ParamEyeBallY', 'ParamEyeBallX', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle'], 400);
             return;
         }
 
-        // [Surprised] 惊讶 - 睁大眼 + 后仰 + 张嘴
+        // [Surprised] 惊讶
         if (emotion === 'Surprised') {
             console.log('[Motion] Triggering procedural Surprised animation');
             await this.tweenParameters({
-                'ParamEyeLOpen': 1.3,
-                'ParamEyeROpen': 1.3,
-                'ParamAngleY': -8.0,
-                'ParamBodyAngleY': -3.0,
-                'ParamMouthOpenY': 0.5,
-                'ParamBrowLY': 0.6,
-                'ParamBrowRY': 0.6
+                'ParamEyeLOpen': 1.3, 'ParamEyeROpen': 1.3, 'ParamAngleY': -8.0, 'ParamBodyAngleY': -3.0,
+                'ParamMouthOpenY': 0.5, 'ParamBrowLY': 0.6, 'ParamBrowRY': 0.6
             }, 150, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 500));
             await this.tweenParameters({
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleY': 0.0,
-                'ParamBodyAngleY': 0.0,
-                'ParamMouthOpenY': 0.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0
+                'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0, 'ParamAngleY': 0.0, 'ParamBodyAngleY': 0.0,
+                'ParamMouthOpenY': 0.0, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0
             }, 300, easeInCubic);
-            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleY': null, 'ParamBodyAngleY': null, 'ParamMouthOpenY': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            await this.releaseParametersSmoothly(['ParamEyeLOpen', 'ParamEyeROpen', 'ParamAngleY', 'ParamBodyAngleY', 'ParamMouthOpenY', 'ParamBrowLY', 'ParamBrowRY'], 300);
             return;
         }
 
-        // [HappyBounce] 开心跳跃 - 笑脸 + 小幅度上下跳动
+        // [HappyBounce] 开心跳跃
         if (emotion === 'HappyBounce') {
             console.log('[Motion] Triggering procedural HappyBounce animation');
             await this.tweenParameters({'ParamMouthForm': 1.0, 'ParamCheek': 0.5}, 150, easeOutCubic);
@@ -719,64 +893,72 @@ class Live2DManager {
                 await this.tweenParameters({'ParamAngleY': -2.0, 'ParamBodyAngleY': -1.0}, 100, easeInCubic);
             }
             await this.tweenParameters({
-                'ParamAngleY': 0.0,
-                'ParamBodyAngleY': 0.0,
-                'ParamMouthForm': 0.3,
-                'ParamCheek': 0.0
+                'ParamAngleY': 0.0, 'ParamBodyAngleY': 0.0, 'ParamMouthForm': 0.3, 'ParamCheek': 0.0
             }, 200, easeInCubic);
-            this.applyParameters({'ParamAngleY': null, 'ParamBodyAngleY': null, 'ParamMouthForm': null, 'ParamCheek': null}, true);
+            await this.releaseParametersSmoothly(['ParamAngleY', 'ParamBodyAngleY', 'ParamMouthForm', 'ParamCheek'], 200);
             return;
         }
 
-        // [Pout] 嘘嘴/不满 - 鼓起嘴巴 + 眉头下压 + 略微转头
+        // [Pout] 嘘嘴/不满
         if (emotion === 'Pout') {
             console.log('[Motion] Triggering procedural Pout animation');
             await this.tweenParameters({
-                'ParamMouthForm': -0.8,
-                'ParamBrowLY': -0.4,
-                'ParamBrowRY': -0.4,
-                'ParamAngleX': 15.0,
-                'ParamAngleZ': -5.0,
-                'ParamCheek': 0.3
+                'ParamMouthForm': -0.8, 'ParamBrowLY': -0.4, 'ParamBrowRY': -0.4,
+                'ParamAngleX': 15.0, 'ParamAngleZ': -5.0, 'ParamCheek': 0.3
             }, 300, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 800));
             await this.tweenParameters({
-                'ParamMouthForm': 0.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0,
-                'ParamAngleX': 0.0,
-                'ParamAngleZ': 0.0,
-                'ParamCheek': 0.0
+                'ParamMouthForm': 0.0, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0,
+                'ParamAngleX': 0.0, 'ParamAngleZ': 0.0, 'ParamCheek': 0.0
             }, 300, easeInCubic);
-            this.applyParameters({'ParamMouthForm': null, 'ParamBrowLY': null, 'ParamBrowRY': null, 'ParamAngleX': null, 'ParamAngleZ': null, 'ParamCheek': null}, true);
+            await this.releaseParametersSmoothly(['ParamMouthForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamAngleX', 'ParamAngleZ', 'ParamCheek'], 300);
             return;
         }
 
-        // [Sleepy] 困倦 - 缓慢眨眼 + 低头
+        // [Sway] 左右摇摆
+        if (emotion === 'Sway') {
+            console.log('[Motion] Triggering procedural Sway animation');
+            const easeInOutQuad = t => t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            for (let i = 0; i < 2; i++) {
+                await this.tweenParameters({'ParamBodyAngleZ': 2.0, 'ParamAngleZ': 1.0}, 2000, easeInOutQuad);
+                await this.tweenParameters({'ParamBodyAngleZ': -2.0, 'ParamAngleZ': -1.0}, 2000, easeInOutQuad);
+            }
+            await this.tweenParameters({'ParamBodyAngleZ': 0.0, 'ParamAngleZ': 0.0}, 1500, easeInOutQuad);
+            await this.releaseParametersSmoothly(['ParamBodyAngleZ', 'ParamAngleZ'], 1000);
+            return;
+        }
+
+        // [PuffCheeks] 鼓起脸颊
+        if (emotion === 'PuffCheeks') {
+            console.log('[Motion] Triggering procedural PuffCheeks animation');
+            await this.tweenParameters({'ParamCheek': 1.0, 'ParamMouthForm': -0.5, 'ParamMouthOpenY': 0.0, 'ParamEyeBallY': -0.3}, 400, easeOutCubic);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            await this.tweenParameters({'ParamCheek': 0.0, 'ParamMouthForm': 0.0, 'ParamEyeBallY': 0.0}, 400, easeInCubic);
+            await this.releaseParametersSmoothly(['ParamCheek', 'ParamMouthForm', 'ParamMouthOpenY', 'ParamEyeBallY'], 400);
+            return;
+        }
+
+        // [Sleepy] 困倦
         if (emotion === 'Sleepy') {
             console.log('[Motion] Triggering procedural Sleepy animation');
             await this.tweenParameters({
-                'ParamEyeLOpen': 0.3,
-                'ParamEyeROpen': 0.3,
-                'ParamAngleY': -8.0,
-                'ParamBrowLY': -0.3,
-                'ParamBrowRY': -0.3
+                'ParamEyeLOpen': 0.3, 'ParamEyeROpen': 0.3, 'ParamAngleY': -8.0, 'ParamBrowLY': -0.3, 'ParamBrowRY': -0.3
             }, 600, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 500));
-            // 慢慢眨眼
             await this.tweenParameters({'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 0.0}, 400, easeOutCubic);
             await new Promise(resolve => setTimeout(resolve, 300));
             await this.tweenParameters({'ParamEyeLOpen': 0.4, 'ParamEyeROpen': 0.4}, 600, easeInCubic);
             await new Promise(resolve => setTimeout(resolve, 300));
             await this.tweenParameters({
-                'ParamEyeLOpen': 1.0,
-                'ParamEyeROpen': 1.0,
-                'ParamAngleY': 0.0,
-                'ParamBrowLY': 0.0,
-                'ParamBrowRY': 0.0
+                'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0, 'ParamAngleY': 0.0, 'ParamBrowLY': 0.0, 'ParamBrowRY': 0.0
             }, 400, easeInCubic);
-            this.applyParameters({'ParamEyeLOpen': null, 'ParamEyeROpen': null, 'ParamAngleY': null, 'ParamBrowLY': null, 'ParamBrowRY': null}, true);
+            await this.releaseParametersSmoothly(['ParamEyeLOpen', 'ParamEyeROpen', 'ParamAngleY', 'ParamBrowLY', 'ParamBrowRY'], 400);
             return;
+        }
+        
+        } catch (error) {
+            if (error === 'Cancelled') return;
+            console.error('播放动作失败 (Procedural):', error);
         }
 
         // ========== 原生 Motion 文件播放 ==========
@@ -905,64 +1087,72 @@ class Live2DManager {
         }
     }
 
-    // 播放简单动作（回退方案）
-    playSimpleMotion(emotion) {
+    // 播放简单动作（回退方案） - 使用补间动画避免跳变
+    async playSimpleMotion(emotion) {
         try {
+            // 定义缓动函数
+            const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+            const easeInCubic = t => t * t * t;
+            const easeInOutQuad = t => t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
             switch (emotion) {
                 case 'happy':
                     // 轻微点头
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 8);
-                    const happyTimer = setTimeout(() => {
-                        this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
+                    await this.tweenParameters({'ParamAngleY': 8.0}, 150, easeOutCubic);
+                    setTimeout(() => {
+                        this.tweenParameters({'ParamAngleY': 0.0}, 200, easeInCubic);
                         this.motionTimer = null;
-                        // motion完成后清除motion参数，但保留expression
                         this.clearEmotionEffects();
                     }, 1000);
-                    this.motionTimer = { type: 'timeout', id: happyTimer };
                     break;
                 case 'sad':
-                    // 轻微低头
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', -5);
-                    const sadTimer = setTimeout(() => {
-                        this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
+                    // 轻微低头 + 悲伤嘴角
+                    await this.tweenParameters({
+                        'ParamAngleY': -5.0,
+                        'ParamAngleZ': -2.0,
+                        'ParamMouthForm': -0.8,
+                        'ParamBrowLY': -0.3,
+                        'ParamBrowRY': -0.3
+                    }, 400, easeOutCubic);
+                    setTimeout(() => {
+                        this.tweenParameters({
+                            'ParamAngleY': 0.0,
+                            'ParamAngleZ': 0.0
+                        }, 500, easeInCubic);
                         this.motionTimer = null;
-                        // motion完成后清除motion参数，但保留expression
                         this.clearEmotionEffects();
-                    }, 1200);
-                    this.motionTimer = { type: 'timeout', id: sadTimer };
+                    }, 1500);
                     break;
                 case 'angry':
                     // 轻微摇头
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', 5);
+                    await this.tweenParameters({'ParamAngleX': 5.0}, 100, easeOutCubic);
                     setTimeout(() => {
-                        this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', -5);
-                    }, 400);
-                    const angryTimer = setTimeout(() => {
-                        this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', 0);
+                         this.tweenParameters({'ParamAngleX': -5.0}, 100, easeInOutQuad);
+                    }, 150);
+                    setTimeout(() => {
+                        this.tweenParameters({'ParamAngleX': 0.0}, 200, easeInCubic);
                         this.motionTimer = null;
-                        // motion完成后清除motion参数，但保留expression
                         this.clearEmotionEffects();
                     }, 800);
-                    this.motionTimer = { type: 'timeout', id: angryTimer };
                     break;
                 case 'surprised':
                     // 轻微后仰
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', -8);
-                    const surprisedTimer = setTimeout(() => {
-                        this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
+                    await this.tweenParameters({'ParamAngleY': -8.0}, 150, easeOutCubic);
+                    setTimeout(() => {
+                        this.tweenParameters({'ParamAngleY': 0.0}, 200, easeInCubic);
                         this.motionTimer = null;
-                        // motion完成后清除motion参数，但保留expression
                         this.clearEmotionEffects();
                     }, 800);
-                    this.motionTimer = { type: 'timeout', id: surprisedTimer };
                     break;
                 default:
                     // 中性状态，重置角度
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', 0);
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
+                    this.tweenParameters({
+                        'ParamAngleX': 0.0,
+                        'ParamAngleY': 0.0
+                    }, 300, easeInCubic);
                     break;
             }
-            console.log(`播放简单动作: ${emotion}`);
+            console.log(`播放简单动作(Smooth): ${emotion}`);
         } catch (paramError) {
             console.warn('设置简单动作参数失败:', paramError);
         }
@@ -1261,14 +1451,105 @@ class Live2DManager {
         }
     }
 
+    // 停止待机动作调度器
+    stopIdleMotionScheduler() {
+        if (this.idleMotionTimer) {
+            clearInterval(this.idleMotionTimer);
+            this.idleMotionTimer = null;
+            this.isIdleMotionPlaying = false;
+            console.log('[Idle] Idle motion scheduler stopped');
+        }
+    }
+
+    // 启动待机随机动作调度器
+    startIdleMotionScheduler() {
+        this.stopIdleMotionScheduler();
+        
+        console.log('[Idle] Starting idle motion scheduler (Low Frequency)');
+        this.isIdleMotionPlaying = false;
+        
+        // 每 12 秒检查一次 (降低频率，避免多动)
+        this.idleMotionTimer = setInterval(async () => {
+            // 检查模型是否加载并初始化
+            if (!this.currentModel || !this.isInitialized) return;
+            
+            // 仅在 neutral 或 idle 状态下播放
+            // 且当前没有正在改变情感或播放其他动作
+            if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') return;
+            if (this.isEmotionChanging) return;
+            if (this.motionTimer) return; // 有动作正在播放
+            if (this.isIdleMotionPlaying) return; // 正在播放待机动作
+            
+            // 60% 概率播放随机动作 (恢复活跃度)
+            if (Math.random() < 0.6) {
+                this.isIdleMotionPlaying = true;
+
+                // 定义自然的待机动作 (移除强情绪和夸张动作)
+                const idleMotions = [
+                    'Sway',           // 摇摆 (已优化，幅度小)
+                    'MicroBodySway',  // 微小晃动 (New)
+                    'Search',         // 看看周围
+                    'HeadTilt',       // 歪头
+                    'Nod',            // 偶尔点头
+                    'SlightSmile',    // 微笑 (New)
+                    'BreathSigh',     // 叹气/深呼吸 (New)
+                    'EyeTwitch',      // 眨眼 (New)
+                    'Blink_Special'   // 特殊眨眼 (如果映射有)
+                ];
+                
+                // 过滤可用动作
+                const availableMotions = idleMotions.filter(m => {
+                    // 程序化动作总是可用
+                    if (['HeadTilt', 'Nod', 'Sway', 'Search', 'MicroBodySway', 'SlightSmile', 'BreathSigh', 'EyeTwitch'].includes(m)) return true;
+                    // 检查映射中是否存在
+                    return (this.emotionMapping && this.emotionMapping.motions && this.emotionMapping.motions[m] && this.emotionMapping.motions[m].length > 0);
+                });
+                
+                if (availableMotions.length > 0) {
+                    // 极低概率 (5%) 播放组合动作，或者完全移除以保持平滑
+                    // 用户反馈动作过多，这里我们暂时移除 Combo，只播放单个动作
+                    const randomMotion = this.getRandomElement(availableMotions);
+                    console.log(`[Idle] Triggering natural idle motion: ${randomMotion}`);
+                    
+                    // User verification helper
+                    const logMsg = `⚡ [Idle] Triggered: ${randomMotion}`;
+                    console.log(`%c ${logMsg}`, 'color: #00ff00; font-weight: bold; font-size: 12px;');
+                    if (typeof logToScreen === 'function') {
+                        logToScreen(logMsg);
+                    }
+                    
+                    try {
+                        await this.playMotion(randomMotion);
+                        // 动作结束后，强制做一次极短的平滑归位，确保不卡在奇怪姿势
+                        // 这里的 tweenParameters 会自动读取当前值到目标值(0)
+                        // 使用较长的时间(1s)来做一个极其平滑的收尾
+                        // await this.tweenParameters({
+                        //    'ParamAngleX': 0, 'ParamAngleY': 0, 'ParamAngleZ': 0,
+                        //    'ParamBodyAngleX': 0, 'ParamBodyAngleY': 0, 'ParamBodyAngleZ': 0
+                        // }, 1000, t => t * (2 - t)); // easeOutQuad
+                    } catch (e) {
+                        console.warn('[Idle] Motion failed:', e);
+                    }
+                }
+                
+                this.isIdleMotionPlaying = false;
+            }
+        }, 12000); // 12000ms = 12s
+    }
+
     // 加载模型
     async loadModel(modelPath, options = {}) {
+        console.log(`[Live2D] loadModel called with path: ${modelPath}`);
         if (!this.pixi_app) {
             throw new Error('PIXI 应用未初始化，请先调用 initPIXI()');
         }
 
         // 移除当前模型
         if (this.currentModel) {
+            console.log('[Live2D] Removing existing model...');
+            // 停止待机调度器
+            this.stopIdleMotionScheduler();
+
             // 先清空常驻表情记录
             this.teardownPersistentExpressions();
 
@@ -1285,6 +1566,13 @@ class Live2DManager {
                 }
             } catch (_) {}
             this._mouthOverrideInstalled = false;
+            this._coreOverrideInstalled = false;
+            
+            // Remove previous ticker listeners if any
+            if (this._overrideTickerListener && this.pixi_app && this.pixi_app.ticker) {
+                this.pixi_app.ticker.remove(this._overrideTickerListener);
+                this._overrideTickerListener = null;
+            }
             this._origUpdateParameters = null;
             this._origExpressionUpdateParameters = null;
             // 同时移除 mouthTicker（若曾启用过 ticker 模式）
@@ -1322,7 +1610,7 @@ class Live2DManager {
                 
                 // 暂停 ticker，期间做销毁，随后恢复
                 this.pixi_app.ticker && this.pixi_app.ticker.stop();
-            } catch (_) {}
+            } catch (e) { console.warn('[Live2D] Error during cleanup prep:', e); }
             try {
                 this.pixi_app.stage.removeAllListeners && this.pixi_app.stage.removeAllListeners();
             } catch (_) {}
@@ -1333,14 +1621,36 @@ class Live2DManager {
             // 从舞台移除并销毁旧模型
             try { this.pixi_app.stage.removeChild(this.currentModel); } catch (_) {}
             try { this.currentModel.destroy({ children: true }); } catch (_) {}
-            try { this.pixi_app.ticker && this.pixi_app.ticker.start(); } catch (_) {}
+            try { 
+                this.pixi_app.ticker && this.pixi_app.ticker.start(); 
+            } catch (_) {}
+            console.log('[Live2D] Existing model removed.');
         }
 
         try {
+            console.log('[Live2D] Starting model load...');
             if (!PIXI.live2d || !PIXI.live2d.Live2DModel) {
                 throw new Error('PIXI.live2d.Live2DModel is not available. Library might not be loaded.');
             }
-            const model = await PIXI.live2d.Live2DModel.from(modelPath, { autoInteract: false });
+            
+            let model;
+            try {
+                model = await PIXI.live2d.Live2DModel.from(modelPath, { autoInteract: false });
+                console.log('[Live2D] Model loaded successfully.');
+            } catch (loadError) {
+                console.warn('模型加载失败，尝试回退到默认模型: mao_pro', loadError);
+                if (modelPath !== '/static/mao_pro/mao_pro.model3.json') {
+                    try {
+                        const defaultPath = '/static/mao_pro/mao_pro.model3.json';
+                        model = await PIXI.live2d.Live2DModel.from(defaultPath, { autoInteract: false });
+                        console.log('成功回退到默认模型: mao_pro');
+                    } catch (fallbackError) {
+                        throw new Error(`原始模型加载失败: ${loadError.message}，且回退模型也失败: ${fallbackError.message}`);
+                    }
+                } else {
+                    throw loadError;
+                }
+            }
             this.currentModel = model;
 
             // 解析模型目录名与根路径，供资源解析使用
@@ -1386,7 +1696,9 @@ class Live2DManager {
             this.applyModelSettings(model, options);
 
             // 添加到舞台
+            console.log('[Live2D] Adding model to stage...');
             this.pixi_app.stage.addChild(model);
+            console.log('[Live2D] Model added to stage.');
 
             // [DEBUG] 打印模型参数
             this.logModelParameters(model);
@@ -1417,20 +1729,12 @@ class Live2DManager {
             // 设置原来的锁按钮
             this.setupHTMLLockIcon(model);
 
-            // 安装核心参数覆盖系统（用于强制控制眼睛等参数）
+            // 安装核心参数覆盖系统（用于强制控制眼睛等参数 + 智能叠加）
             try {
                 this.installCoreOverride();
-                console.log('已安装核心参数覆盖');
+                console.log('已安装核心参数覆盖（含智能叠加）');
             } catch (e) {
                 console.warn('安装核心参数覆盖失败:', e);
-            }
-
-            // 安装口型覆盖逻辑（屏蔽 motion 对嘴巴的控制）
-            try {
-                this.installMouthOverride();
-                console.log('已安装口型覆盖');
-            } catch (e) {
-                console.warn('安装口型覆盖失败:', e);
             }
 
             // 加载 FileReferences 与 EmotionMapping
@@ -1462,6 +1766,9 @@ class Live2DManager {
             // 设置常驻表情（根据 EmotionMapping.expressions.常驻 或 FileReferences 前缀推导）
             await this.setupPersistentExpressions();
 
+            // 启动待机动作调度器
+            this.startIdleMotionScheduler();
+
             // 调用回调函数
             if (this.onModelLoaded) {
                 this.onModelLoaded(model, modelPath);
@@ -1477,192 +1784,7 @@ class Live2DManager {
     // 不再需要预解析嘴巴参数ID，保留占位以兼容旧代码调用
     resolveMouthParameterId() { return null; }
 
-    // 安装核心参数覆盖：拦截底层 setParameterValueById 调用
-    installCoreOverride() {
-        if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) {
-            return;
-        }
 
-        const core = this.currentModel.internalModel.coreModel;
-        
-        // 防止重复安装
-        if (core._originalSetParameterValueById) return;
-
-        // 保存原始方法 (ById)
-        const originalSetById = core.setParameterValueById.bind(core);
-        const originalAddById = core.addParameterValueById ? core.addParameterValueById.bind(core) : null;
-        const originalMulById = core.multiplyParameterValueById ? core.multiplyParameterValueById.bind(core) : null;
-
-        // 保存原始方法 (ByIndex) - 这是更底层的调用
-        const originalSetByIndex = core.setParameterValueByIndex.bind(core);
-        const originalAddByIndex = core.addParameterValueByIndex ? core.addParameterValueByIndex.bind(core) : null;
-        const originalMulByIndex = core.multiplyParameterValueByIndex ? core.multiplyParameterValueByIndex.bind(core) : null;
-
-        core._originalSetParameterValueById = originalSetById;
-        if (originalAddById) core._originalAddParameterValueById = originalAddById;
-        if (originalMulById) core._originalMultiplyParameterValueById = originalMulById;
-
-        // 捕获 this
-        const self = this;
-
-        // --- 覆盖 ById 方法 (第一道防线) ---
-        core.setParameterValueById = function(id, value, weight) {
-            if (self.parameterOverrides && self.parameterOverrides[id] !== undefined) {
-                originalSetById(id, self.parameterOverrides[id], 1.0);
-            } else {
-                originalSetById(id, value, weight);
-            }
-        };
-
-        if (originalAddById) {
-            core.addParameterValueById = function(id, value, weight) {
-                if (self.parameterOverrides && self.parameterOverrides[id] !== undefined) {
-                    originalAddById(id, 0.0, 1.0); // 忽略叠加
-                } else {
-                    originalAddById(id, value, weight);
-                }
-            };
-        }
-
-        if (originalMulById) {
-            core.multiplyParameterValueById = function(id, value, weight) {
-                if (self.parameterOverrides && self.parameterOverrides[id] !== undefined) {
-                    originalMulById(id, 1.0, 1.0); // 忽略乘法
-                } else {
-                    originalMulById(id, value, weight);
-                }
-            };
-        }
-
-        // --- 覆盖 ByIndex 方法 (第二道防线 - 核心防线) ---
-        // 许多内部组件(如MotionManager)直接调用 ByIndex 方法以提高性能
-        
-        core.setParameterValueByIndex = function(index, value, weight) {
-            if (self.overriddenIndices && self.overriddenIndices[index] !== undefined) {
-                originalSetByIndex(index, self.overriddenIndices[index], 1.0);
-            } else {
-                originalSetByIndex(index, value, weight);
-            }
-        };
-
-        if (originalAddByIndex) {
-            core.addParameterValueByIndex = function(index, value, weight) {
-                if (self.overriddenIndices && self.overriddenIndices[index] !== undefined) {
-                    originalAddByIndex(index, 0.0, 1.0); // 忽略叠加
-                } else {
-                    originalAddByIndex(index, value, weight);
-                }
-            };
-        }
-
-        if (originalMulByIndex) {
-            core.multiplyParameterValueByIndex = function(index, value, weight) {
-                if (self.overriddenIndices && self.overriddenIndices[index] !== undefined) {
-                    originalMulByIndex(index, 1.0, 1.0); // 忽略乘法
-                } else {
-                    originalMulByIndex(index, value, weight);
-                }
-            };
-        }
-        
-        console.log('[Live2DManager] Core parameter override system installed (Set/Add/Mul for ById AND ByIndex).');
-    }
-
-    // 安装覆盖：在 motion 参数更新后强制写入口型参数
-    installMouthOverride() {
-        if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.motionManager) {
-            throw new Error('模型未就绪，无法安装口型覆盖');
-        }
-
-        const mm = this.currentModel.internalModel.motionManager;
-
-        // 如果之前装过在其他模型上，先尝试还原
-        try {
-            if (this._mouthOverrideInstalled) {
-                if (typeof this._origUpdateParameters === 'function') {
-                    try { mm.updateParameters = this._origUpdateParameters; } catch (_) {}
-                }
-                if (mm.expressionManager && typeof this._origExpressionUpdateParameters === 'function') {
-                    try { mm.expressionManager.updateParameters = this._origExpressionUpdateParameters; } catch (_) {}
-                }
-                this._mouthOverrideInstalled = false;
-                this._origUpdateParameters = null;
-                this._origExpressionUpdateParameters = null;
-            }
-        } catch (_) {}
-
-        if (typeof mm.updateParameters !== 'function') {
-            throw new Error('motionManager.updateParameters 不可用');
-        }
-
-        // 绑定原函数并覆盖
-        const orig = mm.updateParameters.bind(mm);
-        mm.updateParameters = (coreModel, now) => {
-            const updated = orig(coreModel, now);
-            try {
-                const mouthIds = ['ParamMouthOpenY', 'ParamO'];
-                for (const id of mouthIds) {
-                    try {
-                        if (coreModel.getParameterIndex(id) !== -1) {
-                            coreModel.setParameterValueById(id, this.mouthValue, 1);
-                        }
-                    } catch (_) {}
-                }
-            } catch (_) {}
-            return updated;
-        };
-        this._origUpdateParameters = orig; // 保存可还原的实现（已绑定）
-
-        // 也覆盖 expressionManager.updateParameters，防止表情参数覆盖嘴巴
-        if (mm.expressionManager && typeof mm.expressionManager.updateParameters === 'function') {
-            const origExp = mm.expressionManager.updateParameters.bind(mm.expressionManager);
-            mm.expressionManager.updateParameters = (coreModel, now) => {
-                const updated = origExp(coreModel, now);
-                try {
-                    const mouthIds = ['ParamMouthOpenY', 'ParamO'];
-                    for (const id of mouthIds) {
-                        try {
-                            if (coreModel.getParameterIndex(id) !== -1) {
-                                coreModel.setParameterValueById(id, this.mouthValue, 1);
-                            }
-                        } catch (_) {}
-                    }
-                } catch (_) {}
-                return updated;
-            };
-            this._origExpressionUpdateParameters = origExp;
-        } else {
-            this._origExpressionUpdateParameters = null;
-        }
-
-        // 若此前使用了 ticker 覆盖，确保移除
-        if (this._mouthTicker && this.pixi_app && this.pixi_app.ticker) {
-            try { this.pixi_app.ticker.remove(this._mouthTicker); } catch (_) {}
-            this._mouthTicker = null;
-        }
-
-        this._mouthOverrideInstalled = true;
-    }
-
-    // 设置嘴巴开合值（0~1）
-    setMouth(value) {
-        const v = Math.max(0, Math.min(1, Number(value) || 0));
-        this.mouthValue = v;
-        // 即时写入一次，best-effort 同步
-        try {
-            if (this.currentModel && this.currentModel.internalModel) {
-                const coreModel = this.currentModel.internalModel.coreModel;
-                const mouthIds = ['ParamMouthOpenY', 'ParamO'];
-                for (const id of mouthIds) {
-                    try {
-                        if (coreModel.getParameterIndex(id) !== -1) {
-                            coreModel.setParameterValueById(id, this.mouthValue, 1);
-                        }
-                    } catch (_) {}
-                }
-            }
-        } catch (_) {}
-    }
 
     // 解析资源相对路径（基于当前模型根目录）
     resolveAssetPath(relativePath) {
@@ -1955,6 +2077,28 @@ class Live2DManager {
         // 检查 URL 参数以识别是否处于独立浮窗模式，但允许在应用内也显示 JS 按钮
         const urlParams = new URLSearchParams(window.location.search);
         const isFloating = urlParams.get('floating') === 'true';
+        const controlsParam = urlParams.get('controls');
+
+        // Logic:
+        // 1. If controls explicitly set to 'false', HIDE.
+        // 2. If controls explicitly set to 'true', SHOW.
+        // 3. If controls not set, fallback to old logic (Hide if floating).
+
+        if (controlsParam === 'false') {
+             console.log('[Live2D] Controls explicitly disabled via URL.');
+             return;
+        }
+
+        if (controlsParam === 'true') {
+            console.log('[Live2D] Controls explicitly enabled via URL.');
+            // Proceed to show buttons
+        } else {
+            // Fallback
+            if (isFloating) {
+                console.log('[Live2D] Floating mode detected (no controls param): Hiding Web-based floating buttons.');
+                return;
+            }
+        }
 
         const container = document.getElementById('live2d-canvas');
         
@@ -2285,9 +2429,13 @@ class Live2DManager {
             // 先添加 Focus 模式、主动搭话、眼神跟随开关
             const settingsToggles = [
                 { id: 'focus-mode', label: '🎯 允许打断', storageKey: 'focusModeEnabled', inverted: true },
-                { id: 'proactive-chat', label: '💬 主动搭话', storageKey: 'proactiveChatEnabled' },
-                { id: 'mouse-tracking', label: '👀 眼神跟随', storageKey: 'mouseTrackingEnabled' }
+                { id: 'proactive-chat', label: '💬 主动搭话', storageKey: 'proactiveChatEnabled' }
             ];
+
+            // 只有在非浮窗模式下才显示眼神跟随开关 (因为浮窗模式下通常有系统级控制或不需要，避免冲突)
+            if (!isFloating) {
+                settingsToggles.push({ id: 'mouse-tracking', label: '👀 眼神跟随', storageKey: 'mouseTrackingEnabled' });
+            }
             
             settingsToggles.forEach(toggle => {
                 const toggleItem = document.createElement('div');
@@ -2706,26 +2854,94 @@ class Live2DManager {
         });
     }
 
+    // Smoothly release parameters to their internal values (avoids snapping)
+    async releaseParametersSmoothly(keys, duration = 500) {
+        if (!keys || keys.length === 0) return;
+        
+        return new Promise(resolve => {
+            const startValues = {};
+            keys.forEach(key => {
+                // If override exists, use it as start. Else use internal or 0.
+                if (this.parameterOverrides && this.parameterOverrides[key] !== undefined) {
+                    startValues[key] = this.parameterOverrides[key];
+                } else {
+                    // If no override, we are already released, so skip
+                    startValues[key] = null;
+                }
+            });
+            
+            // Filter out keys that don't need smoothing
+            const activeKeys = keys.filter(k => startValues[k] !== null);
+            if (activeKeys.length === 0) {
+                resolve();
+                return;
+            }
+            
+            const startTime = performance.now();
+            const animate = (currentTime) => {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                // Ease out cubic
+                const eased = 1 - Math.pow(1 - progress, 3);
+                
+                const frameParams = {};
+                let stillRunning = false;
+                
+                activeKeys.forEach(key => {
+                    const start = startValues[key];
+                    // Target is dynamic!
+                    const target = (this.internalParameterValues && this.internalParameterValues[key]) !== undefined 
+                        ? this.internalParameterValues[key] 
+                        : 0;
+                    
+                    if (progress < 1) {
+                        const val = start + (target - start) * eased;
+                        frameParams[key] = val;
+                        stillRunning = true;
+                    } else {
+                        frameParams[key] = null; // Release final
+                    }
+                });
+                
+                this.applyParameters(frameParams, true);
+                
+                if (stillRunning) {
+                    requestAnimationFrame(animate);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(animate);
+        });
+    }
+
     // 请求后端 Motion Agent 决策动作
-    async askMotionAgent(userText, aiText) {
+    async askMotionAgent(userText, aiText, config = {}) {
         if (!this.currentModel) return;
         
         const capabilities = this.getModelCapabilities();
         const currentEmotion = this.currentEmotion || 'neutral';
         
-        console.log('[Motion Agent] Requesting decision...', { userText, aiText, emotion: currentEmotion });
+        console.log('[Motion Agent] Requesting decision...', { userText, aiText, emotion: currentEmotion, config });
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        if (config.apiKey) headers['X-Motion-Api-Key'] = config.apiKey;
+        if (config.baseUrl) headers['X-Motion-Base-Url'] = config.baseUrl;
+        if (config.model) headers['X-Motion-Model'] = config.model;
 
         try {
             const response = await fetch('/api/live2d/agent/decide', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: headers,
                 body: JSON.stringify({
                     user_text: userText,
                     ai_text: aiText,
                     emotion: currentEmotion,
-                    capabilities: capabilities
+                    capabilities: capabilities,
+                    history: config.history
                 })
             });
             

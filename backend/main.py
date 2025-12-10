@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union
@@ -132,7 +132,7 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
     }
 
 @app.post("/v1/chat/completions", response_model=OpenAIResponse)
-async def chat_completions(request: OpenAIRequest, raw_request: Request):
+async def chat_completions(request: OpenAIRequest, raw_request: Request, background_tasks: BackgroundTasks):
     logger.info(f"Received chat completion request. Model: {request.model}")
     # Extract the last user message
     last_message_obj = next((m for m in reversed(request.messages) if m.role == "user"), None)
@@ -217,7 +217,8 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request):
                     "prompt": vision_prompt,
                     "fallback": vision_fallback
                 },
-                temperature=temperature
+                temperature=temperature,
+                background_tasks=background_tasks
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)
         
