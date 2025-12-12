@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Header, Response
+from fastapi.responses import StreamingResponse
 from typing import Optional, List
 from app.services.audio_service import AudioService
 from app.core.config import settings
@@ -39,7 +40,54 @@ async def transcribe_audio(
         )
         return {"text": text}
     except Exception as e:
+        print(f"[AudioRoutes] TTS Generation Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/speech/stream")
+async def generate_speech_stream(
+    input: str = Body(..., embed=True),
+    model: str = Body("FunAudioLLM/CosyVoice2-0.5B", embed=True),
+    voice: Optional[str] = Body("alex", embed=True),
+    speed: float = Body(1.0, embed=True),
+    response_format: str = Body("mp3", embed=True),
+    api_key: Optional[str] = Header(None, alias="X-SiliconFlow-Api-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    base_url: Optional[str] = Header("https://api.siliconflow.cn/v1", alias="X-SiliconFlow-Base-Url"),
+):
+    """
+    Generate speech from text (TTS) with streaming.
+    Returns audio binary stream.
+    """
+    final_api_key = api_key
+    if not final_api_key and authorization and authorization.startswith("Bearer "):
+        final_api_key = authorization.replace("Bearer ", "")
+        
+    final_api_key = final_api_key or settings.OPENAI_API_KEY
+    if not final_api_key:
+        print("[AudioRoutes] Missing API Key")
+        raise HTTPException(status_code=401, detail="API Key is required")
+
+    print(f"[AudioRoutes] TTS Stream Request: Model={model}, Voice={voice}, InputLen={len(input)}")
+
+    async def iterfile():
+        try:
+            async for chunk in audio_service.generate_speech_stream(
+                text=input,
+                api_key=final_api_key,
+                base_url=base_url,
+                model=model,
+                voice=voice,
+                response_format=response_format,
+                speed=speed
+            ):
+                yield chunk
+        except Exception as e:
+            print(f"[AudioRoutes] TTS Stream Error: {e}")
+            # In a streaming response, we can't easily change the status code once started,
+            # but we can log it.
+
+    media_type = f"audio/{response_format}"
+    return StreamingResponse(iterfile(), media_type=media_type)
 
 @router.post("/speech")
 async def generate_speech(
@@ -77,7 +125,9 @@ async def generate_speech(
     #          # If user passed just "benjamin" etc, try prepending model
     #          voice = f"{model}:{voice}"
     
-    print(f"[AudioRoutes] TTS Request: Model={original_model}->{model}, Voice={original_voice}->{voice}, InputLen={len(input)}")
+    import time
+    start_time = time.time()
+    print(f"[AudioRoutes] TTS Request Received: Model={original_model}->{model}, Voice={original_voice}->{voice}, InputLen={len(input)}")
 
     try:
         audio_content = await audio_service.generate_speech(
@@ -90,6 +140,9 @@ async def generate_speech(
             speed=speed
         )
         
+        duration = time.time() - start_time
+        print(f"[AudioRoutes] TTS Generation Finished in {duration:.2f}s. Sending response...")
+
         media_type = f"audio/{response_format}"
         return Response(content=audio_content, media_type=media_type)
     except Exception as e:

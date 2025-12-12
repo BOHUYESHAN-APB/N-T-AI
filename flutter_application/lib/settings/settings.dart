@@ -343,6 +343,7 @@ class AppSettings {
   final bool isFirstRun; // 是否首次运行 (用于显示引导页)
   final bool enableTts; // 启用语音合成输出
   final bool enableStt; // 启用语音识别输入
+  final int logMaxErrors; // 最近错误日志条数
 
   const AppSettings({
     this.themeMode = ThemeModeOption.system,
@@ -399,6 +400,7 @@ class AppSettings {
     this.isFirstRun = true,
     this.enableTts = false,
     this.enableStt = false,
+    this.logMaxErrors = 5,
   });
   AppSettings copyWith({
     ThemeModeOption? themeMode,
@@ -453,6 +455,7 @@ class AppSettings {
     bool? isFirstRun,
     bool? enableTts,
     bool? enableStt,
+    int? logMaxErrors,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     locale: locale ?? this.locale,
@@ -511,6 +514,7 @@ class AppSettings {
     isFirstRun: isFirstRun ?? this.isFirstRun,
     enableTts: enableTts ?? this.enableTts,
     enableStt: enableStt ?? this.enableStt,
+    logMaxErrors: logMaxErrors ?? this.logMaxErrors,
   );
 
   ThemeMode get materialThemeMode => switch (themeMode) {

@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.models.database import create_db_and_tables
 from app.services.chat_service import ChatService
 from app.core.logger import logger
+from app.core.logger import get_recent_errors, set_recent_error_max
 from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes
 
 # Lifecycle manager
@@ -100,6 +101,17 @@ class EmbeddingRequest(BaseModel):
     model: str = "text-embedding-ada-002"
 
 chat_service = ChatService()
+_frontend_recent_errors = []
+
+class FrontendLogItem(BaseModel):
+    timestamp: float
+    level: str
+    message: str
+    exception: str | None = None
+
+class FrontendLogs(BaseModel):
+    errors: list[FrontendLogItem] = []
+    max: int | None = None
 
 @app.post("/v1/embeddings")
 async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
@@ -173,10 +185,31 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     vision_fallback_str = raw_request.headers.get("X-Vision-Fallback", "false")
     vision_fallback = vision_fallback_str.lower() == "true"
     
+    # Extract TTS/Audio Config (support multiple header conventions)
+    tts_api_key = (
+        raw_request.headers.get("X-TTS-Api-Key")
+        or raw_request.headers.get("X-SiliconFlow-Api-Key")
+    )
+    tts_base_url = (
+        raw_request.headers.get("X-TTS-Base-Url")
+        or raw_request.headers.get("X-SiliconFlow-Base-Url")
+    )
+    # Fallback: Authorization: Bearer <key>
+    auth_header = raw_request.headers.get("Authorization")
+    if not tts_api_key and auth_header and auth_header.startswith("Bearer "):
+        tts_api_key = auth_header.replace("Bearer ", "").strip()
+    # Fallback: use target LLM credentials if TTS not provided
+    if not tts_api_key:
+        tts_api_key = target_api_key
+    if not tts_base_url:
+        tts_base_url = target_base_url
+
     # Debug logging
     logger.info(f"X-Enable-Browser header: '{enable_search_str}' -> enable_search={enable_search}")
     logger.info(f"X-Search-Region: {search_region}")
     logger.info(f"Usage type: {usage_type}")
+    if tts_api_key:
+        logger.info("TTS API Key provided in headers")
     if vision_model:
         logger.info(f"Vision Agent Configured: {vision_model} (Fallback: {vision_fallback})")
 
@@ -208,6 +241,8 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 target_api_key=target_api_key,
                 target_base_url=target_base_url,
                 target_model=target_model,
+                tts_api_key=tts_api_key,
+                tts_base_url=tts_base_url,
                 enable_search=enable_search,
                 search_region=search_region,
                 vision_config={
@@ -236,6 +271,42 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     except Exception as e:
         logger.error(f"Error processing message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/logs/backend")
+async def get_backend_logs(raw_request: Request):
+    max_header = raw_request.headers.get("X-Log-Max-Errors")
+    if max_header:
+        try:
+            set_recent_error_max(int(max_header))
+        except Exception:
+            pass
+    return {"errors": get_recent_errors()}
+
+@app.post("/api/logs/frontend")
+async def post_frontend_logs(payload: FrontendLogs):
+    global _frontend_recent_errors
+    if payload.max and payload.max > 0:
+        max_n = int(payload.max)
+    else:
+        max_n = settings.LOG_MAX_ERRORS
+    
+    for item in payload.errors:
+        # Store in memory for quick retrieval
+        _frontend_recent_errors.append(item.model_dump())
+        
+        # Log to backend logger (file + console)
+        log_msg = f"[Frontend Error] {item.message}"
+        if item.exception:
+            log_msg += f"\nException: {item.exception}"
+        logger.error(log_msg)
+
+    if len(_frontend_recent_errors) > max_n:
+        _frontend_recent_errors = _frontend_recent_errors[-max_n:]
+    return {"stored": len(payload.errors), "total": len(_frontend_recent_errors)}
+
+@app.get("/api/logs/frontend")
+async def get_frontend_logs():
+    return {"errors": _frontend_recent_errors}
 
 @app.get("/")
 async def root():

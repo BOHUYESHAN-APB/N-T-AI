@@ -56,6 +56,7 @@ class SettingsController extends ChangeNotifier {
   static const _kIsFirstRun = 'settings.app.isFirstRun';
   static const _kEnableTts = 'settings.audio.enableTts';
   static const _kEnableStt = 'settings.audio.enableStt';
+  static const _kLogMaxErrors = 'settings.logs.maxErrors';
   // Legacy font mode key (for migration only)
   static const _kFontMode = 'settings.ui.fontMode';
   // New font settings keys
@@ -102,6 +103,7 @@ class SettingsController extends ChangeNotifier {
     final quickActionsRaw = _prefs.getString(_kQuickActions);
     final enableTts = _prefs.getBool(_kEnableTts) ?? false;
     final enableStt = _prefs.getBool(_kEnableStt) ?? false;
+    final logMaxErrors = _prefs.getInt(_kLogMaxErrors) ?? 5;
 
     // load legacy single-AI settings then attempt to load providers list
     final providersRaw = _prefs.getString(_kAiProviders);
@@ -479,6 +481,7 @@ class SettingsController extends ChangeNotifier {
       isFirstRun: isFirstRun,
       enableTts: enableTts,
       enableStt: enableStt,
+      logMaxErrors: logMaxErrors,
     );
     notifyListeners();
   }
@@ -624,6 +627,13 @@ class SettingsController extends ChangeNotifier {
   Future<void> setEnableStt(bool v) async {
     _settings = _settings.copyWith(enableStt: v);
     await _prefs.setBool(_kEnableStt, v);
+    notifyListeners();
+  }
+
+  Future<void> setLogMaxErrors(int n) async {
+    if (n <= 0) return;
+    _settings = _settings.copyWith(logMaxErrors: n);
+    await _prefs.setInt(_kLogMaxErrors, n);
     notifyListeners();
   }
 

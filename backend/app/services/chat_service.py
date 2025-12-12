@@ -7,14 +7,20 @@ from app.services.mood_service import MoodService
 from app.services.memory_system_service import MemorySystemService
 from app.services.expression_service import ExpressionService
 from app.services.search_service import SearchService
+from app.services.audio_service import AudioService
+from app.api.routes.live2d_routes import manager as live2d_manager
 from app.core.prompts import FIREFLY_PERSONA, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
 from app.core.logger import logger
 from fastapi import BackgroundTasks
+import asyncio
+import base64
 
 from typing import Union, List, Dict, Any
 import re
 import ast
 from datetime import datetime
+
+from app.core.config import settings
 
 class ChatService:
     def __init__(self):
@@ -24,12 +30,179 @@ class ChatService:
         self.memory_system = MemorySystemService()
         self.expression_service = ExpressionService()
         self.search_service = SearchService()
+        self.audio_service = AudioService() # Initialize Audio Service
+
+    def _sanitize_text_for_tts(self, text: str) -> str:
+        s = text or ""
+        s = re.sub(r"```[\s\S]*?```", "", s)
+        s = re.sub(r"\[IMAGE:[^\]]*\]", "", s)
+        s = re.sub(r"\[TOOL_CALL\][\s\S]*?(\n|$)", "", s)
+        s = re.sub(r"\[TOOL_RESULT\][\s\S]*?(\n|$)", "", s)
+        s = re.sub(r"\[System[^\]]*\]", "", s)
+        lines = []
+        for line in s.splitlines():
+            t = line.strip()
+            if not t:
+                continue
+            if t.startswith("注："):
+                continue
+            if re.match(r"^\(.*\)$", t):
+                continue
+            lines.append(line)
+        s = "\n".join(lines)
+        return s.strip()
+
+    def _split_into_chunks(self, text: str) -> List[str]:
+        units = []
+        parts = re.split(r"([。！？!?\.])", text)
+        cur = ""
+        for p in parts:
+            if re.match(r"[。！？!?\.]", p):
+                cur += p
+                if cur.strip():
+                    units.append(cur.strip())
+                cur = ""
+            else:
+                cur += p
+        if cur.strip():
+            units.append(cur.strip())
+        res = []
+        for u in units:
+            if len(u) <= 70:
+                res.append(u)
+                continue
+            subparts = re.split(r"([，,；;])", u)
+            buf = ""
+            for sp in subparts:
+                if re.match(r"[，,；;]", sp):
+                    buf += sp
+                    if buf.strip():
+                        res.append(buf.strip())
+                    buf = ""
+                else:
+                    if len(buf) + len(sp) > 70:
+                        if buf.strip():
+                            res.append(buf.strip())
+                        buf = sp
+                    else:
+                        buf += sp
+            if buf.strip():
+                res.append(buf.strip())
+        final = []
+        acc = ""
+        for piece in res:
+            if len(piece) < 6:
+                acc += piece + " "
+                continue
+            if acc:
+                final.append(acc.strip())
+                acc = ""
+            final.append(piece)
+        if acc.strip():
+            final.append(acc.strip())
+        return final
+
+    async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None):
+        """
+        Generates audio from text using TTS API and broadcasts it to the frontend.
+        Supports chunked generation for lower latency.
+        """
+        if not text:
+            return
+
+        clean_text = self._sanitize_text_for_tts(text)
+        
+        # 1. Credential Resolution & Fallback Logic
+        tts_api_key = api_key if api_key else settings.TTS_API_KEY
+        tts_base_url = base_url if base_url else settings.TTS_BASE_URL
+
+        # Heuristic: If base_url is DeepSeek (no TTS) or missing, and we have a configured TTS provider, switch.
+        # Also switch if no API key provided but we have one in settings.
+        should_switch_to_settings = False
+        
+        if not tts_api_key:
+            should_switch_to_settings = True
+        elif tts_base_url and "deepseek" in tts_base_url.lower():
+             # DeepSeek doesn't support TTS, so we must switch if possible
+             should_switch_to_settings = True
+        
+        if should_switch_to_settings and settings.TTS_API_KEY:
+            print(f"[Backend TTS] Switching to configured TTS provider (SiliconFlow) instead of {tts_base_url}")
+            tts_api_key = settings.TTS_API_KEY
+            tts_base_url = settings.TTS_BASE_URL or "https://api.siliconflow.cn/v1"
+
+        if not tts_base_url:
+            tts_base_url = "https://api.siliconflow.cn/v1"
+
+        if not tts_api_key or len(str(tts_api_key).strip()) < 10:
+            logger.error("[Backend TTS] Missing or invalid TTS API key. Provide X-SiliconFlow-Api-Key header or set TTS_API_KEY in .env")
+            return
+
+        # 2. Chunking for Low Latency
+        chunks = self._split_into_chunks(clean_text)
+        print(f"[Backend TTS] Split response into {len(chunks)} chunks.")
+        
+        # 3. Prepare TTS tasks
+        tasks = []
+        for sentence in chunks:
+            if not sentence.strip(): continue
+            tasks.append(
+                self.audio_service.generate_speech(
+                        text=sentence,
+                        api_key=tts_api_key,
+                        base_url=tts_base_url,
+                        model="FunAudioLLM/CosyVoice2-0.5B",
+                        voice="sys_female_01", # Trying a more generic voice, or 'alloy' if this fails. SiliconFlow often needs valid presets.
+                        speed=1.0
+                    )
+            )
+            
+        # 4. Execute tasks in parallel but broadcast in order
+        if not tasks: return
+        
+        print(f"[Backend TTS] Starting {len(tasks)} TTS tasks concurrently...")
+        try:
+            # Schedule all tasks to run on the event loop
+            running_tasks = [asyncio.create_task(t) for t in tasks]
+            
+            for i, task in enumerate(running_tasks):
+                try:
+                    result = await task
+                    
+                    if isinstance(result, bytes):
+                        # Convert to base64
+                        b64_audio = base64.b64encode(result).decode('utf-8')
+                        
+                        # Broadcast using 'cozy_audio' type which Frontend (app.js) expects
+                        # app.js supports: 
+                        # 1. type='audio', data={audio: b64}
+                        # 2. type='cozy_audio', audioData=b64
+                        await live2d_manager.broadcast({
+                            "type": "cozy_audio",
+                            "audioData": b64_audio,
+                            "text": chunks[i] if i < len(chunks) else ""
+                        })
+                        print(f"[Backend TTS] Broadcasted audio chunk {i+1}/{len(running_tasks)}")
+                        
+                        # Small delay to ensure order on network
+                        await asyncio.sleep(0.05) 
+                    else:
+                        logger.error(f"[Backend TTS] Error or empty result for sentence {i}: {result}")
+                        
+                except Exception as e:
+                    logger.error(f"[Backend TTS] Error generating audio for sentence {i}: {e}")
+
+        except Exception as e:
+            logger.error(f"[Backend TTS] Critical error in audio generation loop: {e}")
+
 
     async def process_message(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
                             session_id: str = None,
                             target_api_key: str = None, 
                             target_base_url: str = None, 
                             target_model: str = None,
+                            tts_api_key: str = None,
+                            tts_base_url: str = None,
                             enable_search: bool = False,
                             search_region: str = "zh-CN",
                             vision_config: Dict[str, Any] = None,
@@ -227,12 +400,17 @@ class ChatService:
             session.add(ai_msg)
             session.commit()
 
-        # 7. Post-Processing (Learning & Mood Update)
+        # 7. Post-Processing (Learning & Mood Update & Audio Generation)
         if background_tasks:
             background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
             background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}], target_api_key, target_base_url, target_model)
+            final_tts_key = tts_api_key if tts_api_key else target_api_key
+            final_tts_url = tts_base_url if tts_base_url else target_base_url
+            tts_text = self._sanitize_text_for_tts(final_response_text)
+            background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url)
         else:
             # Fallback for when no background_tasks context is provided
+            # Note: Awaiting here will block the response, but it's safer than losing the tasks
             await self._learn_from_interaction(text_content, user_id, target_api_key, target_base_url, target_model)
             await self.mood_service.update_mood(
                 user_id, 
@@ -241,6 +419,13 @@ class ChatService:
                 target_base_url,
                 target_model
             )
+            # We fire and forget audio if no background tasks, or await it?
+            # Ideally we should use asyncio.create_task but that might be killed if event loop closes?
+            # FastAPI lifespan keeps it alive usually.
+            final_tts_key = tts_api_key if tts_api_key else target_api_key
+            final_tts_url = tts_base_url if tts_base_url else target_base_url
+            tts_text = self._sanitize_text_for_tts(final_response_text)
+            asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url))
 
         return final_response_text
 
@@ -328,3 +513,6 @@ class ChatService:
                 print(f"Learned new memory for {user_id}: {data['memory_content']}")
         except Exception as e:
             print(f"Learning failed: {e}")
+
+
+

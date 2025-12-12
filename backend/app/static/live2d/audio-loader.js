@@ -167,7 +167,23 @@ class AudioManager {
 
     // 增强口型同步 - 支持中英文嘴型匹配
     startLipSync(model, analyser, modelId) {
-        if (!model || !model.internalModel || !model.internalModel.coreModel) return;
+        // Prevent multiple lip sync loops for the same model
+        const m = this.models.get(modelId);
+        if (m && m.isLipSyncing) {
+             console.log('[AudioLoader] LipSync already running for model:', modelId);
+             return;
+        }
+        if (m) m.isLipSyncing = true;
+        if (window.live2dManager && typeof window.live2dManager.setSpeaking === 'function') {
+            try { window.live2dManager.setSpeaking(true); } catch (_) {}
+        }
+
+        console.log('[AudioLoader] startLipSync called for model:', modelId);
+        if (!model || !model.internalModel || !model.internalModel.coreModel) {
+            console.error('[AudioLoader] Model or CoreModel not found for LipSync');
+            if (m) m.isLipSyncing = false;
+            return;
+        }
 
         const frequencyData = new Uint8Array(analyser.frequencyBinCount);
         const timeData = new Uint8Array(analyser.fftSize);
@@ -183,7 +199,10 @@ class AudioManager {
         const animate = () => {
             // Check if still playing
             const m = this.models.get(modelId);
-            if (!m || m.playingSources.size === 0) return;
+            if (!m || m.playingSources.size === 0) {
+                 if (m) m.isLipSyncing = false;
+                 return;
+            }
 
             analyser.getByteFrequencyData(frequencyData);
             analyser.getByteTimeDomainData(timeData);
@@ -197,7 +216,8 @@ class AudioManager {
                 const rms = Math.sqrt(sum / timeData.length);
                 
                 // Debug log for RMS and Lip Sync (throttled)
-                if (Math.random() < 0.01) {
+                if (Math.random() < 0.05) { // Increased to 5% for better visibility
+
                     console.log(`[AudioLoader] RMS: ${rms.toFixed(4)}, SmoothedMouth: ${smoothedMouthOpen.toFixed(4)}`);
                     try {
                          // Check available parameters if possible or just log attempt
@@ -212,11 +232,9 @@ class AudioManager {
                 
                 if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
                     window.live2dManager.setMouth(smoothedMouthOpen);
-                } else {
-                    try {
-                        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
-                    } catch(e) {}
                 }
+                try { model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen); } catch(e) {}
+                try { model.internalModel.coreModel.setParameterValueById('ParamA', smoothedMouthOpen); } catch(e) {}
                 
                 m.animationFrameId = requestAnimationFrame(animate);
                 return;
@@ -232,10 +250,16 @@ class AudioManager {
             const vowelness = (lowBand + midLowBand) / (lowBand + midLowBand + midHighBand + highBand + 0.001);
             
             // 开口度
-            let baseMouthOpen = Math.min(1, rms * 6);
+            // Reduced gain from 15 to 5 to prevent exaggerated mouth movement
+            let baseMouthOpen = Math.min(1, rms * 5);
             let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
             if (highBand > midLowBand * 0.5) {
                 targetMouthOpen = Math.max(targetMouthOpen, baseMouthOpen * 0.4);
+            }
+            
+            // Debug log for Lip Sync logic (throttled)
+            if (Math.random() < 0.05) {
+                 console.log(`[AudioLoader] RMS: ${rms.toFixed(4)} -> TargetMouth: ${targetMouthOpen.toFixed(4)}`);
             }
             
             // 嘴型形状
@@ -252,53 +276,26 @@ class AudioManager {
             smoothedMouthOpen = Math.min(1, Math.max(0, smoothedMouthOpen));
             smoothedMouthForm = Math.min(1, Math.max(-1, smoothedMouthForm));
             
-            // [Feature] 说话时增加身体和头部摆动
-            // Add sway motion when speaking (RMS/MouthOpen driven)
-            // Use setSwayParams for Motion Stacking (Smart Overlay)
-            if (window.live2dManager && smoothedMouthOpen > 0.05) {
-                const t = Date.now() / 1000;
-                // Amplitude proportional to mouth opening (speech intensity)
-                const swayAmp = smoothedMouthOpen * 5.0; 
-                
-                // Calculate sway angles
-                const swayParams = {
-                    ParamAngleX: Math.sin(t * 3.5) * 3.0 * swayAmp, // Head shake (Left/Right)
-                    ParamAngleY: Math.sin(t * 2.0) * 2.0 * swayAmp, // Head nod (Up/Down)
-                    ParamAngleZ: Math.sin(t * 1.5) * 1.5 * swayAmp, // Head tilt
-                    ParamBodyAngleX: Math.sin(t * 1.0) * 2.0 * swayAmp  // Body sway
-                };
-
-                try {
-                    // Install core override if not already installed (for stacking support)
-                    if (window.live2dManager.installCoreOverride && !window.live2dManager._coreOverrideInstalled) {
-                        window.live2dManager.installCoreOverride();
-                    }
-                    
-                    if (typeof window.live2dManager.setSwayParams === 'function') {
-                        window.live2dManager.setSwayParams(swayParams);
-                    } else {
-                        // Fallback if live2dManager update not applied yet
-                        model.internalModel.coreModel.setParameterValueById('ParamAngleX', swayParams.ParamAngleX);
-                        model.internalModel.coreModel.setParameterValueById('ParamAngleY', swayParams.ParamAngleY);
-                        model.internalModel.coreModel.setParameterValueById('ParamAngleZ', swayParams.ParamAngleZ);
-                        model.internalModel.coreModel.setParameterValueById('ParamBodyAngleX', swayParams.ParamBodyAngleX);
-                    }
-                } catch (_) {}
-            } else {
-                // Clear sway if mouth closed
-                if (window.live2dManager && typeof window.live2dManager.setSwayParams === 'function') {
-                    window.live2dManager.setSwayParams({});
-                }
-            }
+            // [Fixed] Removed body sway logic to prevent twitching/conflict with idle motions
+            // The previous sway logic was conflicting with the model's internal physics/idle animations.
 
             // 设置参数
             try {
-                if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
-                    window.live2dManager.setMouth(smoothedMouthOpen);
-                } else {
-                    model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen);
+                if (window.live2dManager) {
+                    if (typeof window.live2dManager.setMouth === 'function') {
+                        window.live2dManager.setMouth(smoothedMouthOpen);
+                    }
+                    if (typeof window.live2dManager.setMouthForm === 'function') {
+                        window.live2dManager.setMouthForm(smoothedMouthForm);
+                    }
                 }
-                model.internalModel.coreModel.setParameterValueById('ParamMouthForm', smoothedMouthForm);
+
+                // Legacy direct access (Manager override will take precedence if installed)
+                if (model && model.internalModel && model.internalModel.coreModel) {
+                    try { model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', smoothedMouthOpen); } catch(_) {}
+                    try { model.internalModel.coreModel.setParameterValueById('ParamA', smoothedMouthOpen); } catch(_) {}
+                    try { model.internalModel.coreModel.setParameterValueById('ParamMouthForm', smoothedMouthForm); } catch(_) {}
+                }
             } catch (_) {}
             
             m.animationFrameId = requestAnimationFrame(animate);
@@ -323,8 +320,12 @@ class AudioManager {
     stopLipSync(model, modelId) {
         if (!model) return;
         const m = this.models.get(modelId);
+        if (m) m.isLipSyncing = false; // [Fix] Reset lip sync flag so it can restart for next chunk
         if (m && m.animationFrameId) {
             cancelAnimationFrame(m.animationFrameId);
+        }
+        if (window.live2dManager && typeof window.live2dManager.setSpeaking === 'function') {
+            try { window.live2dManager.setSpeaking(false); } catch (_) {}
         }
         
         // 关闭嘴巴并重置嘴型

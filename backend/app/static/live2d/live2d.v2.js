@@ -65,15 +65,131 @@ class Live2DManager {
         this._origUpdateParameters = null;
         this._origExpressionUpdateParameters = null;
         this._mouthTicker = null;
+        this.isSpeaking = false;
 
         // [Parameter Override System]
         this.parameterOverrides = {}; // Stores active overrides: { "ParamName": value }
+        
+        // [Sway & Eye System]
+        this.audioSwayParams = {}; // Stores sway offsets: { "ParamAngleX": offset }
+        this.eyeParams = {}; // Stores eye offsets/targets
+        this.eyeTimer = null; // Timer for random eye movements
+        this.neuroBehaviorTimer = null; // Timer for neuro behavior loop
+        this.isSwayEnabled = true;
 
         // Listen for lock toggle from Flutter
         window.addEventListener('live2d-lock-click', () => {
             this.isLocked = !this.isLocked;
             console.log('[Live2D] Lock toggled via Flutter:', this.isLocked);
         });
+    }
+
+    setSwayParams(params) {
+        this.audioSwayParams = params;
+    }
+
+    // [Eye Movement System]
+    startRandomEyes() {
+        if (this.eyeTimer) return;
+        console.log('[Live2D] Starting Random Eye Movements (Neuro-style)');
+        
+        const moveEyes = () => {
+            if (!this.currentModel) {
+                 this.eyeTimer = setTimeout(moveEyes, 1000);
+                 return;
+            }
+
+            // Neuro-style: Random quick glances (saccades)
+            // Range: -1 to 1
+            const targetX = (Math.random() - 0.5) * 1.5; // Slight bias to center
+            const targetY = (Math.random() - 0.5) * 0.5; // Less vertical movement
+            
+            // Duration of the glance
+            const duration = 200 + Math.random() * 300; 
+            
+            // Perform the movement using a simple tween simulation
+            const startX = this.eyeParams['ParamEyeBallX'] || 0;
+            const startY = this.eyeParams['ParamEyeBallY'] || 0;
+            const startTime = Date.now();
+            
+            const animate = () => {
+                const now = Date.now();
+                const progress = Math.min(1, (now - startTime) / duration);
+                // EaseOutQuad
+                const ease = 1 - (1 - progress) * (1 - progress);
+                
+                this.eyeParams['ParamEyeBallX'] = startX + (targetX - startX) * ease;
+                this.eyeParams['ParamEyeBallY'] = startY + (targetY - startY) * ease;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                }
+            };
+            animate();
+
+            // Next movement in random time (0.5s to 4s)
+            const nextDelay = 500 + Math.random() * 3500;
+            this.eyeTimer = setTimeout(moveEyes, nextDelay);
+        };
+        
+        moveEyes();
+    }
+
+    stopRandomEyes() {
+        if (this.eyeTimer) {
+            clearTimeout(this.eyeTimer);
+            this.eyeTimer = null;
+        }
+        this.eyeParams = {};
+    }
+
+    // [Neuro Behavior System]
+    startNeuroBehavior() {
+        if (this.neuroBehaviorTimer) return;
+        console.log('[Live2D] Starting Neuro Behavior System');
+
+        const behaviorLoop = () => {
+            if (!this.currentModel) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 2000);
+                return;
+            }
+
+            // Only trigger if not already playing a motion (to avoid conflict)
+            // But we want to allow overlay on idle.
+            // Check if user is manually triggering emotion?
+            if (this.isEmotionChanging) {
+                 this.neuroBehaviorTimer = setTimeout(behaviorLoop, 2000);
+                 return;
+            }
+
+            // Random interval: 5s to 15s
+            const nextDelay = 5000 + Math.random() * 10000;
+            
+            // Random chance to do something
+            if (Math.random() < 0.4) {
+                const actions = ['Wink', 'CuteWink', 'HeadTilt', 'Search', 'EyeTwitch', 'MicroBodySway', 'Giggle'];
+                // If speaking, prefer subtle ones
+                let candidates = actions;
+                if (this.isSpeaking) {
+                    candidates = ['EyeTwitch', 'MicroBodySway', 'HeadTilt'];
+                }
+
+                const action = this.getRandomElement(candidates);
+                console.log(`[Neuro Behavior] Triggering: ${action}`);
+                this.playMotion(action);
+            }
+
+            this.neuroBehaviorTimer = setTimeout(behaviorLoop, nextDelay);
+        };
+
+        behaviorLoop();
+    }
+
+    stopNeuroBehavior() {
+        if (this.neuroBehaviorTimer) {
+            clearTimeout(this.neuroBehaviorTimer);
+            this.neuroBehaviorTimer = null;
+        }
     }
 
     // 从 FileReferences 推导 EmotionMapping（用于兼容历史数据）
@@ -134,6 +250,10 @@ class Live2DManager {
             // This prevents "this._applyParameterOverrides is not a function" errors and provides better motion stacking.
             console.log('[Live2D] PIXI Initialized. Ticker started:', this.pixi_app.ticker.started);
 
+            // Auto-start autonomous behaviors
+            this.startRandomEyes();
+            this.startNeuroBehavior();
+
             this.isInitialized = true;
             return this.pixi_app;
         }
@@ -154,15 +274,101 @@ class Live2DManager {
 
         console.log('[Live2D] Installing Core Override System for Motion Stacking');
         
+        // Helper to safely get parameter index (supports Cubism 2 and 4)
+        const getParamIndex = (id) => {
+             let idx = -1;
+             if (typeof coreModel.getParameterIndex === 'function') {
+                 idx = coreModel.getParameterIndex(id);
+             }
+             if (idx < 0 && coreModel._parameterIds && Array.isArray(coreModel._parameterIds)) {
+                 idx = coreModel._parameterIds.indexOf(id);
+             }
+             return idx;
+        };
+
+        // Helper to get parameter value (supports Cubism 2 and 4)
+        const getParamValue = (idx) => {
+             if (typeof coreModel.getParameterValueByIndex === 'function') {
+                 return coreModel.getParameterValueByIndex(idx);
+             } else if (typeof coreModel.getParamFloat === 'function') {
+                 return coreModel.getParamFloat(idx);
+             }
+             return 0;
+        };
+
+        // Helper to set parameter value (supports Cubism 2 and 4)
+        const setParamValue = (idx, value) => {
+             if (typeof coreModel.setParameterValueByIndex === 'function') {
+                 coreModel.setParameterValueByIndex(idx, value);
+             } else if (typeof coreModel.setParamFloat === 'function') {
+                 coreModel.setParamFloat(idx, value);
+             }
+        };
+
+        // [DEBUG] Dump all available parameters to help identify the correct mouth parameter
+        const dumpAllParameters = () => {
+             const msg = '[Live2D DEBUG] Dumping all available parameters:';
+             console.log(msg);
+             if (window.logToScreen) window.logToScreen(msg);
+
+             const paramCount = coreModel.getParameterCount ? coreModel.getParameterCount() : 
+                                (coreModel._parameterCount || (coreModel._parameterIds ? coreModel._parameterIds.length : 0));
+             
+             if (coreModel._parameterIds) {
+                 console.log('[Live2D DEBUG] _parameterIds:', coreModel._parameterIds);
+             }
+
+             let mouthParamsFound = [];
+             for (let i = 0; i < paramCount; i++) {
+                 let id = null;
+                 if (coreModel.getParameterId) {
+                     id = coreModel.getParameterId(i);
+                 } else if (coreModel._parameterIds) {
+                     id = coreModel._parameterIds[i];
+                 }
+                 
+                 // If we found an ID, check if it looks like a mouth param
+                 if (id) {
+                     if (id.toLowerCase().includes('mouth') || id.toLowerCase().includes('open')) {
+                         const info = `[Live2D DEBUG] Potential Mouth Param [${i}]: ${id}`;
+                         console.log(info);
+                         if (window.logToScreen) window.logToScreen(info);
+                         mouthParamsFound.push(id);
+                     }
+                 }
+             }
+             if (mouthParamsFound.length === 0) {
+                 if (window.logToScreen) window.logToScreen('[Live2D DEBUG] NO MOUTH PARAMS FOUND!', 'error');
+             }
+        };
+        try { dumpAllParameters(); } catch (e) { console.error('[Live2D DEBUG] Failed to dump params:', e); }
+
         // Cache indices
-        const mouthIds = ['ParamMouthOpenY', 'ParamO'];
-        const mouthIndices = {};
-        mouthIds.forEach(id => {
-             try {
-                 const idx = coreModel.getParameterIndex(id);
-                 if (idx >= 0) mouthIndices[id] = idx;
-             } catch (_) {}
-        });
+        const mouthIds = [
+            'ParamMouthOpenY', 'ParamMouthOpen', 'ParamA', 'ParamI', 'ParamU', 'ParamE', 'ParamO', 
+            'PARAM_MOUTH_OPEN_Y', 'PARAM_MOUTH_OPEN', 'PARAM_A', 'PARAM_I', 'PARAM_U', 'PARAM_E', 'PARAM_O',
+            'ParamMouthForm', 'PARAM_MOUTH_FORM'
+        ];
+        this._mouthIndices = {}; // Store on instance for debugging/updates
+
+        const findMouthIndices = () => {
+             this._mouthIndices = {};
+             mouthIds.forEach(id => {
+                 try {
+                     const idx = getParamIndex(id);
+                     if (idx >= 0) {
+                         this._mouthIndices[id] = idx;
+                         console.log(`[Live2D] Found mouth param: ${id} -> ${idx}`);
+                     }
+                 } catch (_) {}
+            });
+        };
+        
+        findMouthIndices();
+
+        if (Object.keys(this._mouthIndices).length === 0) {
+            console.warn('[Live2D] No mouth parameters found in CoreModel initially. Will retry in update loop.');
+        }
 
         // 1. Capture original update methods
         const origMotionManagerUpdate = motionManager.update ? motionManager.update.bind(motionManager) : null;
@@ -181,7 +387,7 @@ class Live2DManager {
                     if (this.audioSwayParams) {
                         for (const key in this.audioSwayParams) {
                             try {
-                                const idx = coreModel.getParameterIndex(key);
+                                const idx = getParamIndex(key);
                                 if (idx >= 0) preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
                             } catch (_) {}
                         }
@@ -192,11 +398,11 @@ class Live2DManager {
                             // Skip mouth/visibility
                             if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
                             try {
-                                const idx = coreModel.getParameterIndex(key);
+                                const idx = getParamIndex(key);
                                 if (idx >= 0) {
                                     // Only capture if not already captured
                                     if (preUpdateParams[key] === undefined) {
-                                        preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
+                                        preUpdateParams[key] = getParamValue(idx);
                                     }
                                 }
                             } catch (_) {}
@@ -208,44 +414,93 @@ class Live2DManager {
                         try { origMotionManagerUpdate(...args); } catch (e) {}
                     }
 
+                    // [Force Lip Sync] Immediately after motion update
+                    if (window.LanLan1 && typeof window.LanLan1.getMouth === 'function') {
+                        const currentMouth = window.LanLan1.getMouth();
+                        if (currentMouth > 0.01) {
+                             const mouthParams = [
+                                 'ParamMouthOpenY', 'ParamMouthOpen', 
+                                 'PARAM_MOUTH_OPEN_Y', 'PARAM_MOUTH_OPEN',
+                                 'ParamMouthA', 'ParamMouthI', 'ParamMouthU',
+                                 'ParamA', 'ParamI', 'ParamU', 'ParamE', 'ParamO',
+                                 'PARAM_A', 'PARAM_I', 'PARAM_U', 'PARAM_E', 'PARAM_O'
+                             ];
+                             mouthParams.forEach(id => {
+                                 const idx = getParamIndex(id);
+                                 if (idx >= 0) {
+                                     setParamValue(idx, currentMouth);
+                                     // Double tap with ID if possible
+                                     if (coreModel.setParameterValueById) {
+                                         try { coreModel.setParameterValueById(id, currentMouth); } catch(e) {}
+                                     }
+                                 }
+                             });
+                        }
+                    }
+
                     // C. Apply Smart Overlay (Stacking)
                     
-                    // 1. Apply Audio Sway Stacking
-                    if (this.audioSwayParams) {
+                    // 1. Apply Audio Sway Stacking (Additive Mode)
+                    if (this.audioSwayParams && this.isSwayEnabled) {
                         for (const [key, value] of Object.entries(this.audioSwayParams)) {
                             try {
-                                const idx = coreModel.getParameterIndex(key);
+                                const idx = getParamIndex(key);
                                 if (idx >= 0) {
-                                    const currentVal = coreModel.getParameterValueByIndex(idx);
-                                    
-                                    // Always stack sway (add to current)
-                                    // Logic: Sway is an OFFSET. So we always ADD it.
-                                    coreModel.setParameterValueByIndex(idx, currentVal + value);
+                                    const currentVal = getParamValue(idx);
+                                    // Add sway offset to current value (Idle Motion + Sway)
+                                    // 'value' is already calculated as the offset (e.g. sin(t)*amp)
+                                    setParamValue(idx, currentVal + value);
                                 }
                             } catch (_) {}
                         }
                     }
 
-                    // 2. Apply Parameter Overrides Stacking (Smart Overlay)
+                    // 2. Apply Random Eye Movements (Additive/Override)
+                    if (this.eyeParams) {
+                         for (const [key, value] of Object.entries(this.eyeParams)) {
+                             try {
+                                 const idx = getParamIndex(key);
+                                 if (idx >= 0) {
+                                     // For eyes, we usually override idle motion's random looking, 
+                                     // or we can add to it. Let's try override first as Neuro-sama's eyes are distinct.
+                                     // Actually, adding might be safer to keep blink logic working?
+                                     // Blinks use ParamEyeLOpen, Looking uses ParamEyeBallX/Y.
+                                     // Idle motion might move EyeBall. Let's ADD for subtle movement, or OVERRIDE for strong.
+                                     // Let's use Lerp towards target to be safe?
+                                     // For now: OVERRIDE because we want control.
+                                     setParamValue(idx, value);
+                                 }
+                             } catch (_) {}
+                         }
+                    }
+
+                    // 3. Apply Parameter Overrides Stacking (Smart Overlay)
                     if (this.parameterOverrides) {
                         for (const [key, value] of Object.entries(this.parameterOverrides)) {
                             if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
                             if (value === null) continue;
 
                             try {
-                                const idx = coreModel.getParameterIndex(key);
+                                const idx = getParamIndex(key);
                                 if (idx >= 0) {
-                                    const currentVal = coreModel.getParameterValueByIndex(idx);
+                                    const currentVal = getParamValue(idx);
                                     const preVal = preUpdateParams[key] !== undefined ? preUpdateParams[key] : currentVal;
-                                    const defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
+                                    
+                                    let defaultVal = 0;
+                                    try {
+                                        if (typeof coreModel.getParameterDefaultValueByIndex === 'function') {
+                                            defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
+                                        }
+                                    } catch(_) {}
+
                                     const offset = value - defaultVal; // Calculate desired offset from default
 
                                     // If motion changed the value, we add our offset (stacking)
                                     if (Math.abs(currentVal - preVal) > 0.001) {
-                                        coreModel.setParameterValueByIndex(idx, currentVal + offset);
+                                        setParamValue(idx, currentVal + offset);
                                     } else {
                                         // Motion didn't touch it, enforce our value
-                                        coreModel.setParameterValueByIndex(idx, value);
+                                        setParamValue(idx, value);
                                     }
                                 }
                             } catch (_) {}
@@ -264,22 +519,72 @@ class Live2DManager {
         // 3. Override CoreModel.update (The "Force Override" Layer)
         // This runs LAST, just before rendering. Good for Lip Sync.
         coreModel.update = () => {
-            try {
-                // A. Force Lip Sync (Priority 1)
+            // Helper to apply mouth parameters
+            const applyMouth = () => {
                 if (this.mouthValue > 0 || this.mouthOverrideActive) {
-                    for (const [id, idx] of Object.entries(mouthIndices)) {
-                         try { coreModel.setParameterValueByIndex(idx, this.mouthValue); } catch (_) {}
+                    // Retry finding indices if empty (lazy loading support)
+                    if (!this._mouthIndices || Object.keys(this._mouthIndices).length === 0) {
+                         findMouthIndices();
+                    }
+
+                    // Throttled debug log
+                    if (Math.random() < 0.005) {
+                         console.log(`[Live2D] Core Update: Forcing mouth to ${this.mouthValue}`);
+                    }
+                    for (const [id, idx] of Object.entries(this._mouthIndices)) {
+                         let targetVal = this.mouthValue;
+                         if (id === 'ParamMouthForm') {
+                             if (this.mouthFormValue !== undefined) {
+                                 targetVal = this.mouthFormValue;
+                             } else {
+                                 continue;
+                             }
+                         }
+                         
+                         try { 
+                             if (typeof coreModel.setParameterValueByIndex === 'function') {
+                                 coreModel.setParameterValueByIndex(idx, targetVal); 
+                             } else if (typeof coreModel.setParamFloat === 'function') {
+                                 coreModel.setParamFloat(idx, targetVal);
+                             }
+                         } catch (_) {}
                     }
                 }
-            } catch (e) {}
+            };
 
-            // C. Run original update
+            try {
+                // A. Force Lip Sync (Priority 1) - BEFORE original update
+                applyMouth();
+            } catch (e) {
+                console.error('[Live2D] Error in CoreModel.update override (Pre-LipSync):', e);
+            }
+
+            // B. Run original update (Computes physics/vertices based on params)
             if (origCoreModelUpdate) {
                 try { origCoreModelUpdate(); } catch (e) { console.error(e); }
+            } else {
+                // console.warn('[Live2D] Original CoreModel.update missing!');
+            }
+            
+            // C. POST-UPDATE Force Lip Sync (Priority 2) - AFTER original update
+            // This ensures our value sticks even if physics/motion update reset it.
+            try {
+                applyMouth();
+            } catch (e) {
+                console.error('[Live2D] Error in CoreModel.update override (Post-LipSync):', e);
             }
         };
 
         this._coreOverrideInstalled = true;
+    }
+
+    pauseIdle(pause) {
+        if (pause) this.stopIdleMotionScheduler(); else this.startIdleMotionScheduler();
+    }
+
+    setSpeaking(flag) {
+        this.isSpeaking = !!flag;
+        if (this.isSpeaking) this.stopIdleMotionScheduler(); else this.startIdleMotionScheduler();
     }
 
     // Set Audio Sway Parameters (for stacking)
@@ -290,7 +595,16 @@ class Live2DManager {
     // Set Mouth Value (0-1)
     setMouth(value) {
         this.mouthValue = Math.max(0, Math.min(1, Number(value) || 0));
-        this.mouthOverrideActive = true; // Flag to indicate we are actively controlling mouth
+        this.mouthOverrideActive = true;
+        if (this.mouthValue > 0.1 && Math.random() < 0.05) {
+             console.log(`[Live2D] setMouth called: ${value} -> stored: ${this.mouthValue}`);
+        }
+    }
+
+    // Set Mouth Form Value (-1 to 1)
+    setMouthForm(value) {
+        this.mouthFormValue = Math.max(-1, Math.min(1, Number(value) || 0));
+        this.mouthOverrideActive = true;
     }
 
     // [New] Set Parameter Override (for procedural stacking)
@@ -299,8 +613,16 @@ class Live2DManager {
         
         // Model Compatibility Check: Only set if model supports it
         if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel) {
+            const coreModel = this.currentModel.internalModel.coreModel;
             try {
-                const idx = this.currentModel.internalModel.coreModel.getParameterIndex(id);
+                let idx = -1;
+                if (typeof coreModel.getParameterIndex === 'function') {
+                    idx = coreModel.getParameterIndex(id);
+                }
+                if (idx < 0 && coreModel._parameterIds && Array.isArray(coreModel._parameterIds)) {
+                    idx = coreModel._parameterIds.indexOf(id);
+                }
+
                 if (idx < 0) {
                     // console.warn(`Model does not support parameter: ${id}`);
                     return; // Skip unsupported parameters
@@ -1220,7 +1542,7 @@ class Live2DManager {
                         const defaultValue = coreModel.getParameterDefaultValueByIndex(i);
                         
                         // 跳过嘴巴相关参数（这些由口型同步控制）
-                        if (paramId === 'ParamMouthOpenY' || paramId === 'ParamO') {
+                        if (['ParamMouthOpenY', 'ParamMouthOpen', 'ParamA', 'ParamI', 'ParamU', 'ParamE', 'ParamO'].includes(paramId)) {
                             continue;
                         }
                         
@@ -1765,6 +2087,13 @@ class Live2DManager {
 
             // 设置常驻表情（根据 EmotionMapping.expressions.常驻 或 FileReferences 前缀推导）
             await this.setupPersistentExpressions();
+
+            // Update compatibility references
+            if (!window.LanLan1) window.LanLan1 = {};
+            window.LanLan1.live2dModel = model;
+            window.LanLan1.currentModel = model;
+            window.LanLan1.emotionMapping = this.emotionMapping;
+            console.log('[Live2D] Updated window.LanLan1 references');
 
             // 启动待机动作调度器
             this.startIdleMotionScheduler();

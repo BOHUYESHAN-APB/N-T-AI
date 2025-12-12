@@ -81,6 +81,17 @@
     
     <!-- Load Main Logic -->
     <script src="/static/live2d/live2d.v2.js"></script>
+    <!-- Load App Logic (TTS, LipSync) -->
+    <script src="/static/live2d/app.js"></script>
+    <script>
+        // Initialize app if available
+        window.addEventListener('load', () => {
+            if (typeof init_app === 'function') {
+                console.log('[Index] Initializing App Logic...');
+                init_app();
+            }
+        });
+    </script>
 </head>
 <body>
     <div id="debug-console"></div>

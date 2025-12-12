@@ -212,6 +212,34 @@ class LLMService {
       headers['X-Search-Region'] = searchRegion;
       headers['X-Usage-Type'] = usageType;
       headers['X-Temperature'] = temperature.toString();
+
+      try {
+        final providersRaw = prefs.getString('settings.ai.providers');
+        if (providersRaw != null) {
+          final List data = jsonDecode(providersRaw) as List;
+          final List<Map<String, dynamic>> providers = data.cast<Map<String, dynamic>>();
+          Map<String, dynamic>? ttsProvider;
+          for (final p in providers) {
+            final category = p['category'] as String? ?? 'llm';
+            final enabled = p['enabled'] as bool? ?? true;
+            if (enabled && category == 'tts') { ttsProvider = p; break; }
+          }
+          if (ttsProvider != null) {
+            final ttsKey = ttsProvider['apiKey'] as String? ?? '';
+            var ttsUrl = ttsProvider['baseUrl'] as String? ?? '';
+            if (ttsKey.isNotEmpty) headers['X-SiliconFlow-Api-Key'] = ttsKey;
+            if (ttsUrl.isNotEmpty) {
+              if (ttsUrl.endsWith('/chat/completions')) {
+                ttsUrl = ttsUrl.replaceAll('/chat/completions', '');
+              }
+              if (ttsUrl.endsWith('/')) {
+                ttsUrl = ttsUrl.substring(0, ttsUrl.length - 1);
+              }
+              headers['X-SiliconFlow-Base-Url'] = ttsUrl;
+            }
+          }
+        }
+      } catch (_) {}
       
       // --- Vision Agent Configuration ---
       // Read vision settings to pass to backend

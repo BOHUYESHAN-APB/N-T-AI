@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MODEL: str = "gpt-3.5-turbo"
 
+    # TTS Configuration (SiliconFlow)
+    TTS_API_KEY: str = ""
+    TTS_BASE_URL: str = "https://api.siliconflow.cn/v1"
+
+    LOG_MAX_ERRORS: int = 5
+
     # Server / HTTPS
     HOST: str = "0.0.0.0"
     PORT: int = 8000

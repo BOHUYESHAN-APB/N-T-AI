@@ -36,6 +36,7 @@ Future<void> main(List<String> args) async {
 
   final controller = SettingsController();
   await controller.load();
+  await LoggerService().init(maxErrors: controller.settings.logMaxErrors, backendUrl: controller.settings.pythonBackendUrl);
   
   // Run Diagnostics
   await DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);

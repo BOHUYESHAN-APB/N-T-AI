@@ -56,6 +56,8 @@ class AudioService:
         """
         Generate speech using OpenAI-compatible API (TTS).
         """
+        import time
+        start_time = time.time()
         client = self._get_client(api_key, base_url)
         
         print(f"[AudioService] Calling TTS API: {base_url}/audio/speech")
@@ -70,12 +72,58 @@ class AudioService:
                 response_format=response_format,
                 speed=speed
             )
+            duration = time.time() - start_time
+            print(f"[AudioService] TTS API Completed in {duration:.2f}s. Size: {len(response.content)} bytes")
             return response.content
         except openai.APIStatusError as e:
-            print(f"[AudioService] TTS API Error: {e.status_code} - {e.response.text}")
+            duration = time.time() - start_time
+            print(f"[AudioService] TTS API Error after {duration:.2f}s: {e.status_code} - {e.response.text}")
             raise e
         except Exception as e:
-            print(f"[AudioService] TTS Error: {e}")
+            duration = time.time() - start_time
+            print(f"[AudioService] TTS Error after {duration:.2f}s: {e}")
+            raise e
+        finally:
+            await client.close()
+
+    async def generate_speech_stream(self, 
+                              text: str, 
+                              api_key: str, 
+                              base_url: str, 
+                              model: str = "FunAudioLLM/CosyVoice2-0.5B",
+                              voice: Optional[str] = "alex",
+                              response_format: str = "mp3",
+                              speed: float = 1.0):
+        """
+        Generate speech using OpenAI-compatible API (TTS) with streaming.
+        Yields bytes chunks.
+        """
+        import time
+        start_time = time.time()
+        client = self._get_client(api_key, base_url)
+        
+        print(f"[AudioService] Calling TTS API (Stream): {base_url}/audio/speech")
+        
+        try:
+            # Use with_streaming_response to get a streamable response
+            async with client.audio.speech.with_streaming_response.create(
+                model=model,
+                voice=voice,
+                input=text,
+                response_format=response_format,
+                speed=speed
+            ) as response:
+                first_chunk_time = time.time() - start_time
+                print(f"[AudioService] TTS Stream First Chunk in {first_chunk_time:.2f}s")
+                
+                async for chunk in response.iter_bytes(chunk_size=4096):
+                    yield chunk
+                    
+            total_time = time.time() - start_time
+            print(f"[AudioService] TTS Stream Completed in {total_time:.2f}s")
+            
+        except Exception as e:
+            print(f"[AudioService] TTS Stream Error: {e}")
             raise e
         finally:
             await client.close()

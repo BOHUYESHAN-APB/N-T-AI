@@ -1,18 +1,53 @@
 function init_app(){
-    const micButton = document.getElementById('micButton');
-    const muteButton = document.getElementById('muteButton');
-    const screenButton = document.getElementById('screenButton');
-    const stopButton = document.getElementById('stopButton');
-    const resetSessionButton = document.getElementById('resetSessionButton');
-    const statusElement = document.getElementById('status');
-    const chatContainer = document.getElementById('chatContainer');
-    const textInputBox = document.getElementById('textInputBox');
-    const textSendButton = document.getElementById('textSendButton');
-    const screenshotButton = document.getElementById('screenshotButton');
-    const screenshotThumbnailContainer = document.getElementById('screenshot-thumbnail-container');
-    const screenshotsList = document.getElementById('screenshots-list');
-    const screenshotCount = document.getElementById('screenshot-count');
-    const clearAllScreenshots = document.getElementById('clear-all-screenshots');
+    // [Log Recorder] Send frontend errors to backend
+    const sendLogToBackend = (msg, exc) => {
+        try {
+            fetch('/api/logs/frontend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    errors: [{
+                        timestamp: new Date().toISOString(),
+                        level: 'ERROR',
+                        message: msg,
+                        exception: exc
+                    }]
+                })
+            }).catch(() => {});
+        } catch (_) {}
+    };
+
+    window.onerror = function(message, source, lineno, colno, error) {
+        const msg = `[Global Error] ${message} (${source}:${lineno}:${colno})`;
+        const exc = error ? error.stack : null;
+        console.error(msg, exc);
+        sendLogToBackend(msg, exc);
+        return false;
+    };
+
+    window.onunhandledrejection = function(event) {
+        const msg = `[Unhandled Promise] ${event.reason}`;
+        console.error(msg, event.reason);
+        sendLogToBackend(msg, event.reason ? event.reason.stack : null);
+    };
+
+    // Helper to safely get element
+    const getEl = (id) => document.getElementById(id);
+
+    const micButton = getEl('micButton');
+    const muteButton = getEl('muteButton');
+    const screenButton = getEl('screenButton');
+    const stopButton = getEl('stopButton');
+    const resetSessionButton = getEl('resetSessionButton');
+    const statusElement = getEl('status') || { textContent: '' }; // Mock if missing
+    const chatContainer = getEl('chatContainer');
+    const textInputBox = getEl('textInputBox');
+    const textSendButton = getEl('textSendButton');
+    const screenshotButton = getEl('screenshotButton');
+    const screenshotThumbnailContainer = getEl('screenshot-thumbnail-container');
+    const screenshotsList = getEl('screenshots-list');
+    const screenshotCount = getEl('screenshot-count');
+    const clearAllScreenshots = getEl('clear-all-screenshots');
 
     let audioContext;
     let workletNode;
@@ -26,11 +61,20 @@ function init_app(){
     let screenshotCounter = 0; // 截图计数器
     let isPlaying = false;
     let audioStartTime = 0;
+    let nextChunkTime = 0; // Added for client-side TTS scheduling
     let scheduledSources = [];
     let animationFrameId;
     let seqCounter = 0;
     let globalAnalyser = null;
     let lipSyncActive = false;
+    
+    // Client-side TTS Buffer
+    // let ttsTextBuffer = "";
+    // const sentenceDelimiters = /[.。！？\?!\n]+/;
+    
+    // async function playTTS(text) {
+    //    ...
+    // }
     let screenCaptureStream = null; // 暂存屏幕共享stream，不再需要每次都弹窗选择共享区域，方便自动重连
     // 新增：当前选择的麦克风设备ID
     let selectedMicrophoneId = null;
@@ -71,10 +115,10 @@ function init_app(){
     // 建立WebSocket连接
     function connectWebSocket() {
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-        // [Refactor] Use 'default_user' or config name, fallback to 'Firefly' if undefined
-        // Original: lanlan_config.lanlan_name
-        const characterName = (typeof lanlan_config !== 'undefined' && lanlan_config.lanlan_name) ? lanlan_config.lanlan_name : 'Firefly';
-        socket = new WebSocket(`${protocol}://${window.location.host}/ws/${characterName}`);
+        const wsUrl = `${protocol}://${window.location.host}/api/live2d/ws`;
+        // Old: const characterName = ... /ws/${characterName} -> This was causing 403 errors
+        
+        socket = new WebSocket(wsUrl);
 
         socket.onopen = () => {
             console.log('WebSocket连接已建立');
@@ -109,25 +153,36 @@ function init_app(){
                     // 检查是否是新消息的开始
                     const isNewMessage = response.isNewMessage || false;
                     appendMessage(response.text, 'gemini', isNewMessage);
+                    
+                    // Reverted client-side TTS trigger
+                    // Backend will broadcast 'audio' events
+
                 } else if (response.type === 'user_transcript') {
                     // 处理用户语音转录，显示在聊天界面
                     appendMessage(response.text, 'user', true);
                 } else if (response.type === 'user_activity') {
                     clearAudioQueue();
-                } if (response.type === 'cozy_audio') {
+                } if (response.type === 'cozy_audio' || response.type === 'audio') {
                     // 处理音频响应
-                    console.log("收到新的音频头")
-                    const isNewMessage = response.isNewMessage || false;
-
-                    if (isNewMessage) {
-                        // 如果是新消息，清空当前音频队列
-                        clearAudioQueue();
+                    console.log("收到后端音频消息:", response.type);
+                    
+                    // Prevent playback if tab is hidden (avoid multiple clients echo)
+                    // If multiple tabs are open, only the visible one should play.
+                    if (document.hidden) {
+                         console.log("[Live2D WS] Tab is hidden, skipping audio playback.");
+                         // Don't return, let it process if needed, but don't play?
+                         // Actually, returning here is safe as the loop continues.
+                         return;
                     }
 
-                    // 根据数据格式选择处理方法
-                    if (response.format === 'base64') {
-                        handleBase64Audio(response.audioData, isNewMessage);
-                    }
+                    // if (response.format === 'base64') {
+                         // Use playAudioBase64 from audio-loader.js if available
+                         if (window.playAudioBase64 && response.data && response.data.audio) {
+                             window.playAudioBase64(response.data.audio);
+                         } else if (window.playAudioBase64 && response.audioData) { // Compatible with cozy_audio
+                             window.playAudioBase64(response.audioData);
+                         }
+                    // }
                 } else if (response.type === 'screen_share_error') {
                     // 屏幕分享/截图错误，复位按钮状态
                     statusElement.textContent = response.message;
@@ -220,6 +275,14 @@ function init_app(){
                     window.LanLan1.registered_expressions[response.message]();
                 } else if (response.type === 'system' && response.data === 'turn end') {
                     console.log('收到turn end事件，开始情感分析');
+                    
+                    // Flush remaining TTS
+                    // if (ttsTextBuffer.trim().length > 0) {
+                    //      console.log(`[Frontend TTS] Flushing remaining: "${ttsTextBuffer}"`);
+                    //      playTTS(ttsTextBuffer, seqCounter++);
+                    //      ttsTextBuffer = "";
+                    // }
+
                     // 消息完成时进行情感分析
                     if (currentGeminiMessage) {
                         const fullText = currentGeminiMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] 🎀 /, '');
@@ -1545,9 +1608,17 @@ function init_app(){
 
                 source.connect(globalAnalyser);
 
-                if (!lipSyncActive && window.LanLan1 && window.LanLan1.live2dModel) {
-                    startLipSync(window.LanLan1.live2dModel, globalAnalyser);
+                // Try to get model from LanLan1 or direct from manager
+                const model = (window.LanLan1 && window.LanLan1.live2dModel) || 
+                              (window.live2dManager && window.live2dManager.getCurrentModel());
+
+                if (!lipSyncActive && model) {
+                    console.log('[App] Starting LipSync with model:', model.internalModel ? 'Loaded' : 'Unknown');
+                    startLipSync(model, globalAnalyser);
                     lipSyncActive = true;
+                } else if (!lipSyncActive) {
+                    // Throttled log
+                    if (Math.random() < 0.01) console.log('[App] Waiting for model to start LipSync...');
                 }
 
                 // 精确时间调度
@@ -1565,8 +1636,10 @@ function init_app(){
                     }
 
                     if (scheduledSources.length === 0 && audioBufferQueue.length === 0) {
-                        if (window.LanLan1 && window.LanLan1.live2dModel) {
-                            stopLipSync(window.LanLan1.live2dModel);
+                        const model = (window.LanLan1 && window.LanLan1.live2dModel) || 
+                                      (window.live2dManager && window.live2dManager.getCurrentModel());
+                        if (model) {
+                            stopLipSync(model);
                         }
                         lipSyncActive = false;
                         isPlaying = false; // 新增：所有音频播放完毕，重置isPlaying
@@ -1676,6 +1749,7 @@ function init_app(){
     const minThreshold = 0.02;   // 静音阈值
     
     function startLipSync(model, analyser) {
+        console.log('[LipSync] Starting loop. Model:', !!model, 'Analyser:', !!analyser);
         // 使用频率数据进行更精确的口型分析
         const frequencyData = new Uint8Array(analyser.frequencyBinCount);
         const timeData = new Uint8Array(analyser.fftSize);
@@ -1697,13 +1771,27 @@ function init_app(){
             
             // 静音检测
             if (rms < minThreshold) {
-                // 平滑过渡到闭嘴
-                smoothedMouthOpen = smoothedMouthOpen * 0.85;
-                if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
-                
-                if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
-                    window.LanLan1.setMouth(smoothedMouthOpen);
+                // Fallback: If audio is supposed to be playing (isPlaying is true) but RMS is low,
+                // it might be a quiet part OR the analyser is failing. 
+                // We inject some random movement if isPlaying is true to ensure mouth moves.
+                if (isPlaying) {
+                     // Generate synthetic mouth movement
+                     const syntheticOpen = 0.2 + Math.random() * 0.4;
+                     smoothedMouthOpen += (syntheticOpen - smoothedMouthOpen) * smoothingFactor;
+                     
+                     if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                         window.LanLan1.setMouth(smoothedMouthOpen);
+                     }
+                } else {
+                    // Real silence
+                    smoothedMouthOpen = smoothedMouthOpen * 0.85;
+                    if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
+                    
+                    if (window.LanLan1 && typeof window.LanLan1.setMouth === 'function') {
+                        window.LanLan1.setMouth(smoothedMouthOpen);
+                    }
                 }
+                
                 animationFrameId = requestAnimationFrame(animate);
                 return;
             }
@@ -1731,6 +1819,11 @@ function init_app(){
             // 元音（vowelness高）-> 开口更大
             // 辅音（vowelness低，highBand高）-> 开口更小但更快速
             let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
+
+            // [DEBUG] Log RMS and target
+            if (Math.random() < 0.05) {
+                console.log(`[LipSync] RMS: ${rms.toFixed(4)}, Target: ${targetMouthOpen.toFixed(4)}`);
+            }
             
             // 高频摩擦音增强（辅音快速开合）
             if (highBand > midLowBand * 0.5) {
