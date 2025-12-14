@@ -53,6 +53,8 @@
 *   **语音交互 (Beta)**：
     *   **STT/TTS**: 支持通过云端 API (如 SiliconFlow) 进行语音转文字和文字转语音。
     *   **按住说话**: 聊天界面集成 Push-to-Talk 功能。
+*   **工具执行**：能够执行定义的工具来与环境交互。
+*   **Claude Skills 与 MCP Agent 集成**：利用先进的 "Claude 技能" 进行复杂推理，并结合 "MCP Agent" 编排多任务工作流，通过整合这些能力，使 Agent 能够完成更复杂的任务。
 *   **纯前端模式 (计划中)**：未来的更新将直接在 Flutter 前端实现这些 Agent 能力，移除对 Python 后端的依赖。
 
 ### 3. 记忆与个性化
@@ -131,6 +133,16 @@ N-T-AI 支持两种运行模式，由 `Enable Python Backend` 设置控制：
 
 ---
 
+## 🔐 安全与配置
+
+### 安全配置
+N-T-AI 优先保护您的数据隐私：
+*   **客户端存储**：所有敏感数据（如 OpenAI、SiliconFlow 等的 API Key）仅保存在您的设备上（手机/电脑），并使用加密的安全存储。
+*   **加密传输**：当前端与后端通信时：
+    *   使用 HTTP Header 传递配置（如 `X-Target-Api-Key`, `X-Target-Base-Url`）。
+    *   通过 **HTTPS**（TLS）加密传输。
+*   **无状态后端**：后端不持久化凭据，仅在本次请求中使用客户端提供的参数。
+
 ## 📦 安装
 
 1.  **前置条件**：确保已安装 Flutter SDK (3.0+)。
@@ -146,6 +158,16 @@ N-T-AI 支持两种运行模式，由 `Enable Python Backend` 设置控制：
     `
 
 ---
+
+## 🧠 推荐模型
+
+我们推荐 **[SiliconFlow (硅基流动)](https://cloud.siliconflow.cn/i/oiWI8xjZ)**，在性能与成本之间具有良好平衡。
+
+| 功能 | 推荐模型 | 说明 |
+| :--- | :--- | :--- |
+| **LLM** | `DeepSeek-V3` / `Qwen-2.5` | 高智能、低成本 |
+| **STT** | `SenseVoiceSmall` | 速度快、准确度高、多语言 |
+| **TTS** | `CosyVoice2-0.5B` | 情感自然、人声逼真 |
 
 ## 🔨 构建与编译
 
@@ -184,6 +206,14 @@ flutter build apk --release
 - [x] Live2D 集成 (基于 WebView)。
 
 ### 第二阶段：交互增强 (进行中)
+- [x] **架构优化**：客户端 (身体) 与服务端 (大脑) 分离。
+- [x] **安全连接**：支持 HTTPS，自签名证书轮换。
+- [x] **无状态后端**：通过 `X-Target-*` Header 动态接收前端配置，不在服务端存储密钥。
+- [x] **前端 TTS/STT**：将音频相关逻辑迁移到 Flutter，降低延迟。
+- [x] **部署工具**：完善 Docker 支持与一键启动脚本。
+- [x] **日志增强**：提升前端与后端的错误日志与诊断能力。
+- [ ] **Live2D 增强**：继续优化动作平滑与表情准确度。
+- [ ] **Claude Skills × MCP**：评估“能力装箱 + 分层加载”的工程化方案，与 MCP 工具连接正交组合。
 - [ ] **前端迁移**: 优先将后端逻辑 (ReAct Agent, 记忆系统) 迁移至 Flutter 前端，减少对 Python 环境的依赖。
 - [ ] **本地模型适配**:
     - 针对开源 STT/TTS 模型 (如 CosyVoice, SenseVoice) 制作 "一键启动包"，解决其配置比传统 LLM (Ollama/LM Studio) 更复杂的问题。
@@ -202,6 +232,11 @@ flutter build apk --release
 - [ ] **Open Code CLI 集成**：
     - 集成 [open-code-cli](https://opencode.ai/) (MIT License) 的自定义分支，提供类似 Claude Code CLI 的高级命令行能力 (跳过 MCP)。
 - [ ] **自定义 Agent**：支持用户配置的 AI Agent 正确添加到项目中，实现更完善的 Function Call 和 Tools Use。
+ - [ ] **Claude Skills 能力装箱与分层加载（研究中）**：
+    - **工程化范式**：以标准化文件夹封装任务能力（SKILL.md、scripts、references、assets、tests），分层按需加载，显著降低上下文预算。
+    - **正交组合**：MCP 负责“如何连接外部工具与数据源”，Skills 负责“如何完成具体任务”，两者组合提供可版本化、可测试、可复用的企业级 Agent 能力库。
+    - **最小范式示例**：SKILL.md 定义目标、输入/输出、分层加载策略、MCP 端点与执行步骤，失败回滚记录中间产物与错误日志。
+    - **定位与计划**：相比传统 Agent/MCP，更专注于针对性任务能力，适配特定场景；本项目将逐步评估并融入。
 
 ---
 

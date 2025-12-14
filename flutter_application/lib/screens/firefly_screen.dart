@@ -1,6 +1,7 @@
-import 'package:flutter/services.dart'; // Add this import for LogicalKeyboardKey
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
@@ -54,6 +55,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   StreamSubscription? _historySubscription;
   StreamSubscription? _faceSubscription;
+  StreamSubscription? _ttsSubscription;
 
   // Floating window service
   FloatingWindowService? _floatingWindowService;
@@ -73,6 +75,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _loadSessions();
     _historySubscription = _chatHistory.updateStream.listen((_) {
       if (mounted) _loadSessions();
+    });
+
+    _ttsSubscription = _brain.ttsStream.listen((bytes) {
+      _handleTtsForLive2D(bytes);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -119,6 +125,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
           modelPath: modelPath,
           width: 400,
           height: 600,
+        );
+        await _floatingWindowService!.executeJavaScript(
+          "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;",
         );
       } catch (e) {
         debugPrint('[FireflyScreen] Failed to create floating window: $e');
@@ -167,12 +176,30 @@ class _FireflyScreenState extends State<FireflyScreen> {
   void dispose() {
     _historySubscription?.cancel();
     _faceSubscription?.cancel();
+    _ttsSubscription?.cancel();
     _floatingWindowService?.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _faceController.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleTtsForLive2D(Uint8List bytes) async {
+    if (!mounted) return;
+    final settings = SettingsScope.of(context).settings;
+    final enableAnyLive2D = settings.enableFloatingWindow || settings.showLive2D || settings.showLive2DMiniWindow;
+    if (!enableAnyLive2D) return;
+    final b64 = base64Encode(bytes);
+    final js = "if (window.playExternalAudio) window.playExternalAudio('$b64','mp3');";
+    try {
+      await _live2dController.executeJs(js);
+    } catch (_) {}
+    try {
+      if (settings.enableFloatingWindow && _floatingWindowService != null) {
+        await _floatingWindowService!.executeJavaScript(js);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadSessions() async {

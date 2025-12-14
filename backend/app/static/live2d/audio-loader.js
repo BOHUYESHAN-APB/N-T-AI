@@ -6,10 +6,18 @@ class AudioManager {
         this.priority = {LanLan1: true, LanLan2: false};         // 同前
     }
 
-    /** 确保 ctx 可用——若还没解锁就抛错，让调用方决定怎么做 */
     ensureCtx() {
-        if (!this.ctx || this.ctx.state === 'suspended') {
-            throw new Error('AudioContext not unlocked yet');
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+        for (const [id, m] of this.models) {
+            if (!m.gain) {
+                const {gain, analyser, outputGain} = this._buildNodes();
+                Object.assign(m, {gain, analyser, outputGain});
+            }
         }
         return this.ctx;
     }
@@ -25,8 +33,8 @@ class AudioManager {
         // 任何依赖 ctx 的 Graph 也可以在这里补建
         for (const [id, m] of this.models) {
             if (!m.gain) {
-                const {gain, analyser} = this._buildNodes();
-                Object.assign(m, {gain, analyser});
+                const {gain, analyser, outputGain} = this._buildNodes();
+                Object.assign(m, {gain, analyser, outputGain});
             }
         }
     }
@@ -39,28 +47,39 @@ class AudioManager {
         const modelState = {
             gain: null,
             analyser: null,
+            outputGain: null,
             queue: [],
             nextTime: 0,
             playingSources: new Set(),
             animationFrameId: null,
+            lipSyncStopAt: 0,
         };
         this.models.set(modelId, modelState);
 
         // [Fix] If context is already unlocked, build nodes immediately!
         if (this.ctx && this.ctx.state !== 'closed') {
-             const {gain, analyser} = this._buildNodes();
-             Object.assign(modelState, {gain, analyser});
+             const {gain, analyser, outputGain} = this._buildNodes();
+             Object.assign(modelState, {gain, analyser, outputGain});
         }
     }
 
     /** 内部小工具：生成 Gain + Analyser */
     _buildNodes() {
-        const gain = this.ctx.createGain();
+        const gain = this.ctx.createGain(); // Input Gain (Ducking)
         const analyser = this.ctx.createAnalyser();
+        const outputGain = this.ctx.createGain(); // Output Gain (Volume/Mute)
+        
         gain.connect(analyser);
-        analyser.connect(this.ctx.destination);
+        analyser.connect(outputGain);
+        outputGain.connect(this.ctx.destination);
+        
         analyser.fftSize = 2048;
-        return {gain, analyser};
+        
+        // [Triple Playback Fix] Default to MUTED to prevent echo.
+        // Flutter plays the audio. Live2D uses it for lip-sync only.
+        outputGain.gain.value = 0.0; 
+        
+        return {gain, analyser, outputGain};
     }
 
     /** 往某个模型的播放队列塞一段 PCM buffer */
@@ -69,7 +88,16 @@ class AudioManager {
         m.queue.push({buffer: audioBuffer, seq});
         m.queue.sort((a, b) => a.seq - b.seq);
         if (m.playingSources.size === 0) {
-            m.nextTime = this.ctx.currentTime + 0.1;
+            m.nextTime = this.ctx.currentTime + 0.02;
+            let model = null;
+            if (window.live2dManager && window.live2dManager.currentModel) {
+                model = window.live2dManager.currentModel;
+            } else if (window[modelId] && window[modelId].live2dModel) {
+                model = window[modelId].live2dModel; // Legacy fallback
+            }
+            if (model) {
+                try { this.startLipSync(model, m.analyser, modelId); } catch (_) {}
+            }
         }
         if (!m.schedulingLoop) this._scheduleLoop(modelId);
     }
@@ -81,9 +109,10 @@ class AudioManager {
         const lookAhead = 4;               // 4 s 预调度
         const fadeTime = 0.05; // 50ms淡入淡出时间 (Increased for smoothness)
         const loop = () => {
-            const tNow = this.ctx.currentTime;
+            try {
+                const tNow = this.ctx.currentTime;
 
-            while (m.queue.length && m.nextTime < tNow + lookAhead) {
+                while (m.queue.length && m.nextTime < tNow + lookAhead) {
                 const {buffer} = m.queue.shift();
                 const src = this.ctx.createBufferSource();
                 // src.buffer = buffer;
@@ -107,11 +136,6 @@ class AudioManager {
                     model = window[modelId].live2dModel; // Legacy fallback
                 }
 
-                // 口型
-                if (model) {
-                    this.startLipSync(model, m.analyser, modelId);
-                }
-
                 src.onended = () => {
                     m.playingSources.delete(src);
                     if (m.playingSources.size === 0) {
@@ -122,14 +146,35 @@ class AudioManager {
                 };
 
                 src.start(m.nextTime);
-                m.nextTime += buffer.duration;
+                const clipEnd = m.nextTime + buffer.duration;
+                const margin = 0.25;
+                const hardStop = clipEnd + margin;
+                if (!m.lipSyncStopAt || hardStop > m.lipSyncStopAt) {
+                    m.lipSyncStopAt = hardStop;
+                }
+                m.nextTime = clipEnd;
                 m.playingSources.add(src);
+                if (model) {
+                    this.startLipSync(model, m.analyser, modelId);
+                }
                 this._updateDuck();            // 让优先级立即生效
+                console.log(`[AudioLoader] [${Date.now()}] Playback started. Buffer duration: ${buffer.duration.toFixed(3)}s`);
             }
             if (m.queue.length || m.playingSources.size) {
                 setTimeout(loop, 25);
             } else {
                 m.schedulingLoop = false;      // 暂停 loop，等下一包再启动
+                console.log(`[AudioLoader] [${Date.now()}] Queue empty. Stopping loop.`);
+            }
+            } catch (e) {
+                console.error('[AudioLoader] Schedule loop error:', e);
+                // Retry instead of stopping completely
+                if (m.queue.length > 0) {
+                     console.log('[AudioLoader] Retrying loop in 100ms...');
+                     setTimeout(loop, 100);
+                } else {
+                     m.schedulingLoop = false;
+                }
             }
         };
         loop();
@@ -190,18 +235,27 @@ class AudioManager {
         const sampleRate = this.ctx?.sampleRate || 44100;
         const binSize = sampleRate / analyser.fftSize;
         
-        // 平滑参数
-        let smoothedMouthOpen = 0;
+        let smoothedMouthOpen = 0.0;
         let smoothedMouthForm = 0;
-        const smoothingFactor = 0.3;
-        const minThreshold = 0.02;
+        const smoothingFactor = 0.35;
+        const minThreshold = 0.003;
 
         const animate = () => {
-            // Check if still playing
             const m = this.models.get(modelId);
-            if (!m || m.playingSources.size === 0) {
-                 if (m) m.isLipSyncing = false;
-                 return;
+            if (!m) {
+                return;
+            }
+
+            if (m.lipSyncStopAt && this.ctx && typeof this.ctx.currentTime === 'number') {
+                if (this.ctx.currentTime >= m.lipSyncStopAt) {
+                    this.stopLipSync(model, modelId);
+                    return;
+                }
+            }
+            const hasPendingAudio = (m.playingSources.size > 0 || m.queue.length > 0);
+            if (!hasPendingAudio) {
+                m.isLipSyncing = false;
+                return;
             }
 
             analyser.getByteFrequencyData(frequencyData);
@@ -227,7 +281,8 @@ class AudioManager {
                 
                 // 静音检测
             if (rms < minThreshold) {
-                smoothedMouthOpen = smoothedMouthOpen * 0.85;
+                smoothedMouthOpen += (0 - smoothedMouthOpen) * 0.5;
+                smoothedMouthForm += (0 - smoothedMouthForm) * 0.5;
                 if (smoothedMouthOpen < 0.01) smoothedMouthOpen = 0;
                 
                 if (window.live2dManager && typeof window.live2dManager.setMouth === 'function') {
@@ -250,9 +305,16 @@ class AudioManager {
             const vowelness = (lowBand + midLowBand) / (lowBand + midLowBand + midHighBand + highBand + 0.001);
             
             // 开口度
-            // Reduced gain from 15 to 5 to prevent exaggerated mouth movement
-            let baseMouthOpen = Math.min(1, rms * 5);
-            let targetMouthOpen = baseMouthOpen * (0.5 + vowelness * 0.7);
+            let baseMouthOpen = Math.min(1, rms * 6.0);
+            
+            // [Adjusted] Vowel influence
+            let targetMouthOpen = baseMouthOpen * (0.4 + vowelness * 0.8);
+            
+            // [Fix] Ensure minimum opening if there is significant sound
+            if (rms > 0.005 && targetMouthOpen < 0.1) {
+                targetMouthOpen = 0.1 + rms * 5.0;
+            }
+
             if (highBand > midLowBand * 0.5) {
                 targetMouthOpen = Math.max(targetMouthOpen, baseMouthOpen * 0.4);
             }
@@ -275,6 +337,9 @@ class AudioManager {
             
             smoothedMouthOpen = Math.min(1, Math.max(0, smoothedMouthOpen));
             smoothedMouthForm = Math.min(1, Math.max(-1, smoothedMouthForm));
+
+            // [Force] Ensure mouth closes if very small
+            if (smoothedMouthOpen < 0.015) smoothedMouthOpen = 0;
             
             // [Fixed] Removed body sway logic to prevent twitching/conflict with idle motions
             // The previous sway logic was conflicting with the model's internal physics/idle animations.
@@ -371,11 +436,74 @@ function handleAudioBlobFor(id, blob, seq) {
     });
 }
 
-/**
- * Play audio from Base64 string (called from Flutter via WebSocket)
- */
+    /**
+     * [New] Support URL playback to reduce delay.
+     * Fetches audio, decodes it, and enqueues it for lip-sync.
+     * Note: Output volume is controlled by _buildNodes() (currently 0.0 for lip-sync only).
+     */
+function playAudioUrl(url) {
+        try { window.AM.unlock(); } catch (_) {}
+        try { window.AM.ensureCtx(); } catch (_) {}
+        let modelId = 'default_model';
+        if (window.live2dManager && window.live2dManager.modelName) {
+            modelId = window.live2dManager.modelName;
+        }
+        if (!window.AM.models.has(modelId)) {
+             window.AM.register(modelId);
+        }
+
+        const startTime = Date.now();
+        console.log(`[AudioLoader] [${startTime}] Start fetching audio URL: ${url}`);
+
+        fetch(url)
+            .then(response => {
+                console.log(`[AudioLoader] [${Date.now()}] Download complete. Status: ${response.status}`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return response.arrayBuffer();
+            })
+            .then(arrayBuffer => {
+                const downloadTime = Date.now() - startTime;
+                console.log(`[AudioLoader] [${Date.now()}] ArrayBuffer received. Size: ${arrayBuffer.byteLength} bytes. Download time: ${downloadTime}ms`);
+                
+                try {
+                    const ctx = window.AM.ensureCtx();
+                    const decodeStart = Date.now();
+                    ctx.decodeAudioData(arrayBuffer).then(audioBuffer => {
+                        const decodeTime = Date.now() - decodeStart;
+                        console.log(`[AudioLoader] [${Date.now()}] Audio decoded. Duration: ${audioBuffer.duration.toFixed(3)}s. Decode time: ${decodeTime}ms`);
+                        
+                        // Enqueue for playback (lip-sync)
+                        window.AM.enqueue(modelId, audioBuffer, Date.now());
+                        
+                        // Safety check: if loop isn't running, it might be stuck
+                        setTimeout(() => {
+                            const m = window.AM.models.get(modelId);
+                            if (m && !m.isLipSyncing && m.queue.length > 0) {
+                                console.warn('[AudioLoader] LipSync slow to start (URL). Queue length:', m.queue.length);
+                                if (!m.schedulingLoop) {
+                                     console.log('[AudioLoader] Restarting loop manually');
+                                     window.AM._scheduleLoop(modelId);
+                                }
+                            }
+                        }, 500); // Check after 500ms
+                        
+                    }).catch(e => {
+                        console.error("[AudioLoader] Error decoding audio data:", e);
+                    });
+                } catch (e) {
+                     console.error("[AudioLoader] AudioContext error during decode:", e);
+                }
+            })
+            .catch(e => console.error("[AudioLoader] Error fetching audio URL:", e));
+    }
+
+    /**
+     * Play audio from Base64 string (called from Flutter via WebSocket)
+     */
 function playAudioBase64(base64String) {
     try {
+        try { window.AM.unlock(); } catch (_) {}
+        try { window.AM.ensureCtx(); } catch (_) {}
         const binaryString = window.atob(base64String);
         const len = binaryString.length;
         const bytes = new Uint8Array(len);
@@ -394,8 +522,21 @@ function playAudioBase64(base64String) {
              window.AM.register(modelId);
         }
 
-        console.log(`[Audio] Received audio for model: ${modelId}`);
+        console.log(`[Audio] Received audio for model: ${modelId}, Base64 length: ${base64String.length}`);
         handleAudioBlobFor(modelId, new Blob([bytes]), Date.now());
+        
+        // Monitor LipSync status
+        setTimeout(() => {
+            const m = window.AM.models.get(modelId);
+            if (m && !m.isLipSyncing && m.queue.length > 0) {
+                console.warn('[AudioLoader] LipSync slow to start. Queue length:', m.queue.length);
+                // Do not re-enqueue to avoid triple playback
+                if (!m.schedulingLoop) {
+                     console.log('[AudioLoader] Restarting loop manually');
+                     window.AM._scheduleLoop(modelId);
+                }
+            }
+        }, 1000);
         
     } catch (e) {
         console.error("[Audio] Failed to process base64 audio:", e);
@@ -403,5 +544,7 @@ function playAudioBase64(base64String) {
 }
 
 window.AM = new AudioManager();
+window.playAudioBase64 = playAudioBase64;
+window.playAudioUrl = playAudioUrl;
 window.addEventListener('pointerdown', unlockAudio, {passive: true});
 window.addEventListener('keydown', unlockAudio, {passive: true});

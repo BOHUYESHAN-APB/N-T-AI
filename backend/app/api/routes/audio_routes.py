@@ -67,6 +67,19 @@ async def generate_speech_stream(
         print("[AudioRoutes] Missing API Key")
         raise HTTPException(status_code=401, detail="API Key is required")
 
+    # Auto-fix common voice aliases for SiliconFlow/CosyVoice (Streaming)
+    if model and "CosyVoice" in model:
+        if not voice or voice == "alex":
+            voice = "FunAudioLLM/CosyVoice2-0.5B:alex"
+        elif voice == "sys_female_01": 
+            voice = "FunAudioLLM/CosyVoice2-0.5B:alex" 
+        elif voice == "sys_male_01":
+            voice = "FunAudioLLM/CosyVoice2-0.5B:benjamin"
+        elif ":" not in voice and "/" not in voice:
+             known_system_voices = ["alex", "anna", "bella", "benjamin", "charles", "diana"]
+             if voice in known_system_voices:
+                 voice = f"{model}:{voice}"
+
     print(f"[AudioRoutes] TTS Stream Request: Model={model}, Voice={voice}, InputLen={len(input)}")
 
     async def iterfile():
@@ -118,12 +131,22 @@ async def generate_speech(
     original_voice = voice
     original_model = model
     
-    # if model and "CosyVoice" in model:
-    #     if not voice or voice == "alex":
-    #         voice = "FunAudioLLM/CosyVoice2-0.5B:alex"
-    #     elif ":" not in voice and "/" not in voice:
-    #          # If user passed just "benjamin" etc, try prepending model
-    #          voice = f"{model}:{voice}"
+    # Auto-fix common voice aliases for SiliconFlow/CosyVoice
+    if model and "CosyVoice" in model:
+        if not voice or voice == "alex":
+            voice = "FunAudioLLM/CosyVoice2-0.5B:alex"
+        elif voice == "sys_female_01": # Common frontend default
+            voice = "FunAudioLLM/CosyVoice2-0.5B:alex" # Map to Alex or another default female voice
+        elif voice == "sys_male_01":
+            voice = "FunAudioLLM/CosyVoice2-0.5B:benjamin" # Map to Benjamin
+        elif ":" not in voice and "/" not in voice:
+             # If user passed just "benjamin" etc, try prepending model
+             # But be careful, custom voices don't need model prefix usually?
+             # Actually system voices need prefix. Custom voices are just UUIDs or names.
+             # We assume short names are system voices.
+             known_system_voices = ["alex", "anna", "bella", "benjamin", "charles", "diana"]
+             if voice in known_system_voices:
+                 voice = f"{model}:{voice}"
     
     import time
     start_time = time.time()

@@ -297,11 +297,26 @@ class Live2DManager {
         };
 
         // Helper to set parameter value (supports Cubism 2 and 4)
+        // [Optimization] Added Low-Pass Filter (Smoothing) to prevent twitching
+        // This acts as a global damper on all parameter changes.
+        this._paramSmootherState = {}; // Store last values for LPF
+        const SMOOTH_FACTOR = 0.6; // 0.0 = frozen, 1.0 = instant. 0.5-0.7 is good for smoothing.
+
         const setParamValue = (idx, value) => {
+             // Apply smoothing if we have a previous value
+             let finalValue = value;
+             // Only smooth if we have history (skip first frame)
+             if (this._paramSmootherState[idx] !== undefined) {
+                 const prev = this._paramSmootherState[idx];
+                 // Simple Lerp: current = prev + (target - prev) * factor
+                 finalValue = prev + (value - prev) * SMOOTH_FACTOR;
+             }
+             this._paramSmootherState[idx] = finalValue;
+
              if (typeof coreModel.setParameterValueByIndex === 'function') {
-                 coreModel.setParameterValueByIndex(idx, value);
+                 coreModel.setParameterValueByIndex(idx, finalValue);
              } else if (typeof coreModel.setParamFloat === 'function') {
-                 coreModel.setParamFloat(idx, value);
+                 coreModel.setParamFloat(idx, finalValue);
              }
         };
 
@@ -438,37 +453,55 @@ class Live2DManager {
                         }
                     }
 
+                    const postUpdateParams = {};
+                    if (this.parameterOverrides) {
+                        for (const key in this.parameterOverrides) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = getParamIndex(key);
+                                if (idx >= 0) {
+                                    postUpdateParams[key] = getParamValue(idx);
+                                }
+                            } catch (_) {}
+                        }
+                    }
+                    this.internalParameterValues = postUpdateParams;
+
                     // C. Apply Smart Overlay (Stacking)
                     
-                    // 1. Apply Audio Sway Stacking (Additive Mode)
+                    // 1. Apply Audio Sway Stacking (Smoothed Additive Mode)
                     if (this.audioSwayParams && this.isSwayEnabled) {
                         for (const [key, value] of Object.entries(this.audioSwayParams)) {
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) {
                                     const currentVal = getParamValue(idx);
-                                    // Add sway offset to current value (Idle Motion + Sway)
-                                    // 'value' is already calculated as the offset (e.g. sin(t)*amp)
-                                    setParamValue(idx, currentVal + value);
+                                    // Limit sway amplitude to avoid twitching (clamp additive offset)
+                                    // Smoothly blend if needed, but here we just clamp max offset
+                                    const clampedValue = Math.max(-10, Math.min(10, value)); // Arbitrary safety clamp
+                                    setParamValue(idx, currentVal + clampedValue);
                                 }
                             } catch (_) {}
                         }
                     }
 
-                    // 2. Apply Random Eye Movements (Additive/Override)
+                    // 2. Apply Random Eye Movements (Additive/Override with smoothing)
                     if (this.eyeParams) {
                          for (const [key, value] of Object.entries(this.eyeParams)) {
                              try {
                                  const idx = getParamIndex(key);
                                  if (idx >= 0) {
-                                     // For eyes, we usually override idle motion's random looking, 
-                                     // or we can add to it. Let's try override first as Neuro-sama's eyes are distinct.
-                                     // Actually, adding might be safer to keep blink logic working?
-                                     // Blinks use ParamEyeLOpen, Looking uses ParamEyeBallX/Y.
-                                     // Idle motion might move EyeBall. Let's ADD for subtle movement, or OVERRIDE for strong.
-                                     // Let's use Lerp towards target to be safe?
-                                     // For now: OVERRIDE because we want control.
-                                     setParamValue(idx, value);
+                                     // Use simple lerp for smoothing eye movement to avoid snap
+                                     const currentVal = getParamValue(idx);
+                                     // Lerp factor
+                                     const lerp = (a, b, t) => a + (b - a) * t;
+                                     const targetVal = value;
+                                     // If diff is large, snap? No, always lerp for Neuro-sama style smoothness
+                                     // But update loop is fast, so we need state. 
+                                     // For now, just setting it is "okay" if the source (behavior loop) is updating infrequently.
+                                     // To fix "twitching", we ensure we don't conflict with idle motion too aggressively.
+                                     // Force override for eyes is usually better than additive for "looking at something".
+                                     setParamValue(idx, targetVal);
                                  }
                              } catch (_) {}
                          }
@@ -542,10 +575,18 @@ class Live2DManager {
                          }
                          
                          try { 
+                             // Apply smoothing for mouth as well
+                             let target = targetVal;
+                             if (this._paramSmootherState[idx] !== undefined) {
+                                 const prev = this._paramSmootherState[idx];
+                                 target = prev + (targetVal - prev) * 0.8; // Faster smoothing for mouth (0.8)
+                             }
+                             this._paramSmootherState[idx] = target;
+
                              if (typeof coreModel.setParameterValueByIndex === 'function') {
-                                 coreModel.setParameterValueByIndex(idx, targetVal); 
+                                 coreModel.setParameterValueByIndex(idx, target); 
                              } else if (typeof coreModel.setParamFloat === 'function') {
-                                 coreModel.setParamFloat(idx, targetVal);
+                                 coreModel.setParamFloat(idx, target);
                              }
                          } catch (_) {}
                     }
@@ -594,8 +635,31 @@ class Live2DManager {
 
     // Set Mouth Value (0-1)
     setMouth(value) {
-        this.mouthValue = Math.max(0, Math.min(1, Number(value) || 0));
-        this.mouthOverrideActive = true;
+        const newVal = Math.max(0, Math.min(1, Number(value) || 0));
+        
+        // Force update immediately if change is significant
+        if (Math.abs(newVal - this.mouthValue) > 0.01) {
+            this.mouthValue = newVal;
+            this.mouthOverrideActive = true;
+            
+            // Apply immediately to current model if available
+            if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel) {
+                 const coreModel = this.currentModel.internalModel.coreModel;
+                 if (this._mouthIndices) {
+                     for (const [id, idx] of Object.entries(this._mouthIndices)) {
+                         if (id === 'ParamMouthForm') continue;
+                         try {
+                             if (typeof coreModel.setParameterValueByIndex === 'function') {
+                                 coreModel.setParameterValueByIndex(idx, this.mouthValue);
+                             } else if (typeof coreModel.setParamFloat === 'function') {
+                                 coreModel.setParamFloat(idx, this.mouthValue);
+                             }
+                         } catch (_) {}
+                     }
+                 }
+            }
+        }
+        
         if (this.mouthValue > 0.1 && Math.random() < 0.05) {
              console.log(`[Live2D] setMouth called: ${value} -> stored: ${this.mouthValue}`);
         }
@@ -1960,12 +2024,12 @@ class Live2DManager {
                 model = await PIXI.live2d.Live2DModel.from(modelPath, { autoInteract: false });
                 console.log('[Live2D] Model loaded successfully.');
             } catch (loadError) {
-                console.warn('模型加载失败，尝试回退到默认模型: mao_pro', loadError);
-                if (modelPath !== '/static/mao_pro/mao_pro.model3.json') {
+                console.warn('模型加载失败，尝试回退到默认模型: mao_pro_zh', loadError);
+                if (modelPath !== '/static/live2d/mao_pro_zh/mao_pro_zh/runtime/mao_pro.model3.json') {
                     try {
-                        const defaultPath = '/static/mao_pro/mao_pro.model3.json';
+                        const defaultPath = '/static/live2d/mao_pro_zh/mao_pro_zh/runtime/mao_pro.model3.json';
                         model = await PIXI.live2d.Live2DModel.from(defaultPath, { autoInteract: false });
-                        console.log('成功回退到默认模型: mao_pro');
+                        console.log('成功回退到默认模型: mao_pro_zh');
                     } catch (fallbackError) {
                         throw new Error(`原始模型加载失败: ${loadError.message}，且回退模型也失败: ${fallbackError.message}`);
                     }
@@ -1991,7 +2055,9 @@ class Live2DManager {
                 const rootDir = lastSlash >= 0 ? cleanPath.substring(0, lastSlash) : '/static';
                 this.modelRootPath = rootDir; // e.g. /static/mao_pro or /static/some/deeper/dir
                 const parts = rootDir.split('/').filter(Boolean);
-                this.modelName = parts.length > 0 ? parts[parts.length - 1] : null;
+                const afterPrefix = rootDir.replace(/^\/?static\/live2d\//, '');
+                const topFolder = afterPrefix.split('/').filter(Boolean)[0] || null;
+                this.modelName = topFolder || (parts.length > 0 ? parts[parts.length - 1] : null);
                 console.log('模型根路径解析:', { modelUrl: urlString, modelName: this.modelName, modelRootPath: this.modelRootPath });
             } catch (e) {
                 console.warn('解析模型根路径失败，将使用默认值', e);
@@ -3465,6 +3531,7 @@ window.LanLan1.playMotion = (emotion) => window.live2dManager.playMotion(emotion
 window.LanLan1.clearEmotionEffects = () => window.live2dManager.clearEmotionEffects();
 window.LanLan1.clearExpression = () => window.live2dManager.clearExpression();
 window.LanLan1.setMouth = (value) => window.live2dManager.setMouth(value);
+window.LanLan1.getMouth = () => (window.live2dManager && typeof window.live2dManager.mouthValue === 'number') ? window.live2dManager.mouthValue : 0;
 window.LanLan1.lookAt = (x, y) => window.live2dManager.lookAt(x, y);
 window.LanLan1.askMotionAgent = (u, a) => window.live2dManager.askMotionAgent(u, a);
 window.LanLan1.getModelCapabilities = () => window.live2dManager.getModelCapabilities();

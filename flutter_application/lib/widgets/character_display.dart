@@ -134,7 +134,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         setState(() {
           _isWindowsInitialized = true;
         });
-        // Inject initial expression state (sync with current mood)
+        _runJavascript("window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;");
         _injectInitialExpression();
       }
     } catch (e) {
@@ -160,7 +160,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         NavigationDelegate(
           onPageFinished: (String url) {
             print('Page finished loading: $url');
-            // Inject initial expression state
+            _runJavascript("window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;");
             _injectInitialExpression();
           },
         ),

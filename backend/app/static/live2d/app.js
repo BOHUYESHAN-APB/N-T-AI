@@ -6,13 +6,13 @@ function init_app(){
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    errors: [{
-                        timestamp: new Date().toISOString(),
-                        level: 'ERROR',
-                        message: msg,
-                        exception: exc
-                    }]
-                })
+            errors: [{
+                timestamp: Date.now() / 1000,
+                level: 'ERROR',
+                message: msg,
+                exception: exc
+            }]
+        })
             }).catch(() => {});
         } catch (_) {}
     };
@@ -39,7 +39,7 @@ function init_app(){
     const screenButton = getEl('screenButton');
     const stopButton = getEl('stopButton');
     const resetSessionButton = getEl('resetSessionButton');
-    const statusElement = getEl('status') || { textContent: '' }; // Mock if missing
+    const statusElement = getEl('status') || { textContent: '' };
     const chatContainer = getEl('chatContainer');
     const textInputBox = getEl('textInputBox');
     const textSendButton = getEl('textSendButton');
@@ -48,6 +48,8 @@ function init_app(){
     const screenshotsList = getEl('screenshots-list');
     const screenshotCount = getEl('screenshot-count');
     const clearAllScreenshots = getEl('clear-all-screenshots');
+    const isLiteMode = !chatContainer;
+    window.live2dLiteMode = isLiteMode;
 
     let audioContext;
     let workletNode;
@@ -163,26 +165,20 @@ function init_app(){
                 } else if (response.type === 'user_activity') {
                     clearAudioQueue();
                 } if (response.type === 'cozy_audio' || response.type === 'audio') {
-                    // 处理音频响应
-                    console.log("收到后端音频消息:", response.type);
-                    
-                    // Prevent playback if tab is hidden (avoid multiple clients echo)
-                    // If multiple tabs are open, only the visible one should play.
-                    if (document.hidden) {
-                         console.log("[Live2D WS] Tab is hidden, skipping audio playback.");
-                         // Don't return, let it process if needed, but don't play?
-                         // Actually, returning here is safe as the loop continues.
-                         return;
+                    if (!window.LIVE2D_DISABLE_WEBSOCKET_AUDIO) {
+                        console.log("收到后端音频消息:", response.type);
+                        const audioData = response.data || {};
+                        if (typeof audioData.start_at === 'number') {
+                            window.lastAudioStartAt = audioData.start_at;
+                        }
+                        if (window.playAudioBase64 && audioData.audio) {
+                            window.playAudioBase64(audioData.audio);
+                        } else if (window.playAudioUrl && audioData.url) {
+                            window.playAudioUrl(audioData.url);
+                        } else if (window.playAudioBase64 && response.audioData) {
+                            window.playAudioBase64(response.audioData);
+                        }
                     }
-
-                    // if (response.format === 'base64') {
-                         // Use playAudioBase64 from audio-loader.js if available
-                         if (window.playAudioBase64 && response.data && response.data.audio) {
-                             window.playAudioBase64(response.data.audio);
-                         } else if (window.playAudioBase64 && response.audioData) { // Compatible with cozy_audio
-                             window.playAudioBase64(response.audioData);
-                         }
-                    // }
                 } else if (response.type === 'screen_share_error') {
                     // 屏幕分享/截图错误，复位按钮状态
                     statusElement.textContent = response.message;
@@ -869,8 +865,7 @@ function init_app(){
         }, 2000);
     }
 
-    // 开始麦克风录音
-    micButton.addEventListener('click', async () => {
+    if (micButton) micButton.addEventListener('click', async () => {
         // 立即显示准备提示
         showVoicePreparingToast('🎙️ 语音系统准备中...');
         
@@ -964,16 +959,13 @@ function init_app(){
         }
     });
 
-    // 开始屏幕共享
-    screenButton.addEventListener('click', startScreenSharing);
+    if (screenButton) screenButton.addEventListener('click', startScreenSharing);
 
-    // 停止屏幕共享
-    stopButton.addEventListener('click', stopScreenSharing);
+    if (stopButton) stopButton.addEventListener('click', stopScreenSharing);
 
-    // 停止对话
-    muteButton.addEventListener('click', stopMicCapture);
+    if (muteButton) muteButton.addEventListener('click', stopMicCapture);
 
-    resetSessionButton.addEventListener('click', () => {
+    if (resetSessionButton) resetSessionButton.addEventListener('click', () => {
         isSwitchingMode = true; // 开始重置会话（也是一种模式切换）
         
         // 检查是否是"请她离开"触发的
@@ -1044,8 +1036,7 @@ function init_app(){
         }, 500);
     });
     
-    // 文本发送按钮事件
-    textSendButton.addEventListener('click', async () => {
+    if (textSendButton) textSendButton.addEventListener('click', async () => {
         const text = textInputBox.value.trim();
         const hasScreenshots = screenshotsList.children.length > 0;
         
@@ -1166,16 +1157,16 @@ function init_app(){
         }
     });
     
-    // 支持Enter键发送（Shift+Enter换行）
-    textInputBox.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            textSendButton.click();
-        }
-    });
+    if (textInputBox && textSendButton) {
+        textInputBox.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                textSendButton.click();
+            }
+        });
+    }
     
-    // 截图按钮事件
-    screenshotButton.addEventListener('click', async () => {
+    if (screenshotButton) screenshotButton.addEventListener('click', async () => {
         try {
             // 临时禁用截图按钮，防止重复点击
             screenshotButton.disabled = true;
@@ -1319,20 +1310,22 @@ function init_app(){
     
     // 更新截图计数
     function updateScreenshotCount() {
-        const count = screenshotsList.children.length;
-        screenshotCount.textContent = count;
+        const count = screenshotsList ? screenshotsList.children.length : 0;
+        if (screenshotCount) screenshotCount.textContent = count;
     }
     
     // 清空所有截图
-    clearAllScreenshots.addEventListener('click', () => {
-        if (screenshotsList.children.length === 0) return;
-        
-        if (confirm('确定要清空所有待发送的截图吗？')) {
-            screenshotsList.innerHTML = '';
-            screenshotThumbnailContainer.classList.remove('show');
-            updateScreenshotCount();
-        }
-    });
+    if (clearAllScreenshots) {
+        clearAllScreenshots.addEventListener('click', () => {
+            if (!screenshotsList || screenshotsList.children.length === 0) return;
+            
+            if (confirm('确定要清空所有待发送的截图吗？')) {
+                screenshotsList.innerHTML = '';
+                if (screenshotThumbnailContainer) screenshotThumbnailContainer.classList.remove('show');
+                updateScreenshotCount();
+            }
+        });
+    }
 
     // 情感分析功能
     async function analyzeEmotion(text) {
@@ -1749,6 +1742,11 @@ function init_app(){
     const minThreshold = 0.02;   // 静音阈值
     
     function startLipSync(model, analyser) {
+        if (window.AM && window.live2dManager) {
+            try { window.live2dManager.setSpeaking(true); } catch (_) {}
+            try { lipSyncActive = true; } catch (_) {}
+            return;
+        }
         console.log('[LipSync] Starting loop. Model:', !!model, 'Analyser:', !!analyser);
         // 使用频率数据进行更精确的口型分析
         const frequencyData = new Uint8Array(analyser.frequencyBinCount);
@@ -2722,13 +2720,18 @@ window.addEventListener("load", ready);
             const source = externalAudioContext.createBufferSource();
             source.buffer = audioBuffer;
             
-            // 创建分析器用于口型同步
             externalAnalyser = externalAudioContext.createAnalyser();
             externalAnalyser.fftSize = 2048;
             
-            // 连接节点
             source.connect(externalAnalyser);
-            externalAnalyser.connect(externalAudioContext.destination);
+            if (window.LIVE2D_EXTERNAL_AUDIO_MUTED) {
+                const gainNode = externalAudioContext.createGain();
+                gainNode.gain.value = 0.0;
+                externalAnalyser.connect(gainNode);
+                gainNode.connect(externalAudioContext.destination);
+            } else {
+                externalAnalyser.connect(externalAudioContext.destination);
+            }
             
             // 启动口型同步
             startExternalLipSync();

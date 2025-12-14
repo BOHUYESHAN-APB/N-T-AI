@@ -102,30 +102,23 @@ class ChatService:
             final.append(acc.strip())
         return final
 
-    async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None):
-        """
-        Generates audio from text using TTS API and broadcasts it to the frontend.
-        Supports chunked generation for lower latency.
-        """
+    async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None, voice: str = None):
         if not text:
             return
 
         clean_text = self._sanitize_text_for_tts(text)
-        
-        # 1. Credential Resolution & Fallback Logic
+
         tts_api_key = api_key if api_key else settings.TTS_API_KEY
         tts_base_url = base_url if base_url else settings.TTS_BASE_URL
+        # Use provided voice, or fallback to settings, or default
+        tts_voice = voice if voice else (settings.TTS_VOICE if hasattr(settings, 'TTS_VOICE') else "sys_female_01")
 
-        # Heuristic: If base_url is DeepSeek (no TTS) or missing, and we have a configured TTS provider, switch.
-        # Also switch if no API key provided but we have one in settings.
         should_switch_to_settings = False
-        
         if not tts_api_key:
             should_switch_to_settings = True
         elif tts_base_url and "deepseek" in tts_base_url.lower():
-             # DeepSeek doesn't support TTS, so we must switch if possible
-             should_switch_to_settings = True
-        
+            should_switch_to_settings = True
+
         if should_switch_to_settings and settings.TTS_API_KEY:
             print(f"[Backend TTS] Switching to configured TTS provider (SiliconFlow) instead of {tts_base_url}")
             tts_api_key = settings.TTS_API_KEY
@@ -138,62 +131,54 @@ class ChatService:
             logger.error("[Backend TTS] Missing or invalid TTS API key. Provide X-SiliconFlow-Api-Key header or set TTS_API_KEY in .env")
             return
 
-        # 2. Chunking for Low Latency
-        chunks = self._split_into_chunks(clean_text)
-        print(f"[Backend TTS] Split response into {len(chunks)} chunks.")
-        
-        # 3. Prepare TTS tasks
-        tasks = []
-        for sentence in chunks:
-            if not sentence.strip(): continue
-            tasks.append(
-                self.audio_service.generate_speech(
+        try:
+            print(f"[Backend TTS] Generating audio for text: {clean_text[:20]}... Voice: {tts_voice}")
+            
+            # Split into chunks for faster response
+            chunks = self._split_into_chunks(clean_text)
+            print(f"[Backend TTS] Split response into {len(chunks)} chunks.")
+            
+            tasks = []
+            for sentence in chunks:
+                if not sentence.strip(): continue
+                tasks.append(
+                    self.audio_service.generate_speech(
                         text=sentence,
                         api_key=tts_api_key,
                         base_url=tts_base_url,
                         model="FunAudioLLM/CosyVoice2-0.5B",
-                        voice="sys_female_01", # Trying a more generic voice, or 'alloy' if this fails. SiliconFlow often needs valid presets.
+                        voice=tts_voice,
                         speed=1.0
                     )
-            )
+                )
             
-        # 4. Execute tasks in parallel but broadcast in order
-        if not tasks: return
-        
-        print(f"[Backend TTS] Starting {len(tasks)} TTS tasks concurrently...")
-        try:
-            # Schedule all tasks to run on the event loop
+            if not tasks: return
+
+            print(f"[Backend TTS] Starting {len(tasks)} TTS tasks concurrently...")
+            
+            # Schedule all tasks
             running_tasks = [asyncio.create_task(t) for t in tasks]
             
             for i, task in enumerate(running_tasks):
                 try:
                     result = await task
-                    
                     if isinstance(result, bytes):
-                        # Convert to base64
-                        b64_audio = base64.b64encode(result).decode('utf-8')
-                        
-                        # Broadcast using 'cozy_audio' type which Frontend (app.js) expects
-                        # app.js supports: 
-                        # 1. type='audio', data={audio: b64}
-                        # 2. type='cozy_audio', audioData=b64
+                        b64_audio = base64.b64encode(result).decode("utf-8")
                         await live2d_manager.broadcast({
                             "type": "cozy_audio",
                             "audioData": b64_audio,
                             "text": chunks[i] if i < len(chunks) else ""
                         })
-                        print(f"[Backend TTS] Broadcasted audio chunk {i+1}/{len(running_tasks)}")
-                        
-                        # Small delay to ensure order on network
-                        await asyncio.sleep(0.05) 
+                        print(f"[Backend TTS] Broadcasted chunk {i+1}/{len(chunks)}")
+                        # Minimal delay to ensure network order
+                        await asyncio.sleep(0.05)
                     else:
-                        logger.error(f"[Backend TTS] Error or empty result for sentence {i}: {result}")
-                        
+                        logger.error(f"[Backend TTS] Chunk {i} result invalid")
                 except Exception as e:
-                    logger.error(f"[Backend TTS] Error generating audio for sentence {i}: {e}")
+                    logger.error(f"[Backend TTS] Error generating chunk {i}: {e}")
 
         except Exception as e:
-            logger.error(f"[Backend TTS] Critical error in audio generation loop: {e}")
+            logger.error(f"[Backend TTS] Error generating audio: {e}")
 
 
     async def process_message(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
@@ -203,11 +188,13 @@ class ChatService:
                             target_model: str = None,
                             tts_api_key: str = None,
                             tts_base_url: str = None,
+                            tts_voice: str = None,
                             enable_search: bool = False,
                             search_region: str = "zh-CN",
                             vision_config: Dict[str, Any] = None,
                             temperature: float = 0.7,
-                            background_tasks: BackgroundTasks = None) -> str:
+                            background_tasks: BackgroundTasks = None,
+                            enable_backend_tts: bool = False) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
 
@@ -404,10 +391,11 @@ class ChatService:
         if background_tasks:
             background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
             background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}], target_api_key, target_base_url, target_model)
-            final_tts_key = tts_api_key if tts_api_key else target_api_key
-            final_tts_url = tts_base_url if tts_base_url else target_base_url
-            tts_text = self._sanitize_text_for_tts(final_response_text)
-            background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url)
+            if enable_backend_tts:
+                final_tts_key = tts_api_key if tts_api_key else target_api_key
+                final_tts_url = tts_base_url if tts_base_url else target_base_url
+                tts_text = self._sanitize_text_for_tts(final_response_text)
+                background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url, tts_voice)
         else:
             # Fallback for when no background_tasks context is provided
             # Note: Awaiting here will block the response, but it's safer than losing the tasks
@@ -419,13 +407,11 @@ class ChatService:
                 target_base_url,
                 target_model
             )
-            # We fire and forget audio if no background tasks, or await it?
-            # Ideally we should use asyncio.create_task but that might be killed if event loop closes?
-            # FastAPI lifespan keeps it alive usually.
-            final_tts_key = tts_api_key if tts_api_key else target_api_key
-            final_tts_url = tts_base_url if tts_base_url else target_base_url
-            tts_text = self._sanitize_text_for_tts(final_response_text)
-            asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url))
+            if enable_backend_tts:
+                final_tts_key = tts_api_key if tts_api_key else target_api_key
+                final_tts_url = tts_base_url if tts_base_url else target_base_url
+                tts_text = self._sanitize_text_for_tts(final_response_text)
+                asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url, tts_voice))
 
         return final_response_text
 

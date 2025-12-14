@@ -1,4 +1,7 @@
+import os
 from pydantic_settings import BaseSettings
+if os.environ.get("USE_HTTPS", "").strip() == "":
+    os.environ["USE_HTTPS"] = "false"
 
 
 class Settings(BaseSettings):

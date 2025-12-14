@@ -49,6 +49,9 @@ class BrainService {
   final _statusController = StreamController<String>.broadcast();
   Stream<String> get statusStream => _statusController.stream;
 
+  final _ttsController = StreamController<Uint8List>.broadcast();
+  Stream<Uint8List> get ttsStream => _ttsController.stream;
+
   // Context window (Short-term memory)
   // This is now managed by the UI/ChatHistoryService, but we keep a local buffer for the current turn
   List<Map<String, String>> _context = [];
@@ -64,6 +67,7 @@ class BrainService {
     _statusController.close();
     _expressionAgent.dispose();
     _avatar3DAgent.dispose();
+    _ttsController.close();
   }
 
   // Update context from outside (for multi-session support)
@@ -84,51 +88,47 @@ class BrainService {
         text: cleanText,
         voice: ttsProvider.meta['voice'] as String?,
       );
+
+      _ttsController.add(bytes);
       
-      // Save to temp file
       final tempDir = await getTemporaryDirectory();
       final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
       await tempFile.writeAsBytes(bytes);
-      
-      // Broadcast to Live2D via Backend (for ALL windows including floating/mini)
-      // This is preferred over local AudioPlaybackBus because independent windows run in separate isolates.
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
-        // Normalize URL
-        final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
-        
-        print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
-        final response = await http.post(
-          Uri.parse('$urlStr/api/live2d/broadcast/audio'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'audio': base64Encode(bytes)}),
-        );
-        
-        if (response.statusCode == 200) {
-           final json = jsonDecode(response.body);
-           final clientCount = json['clients'] as int;
-           if (clientCount > 0) {
-             print('[BrainService] Audio broadcasted to $clientCount Live2D clients. Skipping local playback.');
-             return; // Success! Live2D will play it.
-           } else {
-             print('[BrainService] No Live2D clients connected. Falling back to local playback.');
-           }
-        } else {
-          print('[BrainService] Audio broadcast failed: ${response.statusCode}');
-        }
-      } catch (e) {
-        print('[BrainService] Audio broadcast error: $e');
-      }
-
-      // Fallback: Local Playback if broadcast failed or no clients
       try {
         // Lazy initialize audio player to avoid startup crash when plugin isn't registered.
         _audioPlayer ??= AudioPlayer();
+        await _audioPlayer!.stop(); // Ensure stop before play
         await _audioPlayer!.play(DeviceFileSource(tempFile.path));
       } catch (e) {
         debugPrint('AudioPlayer error (ignored): $e');
       }
+
+      unawaited(() async {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+          final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
+          print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
+          final response = await http.post(
+            Uri.parse('$urlStr/api/live2d/broadcast/audio'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'audio': base64Encode(bytes)}),
+          );
+          if (response.statusCode == 200) {
+            final json = jsonDecode(response.body);
+            final clientCount = json['clients'] as int;
+            if (clientCount > 0) {
+              print('[BrainService] Audio broadcasted to $clientCount Live2D clients.');
+            } else {
+              print('[BrainService] No Live2D clients connected for audio broadcast.');
+            }
+          } else {
+            print('[BrainService] Audio broadcast failed: ${response.statusCode}');
+          }
+        } catch (e) {
+          print('[BrainService] Audio broadcast error: $e');
+        }
+      }());
     } catch (e) {
       print('TTS Error: $e');
     }

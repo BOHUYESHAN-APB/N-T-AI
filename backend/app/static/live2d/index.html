@@ -205,13 +205,16 @@
                 } else if (window.live2dManager && window.live2dManager.askMotionAgent) {
                     window.live2dManager.askMotionAgent(data.userText, data.aiText, config);
                 }
-            } else if (type === 'audio') {
+            } 
+            /* [Duplicate Fix] Audio is handled by app.js to prevent double playback/echo
+            else if (type === 'audio') {
                 // Audio data (base64)
                 console.log('[Live2D WS] Audio received, playing...');
                 if (window.playAudioBase64) {
                     window.playAudioBase64(data.audio);
                 }
             }
+            */
         }
         
         // 初始化 WebSocket 连接
@@ -261,6 +264,15 @@
                     }
                 } else {
                     logToScreen('No model parameter provided', 'warn');
+                    try {
+                        const fallback = '/static/live2d/mao_pro_zh/mao_pro_zh/runtime/mao_pro.model3.json';
+                        logToScreen(`Loading fallback model: ${fallback}`, 'warn');
+                        await window.live2dManager.loadModel(fallback);
+                        logToScreen('Fallback model loaded successfully');
+                    } catch (e2) {
+                        logToScreen(`Fallback model load failed: ${e2.message}`, 'error');
+                        console.error(e2);
+                    }
                 }
             } catch (e) {
                 logToScreen(`Init failed: ${e.message}`, 'error');

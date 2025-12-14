@@ -194,6 +194,12 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
         raw_request.headers.get("X-TTS-Base-Url")
         or raw_request.headers.get("X-SiliconFlow-Base-Url")
     )
+    # Extract TTS Voice (New)
+    tts_voice = (
+        raw_request.headers.get("X-TTS-Voice")
+        or raw_request.headers.get("X-SiliconFlow-Voice")
+    )
+
     # Fallback: Authorization: Bearer <key>
     auth_header = raw_request.headers.get("Authorization")
     if not tts_api_key and auth_header and auth_header.startswith("Bearer "):
@@ -233,7 +239,8 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
             )
             current_mood = None # No mood update for system tasks
         else:
-            # Normal Chat Flow
+            enable_backend_tts_header = raw_request.headers.get("X-Backend-TTS", "false")
+            enable_backend_tts = enable_backend_tts_header.lower() in ["true", "1", "yes", "server"]
             response_text = await chat_service.process_message(
                 last_message_content, 
                 user_id,
@@ -243,6 +250,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 target_model=target_model,
                 tts_api_key=tts_api_key,
                 tts_base_url=tts_base_url,
+                tts_voice=tts_voice,
                 enable_search=enable_search,
                 search_region=search_region,
                 vision_config={
@@ -253,7 +261,8 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                     "fallback": vision_fallback
                 },
                 temperature=temperature,
-                background_tasks=background_tasks
+                background_tasks=background_tasks,
+                enable_backend_tts=enable_backend_tts
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)
         

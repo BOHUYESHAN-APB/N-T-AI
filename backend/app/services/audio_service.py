@@ -59,6 +59,19 @@ class AudioService:
         import time
         start_time = time.time()
         client = self._get_client(api_key, base_url)
+
+        # Auto-fix common voice aliases for SiliconFlow/CosyVoice
+        if model and "CosyVoice" in model:
+            if not voice or voice == "alex":
+                voice = "FunAudioLLM/CosyVoice2-0.5B:alex"
+            elif voice == "sys_female_01": 
+                voice = "FunAudioLLM/CosyVoice2-0.5B:alex" 
+            elif voice == "sys_male_01":
+                voice = "FunAudioLLM/CosyVoice2-0.5B:benjamin"
+            elif ":" not in voice and "/" not in voice:
+                 known_system_voices = ["alex", "anna", "bella", "benjamin", "charles", "diana"]
+                 if voice in known_system_voices:
+                     voice = f"{model}:{voice}"
         
         print(f"[AudioService] Calling TTS API: {base_url}/audio/speech")
         print(f"[AudioService] Params: model={model}, voice={voice}, speed={speed}, input_len={len(text)}")
@@ -102,6 +115,19 @@ class AudioService:
         start_time = time.time()
         client = self._get_client(api_key, base_url)
         
+        # Auto-fix common voice aliases for SiliconFlow/CosyVoice
+        if model and "CosyVoice" in model:
+            if not voice or voice == "alex":
+                voice = "FunAudioLLM/CosyVoice2-0.5B:alex"
+            elif voice == "sys_female_01": 
+                voice = "FunAudioLLM/CosyVoice2-0.5B:alex" 
+            elif voice == "sys_male_01":
+                voice = "FunAudioLLM/CosyVoice2-0.5B:benjamin"
+            elif ":" not in voice and "/" not in voice:
+                 known_system_voices = ["alex", "anna", "bella", "benjamin", "charles", "diana"]
+                 if voice in known_system_voices:
+                     voice = f"{model}:{voice}"
+
         print(f"[AudioService] Calling TTS API (Stream): {base_url}/audio/speech")
         
         try:
@@ -140,22 +166,21 @@ class AudioService:
         Upload a reference audio for voice cloning (SiliconFlow specific).
         POST /v1/uploads/audio/voice
         """
-        # Ensure base_url doesn't end with /v1 if we are appending /v1... 
-        # Usually base_url is "https://api.siliconflow.cn/v1"
-        # We need to construct the URL carefully.
+        # SiliconFlow API Spec: https://docs.siliconflow.cn/cn/api-reference/audio/upload-voice
+        # URL: https://api.siliconflow.cn/v1/uploads/audio/voice
         
-        # If base_url ends with /v1, we strip it to avoid duplication if needed, 
-        # OR we assume base_url is the root. 
-        # OpenAI client usually takes ".../v1".
-        # SiliconFlow docs: https://api.siliconflow.cn/v1/uploads/audio/voice
-        
+        # Strip trailing slash if present
+        base_url = base_url.rstrip("/")
         url = f"{base_url}/uploads/audio/voice"
-        if base_url.endswith("/"):
-            url = f"{base_url}uploads/audio/voice"
             
         headers = {
             "Authorization": f"Bearer {api_key}"
         }
+        
+        # Spec says:
+        # customName: string (required)
+        # text: string (optional)
+        # file: file (required)
         
         data = {"customName": custom_name}
         if text:
@@ -167,6 +192,9 @@ class AudioService:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, data=data, files=files, timeout=60.0)
+            # Log error details if failed
+            if not response.is_success:
+                print(f"[AudioService] Upload Voice Error: {response.status_code} - {response.text}")
             response.raise_for_status()
             return response.json()
 
@@ -175,9 +203,8 @@ class AudioService:
         Get list of uploaded voices (SiliconFlow specific).
         GET /v1/audio/voice/list
         """
+        base_url = base_url.rstrip("/")
         url = f"{base_url}/audio/voice/list"
-        if base_url.endswith("/"):
-            url = f"{base_url}audio/voice/list"
             
         headers = {
             "Authorization": f"Bearer {api_key}"
@@ -185,9 +212,12 @@ class AudioService:
         
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers=headers, timeout=30.0)
+            if not response.is_success:
+                print(f"[AudioService] Get Voices Error: {response.status_code} - {response.text}")
             response.raise_for_status()
             data = response.json()
-            # Format might be {"results": [...]} or just [...]
+            # Spec says response is like:
+            # { "results": [ { "voiceId": "...", "customName": "...", ... } ], ... }
             return data.get("results", []) if isinstance(data, dict) else data
 
     async def delete_voice(self, voice_id: str, api_key: str, base_url: str) -> Dict[str, Any]:
@@ -195,20 +225,11 @@ class AudioService:
         Delete a voice (SiliconFlow specific).
         DELETE /v1/audio/voice/{voiceId}
         """
-        # Note: Check docs for exact path. 
-        # Docs say: DELETE /v1/audio/voice
-        # Body: {"voiceId": "..."} ? Or path param?
-        # User provided: https://docs.siliconflow.cn/cn/api-reference/audio/delete-voice
-        # Let's assume it follows standard REST or check if I can find more info.
-        # Usually DELETE takes ID in path or body.
-        # Let's assume body based on some APIs, or path. 
-        # Wait, I'll use a safe bet: try to find the exact spec.
-        # Since I can't browse, I will assume it's likely `DELETE /v1/audio/voice/{voiceId}` or `DELETE /v1/audio/voice` with body.
-        # I will implement it as `DELETE /v1/audio/voice/{voiceId}` for now as it's most common.
+        # Spec: https://docs.siliconflow.cn/cn/api-reference/audio/delete-voice
+        # DELETE /v1/audio/voice/{voiceId}
         
+        base_url = base_url.rstrip("/")
         url = f"{base_url}/audio/voice/{voice_id}"
-        if base_url.endswith("/"):
-             url = f"{base_url}audio/voice/{voice_id}"
 
         headers = {
             "Authorization": f"Bearer {api_key}"
@@ -216,5 +237,7 @@ class AudioService:
         
         async with httpx.AsyncClient() as client:
             response = await client.delete(url, headers=headers, timeout=30.0)
+            if not response.is_success:
+                print(f"[AudioService] Delete Voice Error: {response.status_code} - {response.text}")
             response.raise_for_status()
             return response.json()
