@@ -197,35 +197,5 @@ To control the "Brain" on your PC from your Android phone:
 - [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).
 - [ ] **3D Engine**: Implementing Babylon.js renderer for 3D avatars.
 
----
-
-## 🧠 Recommended Models
-
-We recommend **[SiliconFlow (硅基流动)](https://cloud.siliconflow.cn/i/oiWI8xjZ)** for a balance of performance and cost.
-
-| Function | Recommended Model | Notes |
-| :--- | :--- | :--- |
-| **LLM** | `DeepSeek-V3` / `Qwen-2.5` | High intelligence, low cost. |
-| **STT** | `SenseVoiceSmall` | Fast, accurate, multilingual. |
-| **TTS** | `CosyVoice2-0.5B` | Emotional, natural human voice. |
-
----
-
-## 🤝 Acknowledgements
-
-This project stands on the shoulders of giants. We gratefully acknowledge:
-
-*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**: For inspiration on Live2D interaction logic and emotional feedback systems.
-*   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**: For architectural concepts on 3D rendering.
-*   **Open Source Community**: For the countless libraries and tools that make this possible.
-
----
-
-## 📄 License
-
-**Dual-Licensed Software**
-
-*   **Non-Commercial**: [AGPLv3 with Restrictions](LICENSE). Free for personal, non-profit use.
-*   **Commercial**: [Commercial License](COMMERCIAL_LICENSE_TERMS.md). Required for business use.
-
-*Built with ❤️ by the N-T-AI Team*
+### Future Research: Omni Models, Memory, and Persona
+- [ ] **Neuron Count & Digital Life**: Current AI models, despite having parameter counts (often in the trillions) that rival or exceed the synapse counts of some biological organisms, differ fundamentally in architecture. A human brain operates with ~86 billion neurons and ~100 trillion synapses, functioning as a continuous, plastic, and energy-efficient system. In contrast, LLMs are static snapshots of compressed knowledge. N-T-AI acknowledges this distinction: we do not claim to create biological life, but rather to simulate a "Digital Life" form—an entity that uses these massive computational resources to emulate memory, emotion, and agency, creating a convincing and meaningful companion experience.

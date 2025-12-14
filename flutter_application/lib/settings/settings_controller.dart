@@ -66,6 +66,7 @@ class SettingsController extends ChangeNotifier {
   static const _kDecoUseBubbles = 'settings.ui.decoUseBubbles';
   static const _kUiMode = 'settings.ui.uiMode';
   static const _kChatMode = 'settings.ui.chatMode';
+  static const _kPersonaLevel = 'settings.ui.personaLevel';
 
   late SharedPreferences _prefs;
   AppSettings _settings = const AppSettings();
@@ -92,6 +93,7 @@ class SettingsController extends ChangeNotifier {
     // UI mode
     final uiModeIdx = _prefs.getInt(_kUiMode);
     final chatModeIdx = _prefs.getInt(_kChatMode);
+    final personaLevelIdx = _prefs.getInt(_kPersonaLevel);
     final aiBaseUrl = _prefs.getString(_kAiBaseUrl) ?? '';
     final aiApiKey = _prefs.getString(_kAiApiKey) ?? '';
     final aiModel = _prefs.getString(_kAiModel) ?? '';
@@ -426,6 +428,12 @@ class SettingsController extends ChangeNotifier {
             ChatModeOption.values.length,
             fallback: ChatModeOption.persona.index,
           )],
+      personaLevel:
+          PersonaLevelOption.values[safeIndex(
+            personaLevelIdx,
+            PersonaLevelOption.values.length,
+            fallback: PersonaLevelOption.full.index,
+          )],
       baseFontMode: baseFontMode,
       decoFamily: decoFamily,
       decoUseTitles: useTitles,
@@ -656,6 +664,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setChatMode(ChatModeOption m) async {
     _settings = _settings.copyWith(chatMode: m);
     await _prefs.setInt(_kChatMode, m.index);
+    notifyListeners();
+  }
+
+  Future<void> setPersonaLevel(PersonaLevelOption l) async {
+    _settings = _settings.copyWith(personaLevel: l);
+    await _prefs.setInt(_kPersonaLevel, l.index);
     notifyListeners();
   }
 

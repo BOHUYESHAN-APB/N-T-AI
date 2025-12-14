@@ -179,11 +179,21 @@ class LLMService {
       else if (searchRegionIdx == 1) searchRegion = 'zh-CN';
       else searchRegion = 'zh-CN'; // Auto defaults to CN for now, or could be 'auto' if backend supports it
     }
+
+    // Parse Persona Level
+    final personaLevelIdx = prefs.getInt('settings.ui.personaLevel');
+    String personaMode = 'full';
+    if (personaLevelIdx != null) {
+      if (personaLevelIdx == 0) personaMode = 'basic';
+      else if (personaLevelIdx == 1) personaMode = 'advanced';
+      else personaMode = 'full';
+    }
     
     // Debug logging
     debugPrint('[LLM] enablePythonBackend: $enablePythonBackend');
     debugPrint('[LLM] enableBrowser from prefs: $enableBrowser');
     debugPrint('[LLM] searchRegion: $searchRegion');
+    debugPrint('[LLM] personaMode: $personaMode');
     debugPrint('[LLM] usageType: $usageType');
 
     // Determine actual target URL and headers
@@ -212,6 +222,7 @@ class LLMService {
       headers['X-Search-Region'] = searchRegion;
       headers['X-Usage-Type'] = usageType;
       headers['X-Temperature'] = temperature.toString();
+      headers['X-Persona-Mode'] = personaMode;
 
       try {
         final providersRaw = prefs.getString('settings.ai.providers');

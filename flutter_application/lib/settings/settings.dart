@@ -31,6 +31,8 @@ enum SearchRegionOption { auto, cn, global }
 // 聊天模式：拟人（分段气泡、自然） vs 标准（Markdown严格、单气泡、生产力）
 enum ChatModeOption { persona, standard }
 
+enum PersonaLevelOption { basic, advanced, full }
+
 class AiSettings {
   final AiProvider provider;
   final String baseUrl; // 对于 openai 可留空（使用默认），custom 需要填写
@@ -286,6 +288,7 @@ class AppSettings {
   final PaletteOption palette; // 配色方案
   final UIModeOption uiMode; // 对话界面样式
   final ChatModeOption chatMode; // 聊天模式
+  final PersonaLevelOption personaLevel; // 人格等级
   // 字体
   final BaseFontModeOption baseFontMode; // 基础字体（是否优先 MiSans）
   final DecorativeFontFamily decoFamily; // 装饰字体家族（FZG / nfdcs / none）
@@ -355,6 +358,7 @@ class AppSettings {
     this.palette = PaletteOption.neutral,
     this.uiMode = UIModeOption.auto,
     this.chatMode = ChatModeOption.persona,
+    this.personaLevel = PersonaLevelOption.full,
     this.baseFontMode = BaseFontModeOption.miSansPreferred,
     this.decoFamily = DecorativeFontFamily.none,
     this.decoUseTitles = false,
@@ -411,6 +415,7 @@ class AppSettings {
     PaletteOption? palette,
     UIModeOption? uiMode,
     ChatModeOption? chatMode,
+    PersonaLevelOption? personaLevel,
     BaseFontModeOption? baseFontMode,
     DecorativeFontFamily? decoFamily,
     bool? decoUseTitles,
@@ -465,6 +470,7 @@ class AppSettings {
     palette: palette ?? this.palette,
     uiMode: uiMode ?? this.uiMode,
     chatMode: chatMode ?? this.chatMode,
+    personaLevel: personaLevel ?? this.personaLevel,
     baseFontMode: baseFontMode ?? this.baseFontMode,
     decoFamily: decoFamily ?? this.decoFamily,
     decoUseTitles: decoUseTitles ?? this.decoUseTitles,

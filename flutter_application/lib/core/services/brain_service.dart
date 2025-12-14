@@ -52,6 +52,9 @@ class BrainService {
   final _ttsController = StreamController<Uint8List>.broadcast();
   Stream<Uint8List> get ttsStream => _ttsController.stream;
 
+  int _ttsSessionId = 0;
+  bool _ttsStopped = false;
+
   // Context window (Short-term memory)
   // This is now managed by the UI/ChatHistoryService, but we keep a local buffer for the current turn
   List<Map<String, String>> _context = [];
@@ -77,10 +80,54 @@ class BrainService {
 
   AudioPlayer? _audioPlayer;
 
+  Future<void> _playTtsBytes(Uint8List bytes) async {
+    _ttsController.add(bytes);
+
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
+    await tempFile.writeAsBytes(bytes);
+    try {
+      _audioPlayer ??= AudioPlayer();
+      await _audioPlayer!.stop();
+      await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+    } catch (e) {
+      debugPrint('AudioPlayer error (ignored): $e');
+    }
+
+    unawaited(() async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+        final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
+        print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
+        final response = await http.post(
+          Uri.parse('$urlStr/api/live2d/broadcast/audio'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'audio': base64Encode(bytes)}),
+        );
+        if (response.statusCode == 200) {
+          final json = jsonDecode(response.body);
+          final clientCount = json['clients'] as int;
+          if (clientCount > 0) {
+            print('[BrainService] Audio broadcasted to $clientCount Live2D clients.');
+          } else {
+            print('[BrainService] No Live2D clients connected for audio broadcast.');
+          }
+        } else {
+          print('[BrainService] Audio broadcast failed: ${response.statusCode}');
+        }
+      } catch (e) {
+        print('[BrainService] Audio broadcast error: $e');
+      }
+    }());
+  }
+
   Future<void> speak(String text, AiProviderConfig ttsProvider) async {
-    // Filter text: remove (...) and [...] and （...）
     final cleanText = text.replaceAll(RegExp(r'\（.*?\）|\(.*?\)|\[.*?\]'), '').trim();
     if (cleanText.isEmpty) return;
+
+    final sessionId = ++_ttsSessionId;
+    _ttsStopped = false;
 
     try {
       final bytes = await AiClient.generateSpeech(
@@ -89,48 +136,63 @@ class BrainService {
         voice: ttsProvider.meta['voice'] as String?,
       );
 
-      _ttsController.add(bytes);
-      
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
-      await tempFile.writeAsBytes(bytes);
-      try {
-        // Lazy initialize audio player to avoid startup crash when plugin isn't registered.
-        _audioPlayer ??= AudioPlayer();
-        await _audioPlayer!.stop(); // Ensure stop before play
-        await _audioPlayer!.play(DeviceFileSource(tempFile.path));
-      } catch (e) {
-        debugPrint('AudioPlayer error (ignored): $e');
+      if (_ttsStopped || _ttsSessionId != sessionId) {
+        return;
       }
 
-      unawaited(() async {
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
-          final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
-          print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
-          final response = await http.post(
-            Uri.parse('$urlStr/api/live2d/broadcast/audio'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'audio': base64Encode(bytes)}),
-          );
-          if (response.statusCode == 200) {
-            final json = jsonDecode(response.body);
-            final clientCount = json['clients'] as int;
-            if (clientCount > 0) {
-              print('[BrainService] Audio broadcasted to $clientCount Live2D clients.');
-            } else {
-              print('[BrainService] No Live2D clients connected for audio broadcast.');
-            }
-          } else {
-            print('[BrainService] Audio broadcast failed: ${response.statusCode}');
-          }
-        } catch (e) {
-          print('[BrainService] Audio broadcast error: $e');
-        }
-      }());
+      await _playTtsBytes(bytes);
     } catch (e) {
       print('TTS Error: $e');
+    }
+  }
+
+  Future<void> speakChunks(List<String> parts, AiProviderConfig ttsProvider) async {
+    final cleanedParts = <String>[];
+    for (final raw in parts) {
+      final clean = raw.replaceAll(RegExp(r'\（.*?\）|\(.*?\)|\[.*?\]'), '').trim();
+      if (clean.isNotEmpty) {
+        cleanedParts.add(clean);
+      }
+    }
+    if (cleanedParts.isEmpty) return;
+
+    final sessionId = ++_ttsSessionId;
+    _ttsStopped = false;
+
+    for (final part in cleanedParts) {
+      if (_ttsStopped || _ttsSessionId != sessionId) {
+        break;
+      }
+      try {
+        final bytes = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: part,
+          voice: ttsProvider.meta['voice'] as String?,
+        );
+
+        if (_ttsStopped || _ttsSessionId != sessionId) {
+          break;
+        }
+
+        await _playTtsBytes(bytes);
+      } catch (e) {
+        print('TTS Error: $e');
+        if (_ttsStopped || _ttsSessionId != sessionId) {
+          break;
+        }
+      }
+    }
+  }
+
+  Future<void> stopSpeaking() async {
+    _ttsStopped = true;
+    _ttsSessionId++;
+    try {
+      if (_audioPlayer != null) {
+        await _audioPlayer!.stop();
+      }
+    } catch (e) {
+      debugPrint('AudioPlayer stop error (ignored): $e');
     }
   }
 

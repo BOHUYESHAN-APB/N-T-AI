@@ -9,7 +9,7 @@ from app.services.expression_service import ExpressionService
 from app.services.search_service import SearchService
 from app.services.audio_service import AudioService
 from app.api.routes.live2d_routes import manager as live2d_manager
-from app.core.prompts import FIREFLY_PERSONA, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
+from app.core.prompts import FIREFLY_PERSONA, FIREFLY_PERSONA_BASIC, FIREFLY_PERSONA_ADVANCED, FIREFLY_PERSONA_FULL, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
 from app.core.logger import logger
 from fastapi import BackgroundTasks
 import asyncio
@@ -194,7 +194,8 @@ class ChatService:
                             vision_config: Dict[str, Any] = None,
                             temperature: float = 0.7,
                             background_tasks: BackgroundTasks = None,
-                            enable_backend_tts: bool = False) -> str:
+                            enable_backend_tts: bool = False,
+                            persona_mode: str = "full") -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
 
@@ -239,7 +240,12 @@ class ChatService:
         style_suggestion = self.expression_service.get_style_suggestion(text_content)
         
         # 4. Build Prompt
-        system_prompt = FIREFLY_PERSONA
+        if persona_mode == "basic":
+            system_prompt = FIREFLY_PERSONA_BASIC
+        elif persona_mode == "advanced":
+            system_prompt = FIREFLY_PERSONA_ADVANCED
+        else:
+            system_prompt = FIREFLY_PERSONA_FULL
         
         # Inject Current Time
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")

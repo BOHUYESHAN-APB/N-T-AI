@@ -224,31 +224,62 @@ class GeneralTab extends StatelessWidget {
           ),
         ),
         ListTile(
-          title: const Text('聊天模式 (Chat Mode)'),
-          subtitle: Text(
-            s.chatMode == ChatModeOption.persona
-                ? '拟人 (Persona) - 分段气泡，自然对话'
-                : '标准 (Standard) - 严格Markdown，生产力',
+            title: const Text('聊天模式 (Chat Mode)'),
+            subtitle: Text(
+              s.chatMode == ChatModeOption.persona
+                  ? '拟人 (Persona) - 分段气泡，自然对话'
+                  : '标准 (Standard) - 严格Markdown，生产力',
+            ),
+            trailing: DropdownButton<ChatModeOption>(
+              value: s.chatMode,
+              underline: const SizedBox(),
+              onChanged: (v) {
+                if (v != null) controller.setChatMode(v);
+              },
+              items: const [
+                DropdownMenuItem(
+                  value: ChatModeOption.persona,
+                  child: Text('拟人 (Persona)'),
+                ),
+                DropdownMenuItem(
+                  value: ChatModeOption.standard,
+                  child: Text('标准 (Standard)'),
+                ),
+              ],
+            ),
           ),
-          trailing: DropdownButton<ChatModeOption>(
-            value: s.chatMode,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setChatMode(v);
-            },
-            items: const [
-              DropdownMenuItem(
-                value: ChatModeOption.persona,
-                child: Text('拟人 (Persona)'),
-              ),
-              DropdownMenuItem(
-                value: ChatModeOption.standard,
-                child: Text('标准 (Standard)'),
-              ),
-            ],
+          ListTile(
+            title: const Text('人格深度 (Persona Level)'),
+            subtitle: Text(
+              s.personaLevel == PersonaLevelOption.basic
+                  ? '基础 (Basic) - 仅设定身份'
+                  : s.personaLevel == PersonaLevelOption.advanced
+                      ? '进阶 (Advanced) - 包含性格与记忆'
+                      : '完整 (Full) - 包含完整数字生命设定与交互',
+            ),
+            trailing: DropdownButton<PersonaLevelOption>(
+              value: s.personaLevel,
+              underline: const SizedBox(),
+              onChanged: (v) {
+                if (v != null) controller.setPersonaLevel(v);
+              },
+              items: const [
+                DropdownMenuItem(
+                  value: PersonaLevelOption.basic,
+                  child: Text('基础 (Basic)'),
+                ),
+                DropdownMenuItem(
+                  value: PersonaLevelOption.advanced,
+                  child: Text('进阶 (Advanced)'),
+                ),
+                DropdownMenuItem(
+                  value: PersonaLevelOption.full,
+                  child: Text('完整 (Full)'),
+                ),
+              ],
+            ),
           ),
-        ),
-        ListTile(
+          ListTile(
           title: Text(l10n.generalChatBg),
           trailing: DropdownButton<ChatBgOption>(
             value: s.chatBg,

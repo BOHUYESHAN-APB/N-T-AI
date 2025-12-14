@@ -142,7 +142,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
-  void _interruptGeneration() {
+  Future<void> _interruptGeneration() async {
     if (_isLoading &&
         _interruptCompleter != null &&
         !_interruptCompleter!.isCompleted) {
@@ -156,6 +156,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         });
       });
     }
+    await _stopTtsPlayback();
   }
 
   Future<void> _checkFirstRun() async {
@@ -195,6 +196,26 @@ class _FireflyScreenState extends State<FireflyScreen> {
     try {
       await _live2dController.executeJs(js);
     } catch (_) {}
+    try {
+      if (settings.enableFloatingWindow && _floatingWindowService != null) {
+        await _floatingWindowService!.executeJavaScript(js);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _stopTtsPlayback() async {
+    try {
+      await _brain.stopSpeaking();
+    } catch (_) {}
+
+    if (!mounted) return;
+    final settings = SettingsScope.of(context).settings;
+    const js = "if (window.stopExternalAudio) window.stopExternalAudio();";
+
+    try {
+      await _live2dController.executeJs(js);
+    } catch (_) {}
+
     try {
       if (settings.enableFloatingWindow && _floatingWindowService != null) {
         await _floatingWindowService!.executeJavaScript(js);
@@ -603,11 +624,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
             _brain.expressionAgent.requestMotion(text, cleanedResponse);
           }
 
-          // Trigger TTS
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speak(cleanedResponse, ttsProvider);
+              _brain.speakChunks(parts, ttsProvider);
             }
           }
         }
@@ -1592,7 +1612,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 icon: Icon(
                   _isLoading ? Icons.stop_circle_outlined : Icons.send,
                 ),
-                onPressed: _isLoading ? _interruptGeneration : _sendMessage,
+                onPressed: _isLoading ? () => _interruptGeneration() : _sendMessage,
                 color: _isLoading ? Theme.of(context).colorScheme.error : null,
                 tooltip: _isLoading ? 'Interrupt' : 'Send',
               ),

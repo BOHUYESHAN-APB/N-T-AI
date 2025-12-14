@@ -166,6 +166,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     enable_search = enable_search_str.lower() == "true"
     search_region = raw_request.headers.get("X-Search-Region", "zh-CN")
     usage_type = raw_request.headers.get("X-Usage-Type", "main")
+    persona_mode = raw_request.headers.get("X-Persona-Mode", "full")
     
     # Extract Temperature from Header (if provided by frontend logic) or Body
     # Frontend sends X-Temperature header now.
@@ -253,6 +254,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 tts_voice=tts_voice,
                 enable_search=enable_search,
                 search_region=search_region,
+                persona_mode=persona_mode,
                 vision_config={
                     "api_key": vision_api_key,
                     "base_url": vision_base_url,
