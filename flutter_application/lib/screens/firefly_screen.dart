@@ -26,6 +26,8 @@ import 'settings/settings_screen.dart'; // Import SettingsScreen
 import 'first_run_dialog.dart'; // Import FirstRunDialog
 import '../services/floating_window_factory.dart'; // Import FloatingWindowService
 import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
+import '../core/services/websocket_service.dart'; // Import WebSocketService
+import '../plugins/plugin_manager.dart'; // Import PluginManager
 
 class FireflyScreen extends StatefulWidget {
   const FireflyScreen({Key? key}) : super(key: key);
@@ -37,6 +39,7 @@ class FireflyScreen extends StatefulWidget {
 class _FireflyScreenState extends State<FireflyScreen> {
   final BrainService _brain = BrainService();
   final LLMService _llmService = LLMService();
+  final WebSocketService _wsService = WebSocketService();
   final ChatHistoryService _chatHistory = ChatHistoryService();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -56,6 +59,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
   StreamSubscription? _historySubscription;
   StreamSubscription? _faceSubscription;
   StreamSubscription? _ttsSubscription;
+  StreamSubscription? _wsSubscription;
+  StreamSubscription? _initiativeSubscription;
 
   // Floating window service
   FloatingWindowService? _floatingWindowService;
@@ -81,6 +86,45 @@ class _FireflyScreenState extends State<FireflyScreen> {
       _handleTtsForLive2D(bytes);
     });
 
+    _wsSubscription = _wsService.messageStream.listen(_handleWebSocketMessage);
+    
+    _initiativeSubscription = _brain.initiativeStream.listen((response) {
+      if (!mounted) return;
+      
+      // Add initiative response to chat
+      setState(() {
+        _messages.add({
+          'role': 'assistant',
+          'content': response.content,
+          'created_at': DateTime.now(),
+        });
+      });
+      _scrollToBottom();
+      
+      // Trigger TTS
+      try {
+        final settings = SettingsScope.of(context).resolveFromConfig(
+          SettingsScope.of(context).selectProviderForNextCall() ?? 
+          SettingsScope.of(context).settings.providers.first
+        );
+        // We use the first available provider for TTS if not specified, 
+        // or we could use a specific TTS provider.
+        // For simplicity, we assume the active provider has TTS capabilities or handled by Brain.
+        // Actually BrainService.speak needs a provider config.
+        final providerConfig = SettingsScope.of(context).selectProviderForNextCall() ??
+            SettingsScope.of(context).settings.providers.first;
+            
+        if (providerConfig != null) {
+           _brain.speak(response.content, providerConfig);
+        }
+      } catch (e) {
+        debugPrint("[Initiative] TTS Error: $e");
+      }
+    });
+
+    // Start Initiative Loop
+    _brain.startInitiativeLoop();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkFirstRun();
     });
@@ -92,6 +136,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     // Check floating window setting and update accordingly
     final settings = SettingsScope.of(context).settings;
     _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
+    _wsService.connect(settings.pythonBackendUrl);
     
     // Unify Broadcast Logic: Enable if ANY Live2D mode is active
     // This ensures Sidebar and Mini Window also receive WebSocket events
@@ -178,12 +223,71 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _historySubscription?.cancel();
     _faceSubscription?.cancel();
     _ttsSubscription?.cancel();
+    _wsSubscription?.cancel();
+    _initiativeSubscription?.cancel();
+    _brain.stopInitiativeLoop();
+    _wsService.dispose();
     _floatingWindowService?.dispose();
     _controller.dispose();
     _scrollController.dispose();
     _faceController.dispose();
     _focusNode.dispose();
+    _floatingControlsHideTimer?.cancel(); // Added back just in case
     super.dispose();
+  }
+
+  void _handleWebSocketMessage(Map<String, dynamic> msg) {
+    if (!mounted) return;
+    
+    final type = msg['type'];
+    final data = msg['data'];
+    
+    String? role;
+    String? content;
+    
+    // Handle different formats
+    // Backend sends: type="chat_message", text="...", sender="chat_normal"/"chat_sc"
+    if (type == 'chat_message') {
+       final sender = msg['sender'];
+       if (sender == 'chat_normal' || sender == 'chat_sc') {
+           role = sender;
+           content = msg['text'] ?? msg['content'];
+       }
+    } else if (type == 'chat_normal' || type == 'chat_sc') {
+        // Legacy or direct format
+        role = type;
+        if (data is Map) {
+           content = data['content'] ?? data['text'] ?? data.toString();
+        } else {
+           content = msg['content'] ?? data?.toString();
+        }
+    } else if (type == 'chat_summary') {
+       role = 'chat_summary';
+       content = msg['content'] ?? msg['text'];
+    }
+    
+    if (role != null && content != null && content.isNotEmpty) {
+            // Filter out raw Danmaku (chat_normal) from the main chat interface
+            // unless it's explicitly marked as a summary or important.
+            // User requested to show only summaries here.
+            if (role == 'chat_normal') {
+              _brain.feedDanmaku(content); // Feed raw danmaku to brain for initiative mode
+              // debugPrint('[Danmaku] Ignored in main chat: $content');
+              return; 
+            }
+
+            // Explicitly allow summaries or agent output
+            // (role == 'assistant' is standard, 'chat_summary' might be custom)
+            
+            setState(() {
+              _messages.add({
+                'role': role,
+                'content': content,
+                'created_at': DateTime.now(),
+              });
+            });
+            _scrollToBottom();
+          }
   }
 
   Future<void> _handleTtsForLive2D(Uint8List bytes) async {
@@ -192,7 +296,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     final enableAnyLive2D = settings.enableFloatingWindow || settings.showLive2D || settings.showLive2DMiniWindow;
     if (!enableAnyLive2D) return;
     final b64 = base64Encode(bytes);
-    final js = "if (window.playExternalAudio) window.playExternalAudio('$b64','mp3');";
+    final js = "if (window.playAudioBase64) window.playAudioBase64('$b64');";
     try {
       await _live2dController.executeJs(js);
     } catch (_) {}
@@ -323,42 +427,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
   AiProviderConfig? _resolveAudioProvider(AiProviderCategory category) {
     final providers = SettingsScope.of(context).providers;
 
-    // 1. Try to find explicit provider
+    // 1. Try to find explicit provider with valid baseUrl + apiKey
     final explicit = providers.firstWhere(
-      (p) => p.category == category && p.enabled,
+      (p) =>
+          p.category == category &&
+          p.enabled &&
+          p.baseUrl.isNotEmpty &&
+          p.apiKey.isNotEmpty,
       orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
     );
     if (explicit.id.isNotEmpty) return explicit;
-
-    // 2. Fallback: Check if Backend is enabled
-    final settings = SettingsScope.of(context).settings;
-    if (settings.enablePythonBackend) {
-      // Try to find an LLM provider to borrow the API Key (e.g. SiliconFlow)
-      final llmProvider = providers.firstWhere(
-        (p) =>
-            p.category == AiProviderCategory.llm &&
-            p.enabled &&
-            (p.baseUrl.contains('siliconflow') ||
-                p.name.toLowerCase().contains('silicon')),
-        orElse: () =>
-            AiProviderConfig(id: '', name: '', kind: AiProvider.local),
-      );
-
-      String apiKey = llmProvider.id.isNotEmpty ? llmProvider.apiKey : '';
-
-      return AiProviderConfig(
-        id: 'backend_proxy_${category.name}',
-        name: 'Backend Proxy (${category.name})',
-        kind: AiProvider.openai,
-        baseUrl: 'http://localhost:8000/api',
-        apiKey: apiKey,
-        model: category == AiProviderCategory.stt
-            ? 'FunAudioLLM/SenseVoiceSmall'
-            : 'FunAudioLLM/CosyVoice2-0.5B',
-        category: category,
-        enabled: true,
-      );
-    }
 
     return null;
   }
@@ -428,7 +506,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       String response;
 
       // Define the generation task
-      Future<String> generationTask() async {
+      Future<AiResponse> generationTask() async {
         if (_pendingImageBytes != null) {
           // Trigger background learning (Autonomous Meme Learning)
           final bytesToLearn = Uint8List.fromList(_pendingImageBytes!);
@@ -447,7 +525,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             if (useMainIfCapable && mainVisionCapable) {
               final defaultHint =
                   '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
-              return await _llmService.chatWithImage(
+              final content = await _llmService.chatWithImage(
                 messages: _messages
                     .map(
                       (m) => {
@@ -460,11 +538,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 prompt: text.isNotEmpty ? text : defaultHint,
                 usageType: 'main',
               );
+              return AiResponse(content: content);
             } else if (selectedVisionProviderId != null &&
                 selectedVisionProviderId.isNotEmpty) {
               final defaultHint =
                   '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
-              return await _llmService.chatWithImage(
+              final content = await _llmService.chatWithImage(
                 messages: _messages
                     .map(
                       (m) => {
@@ -478,6 +557,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 usageType: 'main',
                 providerIdOverride: selectedVisionProviderId,
               );
+              return AiResponse(content: content);
             } else {
               // Fallback: insert helper guidance to switch to a vision-capable model
               final helper =
@@ -549,18 +629,23 @@ class _FireflyScreenState extends State<FireflyScreen> {
         return; // Stop processing
       }
 
-      response = result as String;
+      final aiResponse = result as AiResponse;
+      response = aiResponse.content;
 
       if (mounted) {
         final cleanedResponse = _stripExpressionBlocks(response);
 
         if (settings.chatMode == ChatModeOption.standard) {
+          final displayContent =
+              cleanedResponse.replaceAll('[SPLIT]', '\n\n').trim();
           setState(() {
             _isLoading = false;
             _pendingImageBytes = null;
             _messages.add(<String, dynamic>{
               'role': 'assistant',
-              'content': cleanedResponse,
+              'content': displayContent,
+              'reasoning_content': aiResponse.reasoningContent,
+              'tool_calls': aiResponse.toolCalls,
               'created_at': DateTime.now(),
             });
           });
@@ -568,19 +653,19 @@ class _FireflyScreenState extends State<FireflyScreen> {
           await _chatHistory.addMessage(
             _currentSessionId!,
             'assistant',
-            cleanedResponse,
+            displayContent,
           );
 
           // Trigger Motion Agent
           if (settings.enableLive2D) {
-            _brain.expressionAgent.requestMotion(text, cleanedResponse);
+            _brain.expressionAgent.requestMotion(text, displayContent);
           }
 
           // Trigger TTS
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speak(cleanedResponse, ttsProvider);
+              _brain.speak(displayContent, ttsProvider);
             }
           }
         } else {
@@ -884,76 +969,183 @@ class _FireflyScreenState extends State<FireflyScreen> {
       isActive = false;
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: PopupMenuButton<String>(
-        tooltip: '显示模式',
-        padding: EdgeInsets.zero,
-        icon: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(
-            currentIcon,
-            size: 24,
-            color: isActive
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-        onSelected: (value) {
-          // Mutually exclusive logic: Disable all first
-          settingsController.setShowExpressionFace(false);
-          settingsController.setShowLive2D(false);
-          settingsController.setEnableFloatingWindow(false);
-          settingsController.setShowLive2DMiniWindow(false);
-
-          switch (value) {
-            case 'expression':
-              settingsController.setShowExpressionFace(true);
-              break;
-            case 'sidebar':
-              settingsController.setShowLive2D(true);
-              break;
-            case 'floating_native':
-              settingsController.setEnableFloatingWindow(true);
-              break;
-            case 'floating_mini':
-              settingsController.setShowLive2DMiniWindow(true);
-              break;
-            case 'hide':
-              // All disabled above
-              break;
-          }
-        },
-        itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'expression',
-            child: Row(
-              children: [
-                Icon(
-                  Icons.face_retouching_natural,
-                  color: settings.showExpressionFace
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('表情系统（灵动岛）'),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Thinking Mode Toggle (DeepSeek)
+        if (settings.agentEnabled)
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
               ],
             ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () {
+                  final newValue = !(settings.ai.enableThinking ?? false);
+                  settingsController.updateAiSettings(settings.ai.copyWith(enableThinking: newValue));
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(newValue ? 'Thinking Mode Enabled' : 'Thinking Mode Disabled'),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.psychology, 
+                        size: 20, 
+                        color: (settings.ai.enableThinking ?? false) ? Colors.orange : Colors.grey
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "Thinking",
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: (settings.ai.enableThinking ?? false) ? Colors.orange : Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-          PopupMenuItem(
-            value: 'sidebar',
-            child: Row(
-              children: [
+
+        // Initiative Mode Toggle (搭话模式)
+        if (settings.agentEnabled)
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () {
+                  final newValue = !settings.ai.initiativeMode;
+                  settingsController.updateAiSettings(settings.ai.copyWith(initiativeMode: newValue));
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(newValue ? '搭话模式已开启' : '搭话模式已关闭'),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.record_voice_over, 
+                        size: 20, 
+                        color: settings.ai.initiativeMode ? Colors.green : Colors.grey
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "搭话",
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: settings.ai.initiativeMode ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.15),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: PopupMenuButton<String>(
+            tooltip: '显示模式',
+            padding: EdgeInsets.zero,
+            icon: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Icon(
+                currentIcon,
+                size: 24,
+                color: isActive
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            onSelected: (value) {
+              // Mutually exclusive logic: Disable all first
+              settingsController.setShowExpressionFace(false);
+              settingsController.setShowLive2D(false);
+              settingsController.setEnableFloatingWindow(false);
+              settingsController.setShowLive2DMiniWindow(false);
+
+              switch (value) {
+                case 'expression':
+                  settingsController.setShowExpressionFace(true);
+                  break;
+                case 'sidebar':
+                  settingsController.setShowLive2D(true);
+                  break;
+                case 'floating_native':
+                  settingsController.setEnableFloatingWindow(true);
+                  break;
+                case 'floating_mini':
+                  settingsController.setShowLive2DMiniWindow(true);
+                  break;
+                case 'hide':
+                  // All disabled above
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'expression',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.face_retouching_natural,
+                      color: settings.showExpressionFace
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    const Text('表情系统（灵动岛）'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'sidebar',
+                child: Row(
+                  children: [
                 Icon(
                   Icons.view_sidebar,
                   color: settings.showLive2D && !settings.enableFloatingWindow
@@ -1016,6 +1208,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
           ),
         ],
       ),
+    ),
+      ],
     );
   }
 
@@ -1397,7 +1591,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
               id: index.toString(),
               text: msg['content'],
               isMine: isUser,
+              role: msg['role'], // Pass role for plugin message support
               time: timeStr,
+              reasoningContent: msg['reasoning_content'], // Pass reasoning if available
+              toolCalls: msg['tool_calls'], // Pass tool calls if available
             ),
           ),
         );
@@ -1688,21 +1885,21 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
           const Divider(height: 1),
-          // Bottom area of history panel (Model switcher etc)
+          // Bottom area of history panel (Plugin Toggles)
           Container(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  l10n.modelTitle,
-                  style: const TextStyle(
+                const Text(
+                  '插件控制 (Plugins)',
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 6),
-                _ModelSwitcher(settingsController: SettingsScope.of(context)),
+                _PluginToggles(settingsController: SettingsScope.of(context)),
               ],
             ),
           ),
@@ -1808,85 +2005,80 @@ class _DynamicIslandState extends State<_DynamicIsland> {
   }
 }
 
-// 模型切换组件
-class _ModelSwitcher extends StatelessWidget {
+// 插件切换组件
+class _PluginToggles extends StatelessWidget {
   final SettingsController settingsController;
-  const _ModelSwitcher({required this.settingsController});
+  const _PluginToggles({required this.settingsController});
   @override
   Widget build(BuildContext context) {
-    final providers = settingsController.providers;
-    final activeId = settingsController.activeProviderId;
-    final visionId = settingsController.settings.activeVisionProviderId;
-    return SizedBox(
-      height: 120,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: providers.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final p = providers[i];
-          final isActive = p.id == activeId;
-          final isVision = visionId != null && p.id == visionId;
-          return GestureDetector(
-            onTap: () => settingsController.setActiveProvider(p.id),
-            onLongPress: () => settingsController.setActiveVisionProvider(
-              isVision ? null : p.id,
+    return AnimatedBuilder(
+      animation: globalPluginManager,
+      builder: (context, _) {
+        final plugins = globalPluginManager.allPlugins;
+        if (plugins.isEmpty) {
+          return const SizedBox(
+            height: 100,
+            child: Center(
+              child: Text('暂无插件', style: TextStyle(color: Colors.grey, fontSize: 12)),
             ),
-            child: Glass(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              borderRadius: BorderRadius.circular(18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          );
+        }
+        
+        return SizedBox(
+          height: 100,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: plugins.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final p = plugins[i];
+              return GestureDetector(
+                onTap: () {
+                   final newState = !p.isEnabled;
+                   globalPluginManager.togglePlugin(p.id, newState);
+                   if (newState) {
+                       p.onSync(context);
+                       ScaffoldMessenger.of(context).showSnackBar(
+                         SnackBar(
+                           content: Text('已启用并同步 ${p.name}'),
+                           duration: const Duration(milliseconds: 1000),
+                         ),
+                       );
+                   }
+                },
+                child: Glass(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  borderRadius: BorderRadius.circular(18),
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        isActive
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_unchecked,
-                        size: 16,
+                        p.icon,
+                        size: 24,
+                        color: p.isEnabled ? Theme.of(context).colorScheme.primary : Colors.grey,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(height: 8),
                       Text(
                         p.name,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: p.isEnabled ? FontWeight.bold : FontWeight.normal,
+                          color: p.isEnabled ? null : Colors.grey,
                         ),
                       ),
-                      if (isVision)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 4),
-                          child: Icon(Icons.visibility, size: 14),
-                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        p.isEnabled ? 'ON' : 'OFF',
+                        style: const TextStyle(fontSize: 9, color: Colors.grey),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    p.model.isNotEmpty ? p.model : '未配置模型',
-                    style: const TextStyle(fontSize: 10),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    p.baseUrl.split('//').last.split('/').first,
-                    style: TextStyle(
-                      fontSize: 9,
-                      color: Theme.of(context).colorScheme.outline,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    isVision ? '长按取消视觉中枢' : '长按设为视觉',
-                    style: const TextStyle(fontSize: 9),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

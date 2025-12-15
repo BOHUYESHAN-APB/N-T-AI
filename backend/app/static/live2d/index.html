@@ -15,11 +15,13 @@
             -webkit-user-select: none;
             user-select: none;
             -webkit-touch-callout: none;
+            font-family: "Segoe UI", sans-serif;
         }
         #canvas-container {
             width: 100%;
             height: 100%;
             position: relative;
+            z-index: 1;
         }
         canvas {
             width: 100%;
@@ -28,6 +30,9 @@
             image-rendering: crisp-edges;
             image-rendering: pixelated;
         }
+        
+        /* --- Chat UI Removed --- */
+        
         #debug-console {
             position: absolute;
             top: 0;
@@ -83,6 +88,7 @@
     <script src="/static/live2d/live2d.v2.js"></script>
     <!-- Load App Logic (TTS, LipSync) -->
     <script src="/static/live2d/app.js"></script>
+    <script src="/static/live2d/common_ui.js"></script>
     <script>
         // Initialize app if available
         window.addEventListener('load', () => {
@@ -95,6 +101,20 @@
 </head>
 <body>
     <div id="debug-console"></div>
+
+    <!-- Hidden controls for app.js compatibility -->
+    <div style="display:none;">
+        <button id="micButton"></button>
+        <button id="muteButton"></button>
+        <button id="screenButton"></button>
+        <button id="stopButton"></button>
+        <button id="resetSessionButton"></button>
+        <div id="screenshot-thumbnail-container"></div>
+        <div id="screenshots-list"></div>
+        <div id="screenshot-count"></div>
+        <button id="clear-all-screenshots"></button>
+        <button id="screenshotButton"></button>
+    </div>
 
     <div id="canvas-container">
         <canvas id="live2d-canvas"></canvas>

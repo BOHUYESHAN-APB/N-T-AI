@@ -79,6 +79,12 @@ class AudioBroadcastRequest(BaseModel):
     """音频广播请求"""
     audio: str # Base64 encoded audio
 
+class ChatBroadcastRequest(BaseModel):
+    """Chat message broadcast request"""
+    text: str
+    sender: str = "chat_normal" # user, chat_normal, chat_sc, agent
+    senderName: Optional[str] = None
+
 # Initialize services
 # Note: In a real app, use dependency injection
 llm_service = LLMService()
@@ -152,6 +158,34 @@ async def live2d_websocket(websocket: WebSocket):
                 action = message.get('action')
                 if action == 'ping':
                     await websocket.send_text(json.dumps({"type": "pong"}))
+                elif action == 'text_input':
+                    text = message.get('text')
+                    enable_thinking = message.get('enable_thinking', False)
+                    enable_search = message.get('enable_search', False)
+                    
+                    if text:
+                        print(f"[Live2D WS] Processing text input: {text[:50]}... (Thinking: {enable_thinking})")
+                        
+                        # Lazy import to avoid circular dependency
+                        from app.services.chat_service import ChatService
+                        chat_service = ChatService()
+                        
+                        # Process message (async)
+                        # Note: This will block the WebSocket loop until completion. 
+                        # For production, consider using a background task or separate queue.
+                        response_text = await chat_service.process_message(
+                            message=text,
+                            user_id="live2d_websocket_user",
+                            enable_thinking=enable_thinking,
+                            enable_search=enable_search,
+                            enable_backend_tts=True # Enable TTS for Live2D
+                        )
+                        
+                        # Send final response back to this client specifically?
+                        # chat_service already broadcasts 'gemini_response' via manager.broadcast
+                        # So we don't need to send it again here manually, unless we want a private reply.
+                        # But live2d architecture seems to rely on broadcast.
+                        
                 else:
                     print(f"[Live2D WS] Received message: {action}")
             except json.JSONDecodeError:
@@ -215,6 +249,19 @@ async def broadcast_motion(
     await manager.broadcast({
         "type": "motion_request",
         "data": data
+    })
+    return {"status": "ok", "clients": len(manager.active_connections)}
+
+@router.post("/broadcast/chat")
+async def broadcast_chat(request: ChatBroadcastRequest):
+    """
+    Broadcast a chat message (from live stream, user, or other agents)
+    """
+    await manager.broadcast({
+        "type": "chat_message",
+        "text": request.text,
+        "sender": request.sender,
+        "senderName": request.senderName
     })
     return {"status": "ok", "clients": len(manager.active_connections)}
 

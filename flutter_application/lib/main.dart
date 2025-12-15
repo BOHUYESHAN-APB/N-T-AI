@@ -38,8 +38,8 @@ Future<void> main(List<String> args) async {
   await controller.load();
   await LoggerService().init(maxErrors: controller.settings.logMaxErrors, backendUrl: controller.settings.pythonBackendUrl);
   
-  // Run Diagnostics
-  await DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
+  // Run Diagnostics (Fire and forget to avoid blocking startup)
+  DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
 
   // Propagate configured backend URL to services that need it
   try {

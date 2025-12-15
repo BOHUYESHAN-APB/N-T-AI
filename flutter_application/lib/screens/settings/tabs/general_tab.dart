@@ -299,6 +299,32 @@ class GeneralTab extends StatelessWidget {
             ],
           ),
         ),
+        ListTile(
+          title: const Text('用户气泡颜色 (User Bubble)'),
+          trailing: _ColorCircle(
+            color: s.userBubbleColor != null
+                ? Color(s.userBubbleColor!)
+                : Theme.of(context).colorScheme.primary,
+            onTap: () => _showColorPicker(
+              context,
+              s.userBubbleColor,
+              (c) => controller.setUserBubbleColor(c?.value),
+            ),
+          ),
+        ),
+        ListTile(
+          title: const Text('AI 气泡颜色 (AI Bubble)'),
+          trailing: _ColorCircle(
+            color: s.aiBubbleColor != null
+                ? Color(s.aiBubbleColor!)
+                : Theme.of(context).colorScheme.surfaceContainerHighest,
+            onTap: () => _showColorPicker(
+              context,
+              s.aiBubbleColor,
+              (c) => controller.setAiBubbleColor(c?.value),
+            ),
+          ),
+        ),
 
         const SizedBox(height: 24),
         _buildSectionHeader(context, l10n.generalFontSettings),
@@ -600,4 +626,132 @@ class GeneralTab extends StatelessWidget {
       },
     );
   }
+}
+
+class _ColorCircle extends StatelessWidget {
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ColorCircle({required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Theme.of(context).dividerColor,
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _showColorPicker(
+  BuildContext context,
+  int? currentColorValue,
+  Function(Color?) onColorSelected,
+) async {
+  final colors = [
+    Colors.red,
+    Colors.pink,
+    Colors.purple,
+    Colors.deepPurple,
+    Colors.indigo,
+    Colors.blue,
+    Colors.lightBlue,
+    Colors.cyan,
+    Colors.teal,
+    Colors.green,
+    Colors.lightGreen,
+    Colors.lime,
+    Colors.yellow,
+    Colors.amber,
+    Colors.orange,
+    Colors.deepOrange,
+    Colors.brown,
+    Colors.grey,
+    Colors.blueGrey,
+    Colors.black,
+    Colors.white,
+  ];
+
+  await showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('选择颜色'),
+      content: SingleChildScrollView(
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+             GestureDetector(
+              onTap: () {
+                onColorSelected(null); // Reset to default
+                Navigator.pop(ctx);
+              },
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: const Icon(Icons.format_color_reset, size: 20),
+              ),
+            ),
+            ...colors.map(
+              (c) => GestureDetector(
+                onTap: () {
+                  onColorSelected(c);
+                  Navigator.pop(ctx);
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.grey.withOpacity(0.3),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 2,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: currentColorValue == c.value
+                      ? const Icon(Icons.check, color: Colors.white)
+                      : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('取消'),
+        ),
+      ],
+    ),
+  );
 }

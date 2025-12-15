@@ -6,6 +6,7 @@ import aiohttp
 from ..base import BasePlugin
 from app.services.llm_service import LLMService
 from app.services.chat_service import ChatService
+from app.api.routes.live2d_routes import manager as live2d_manager
 import re
 
 # 引入本地的 blivedm 库
@@ -48,7 +49,9 @@ class BilibiliLivePlugin(BasePlugin):
         self._session: Optional[aiohttp.ClientSession] = None
         self._events: List[Dict[str, Any]] = []
         self._danmaku_buffer: List[Dict[str, Any]] = []
+        self._sc_buffer: List[Dict[str, Any]] = []
         self._summary_task: Optional[asyncio.Task] = None
+        self._sc_task: Optional[asyncio.Task] = None
 
     @property
     def name(self) -> str:
@@ -78,14 +81,17 @@ class BilibiliLivePlugin(BasePlugin):
         except Exception as e:
             print(f"[{self.name}] Failed to start blivedm client: {e}")
         
-        # Start danmaku summary loop
+        # Start loops
         self._summary_task = asyncio.create_task(self._loop_process_danmaku())
+        self._sc_task = asyncio.create_task(self._loop_process_sc())
 
     async def on_shutdown(self) -> None:
         await super().on_shutdown()
         await self._stop_ws()
         if self._summary_task:
             self._summary_task.cancel()
+        if self._sc_task:
+            self._sc_task.cancel()
         if self._session:
             await self._session.close()
             self._session = None
@@ -94,26 +100,30 @@ class BilibiliLivePlugin(BasePlugin):
         """Periodically summarize buffered danmaku and send to Main Brain."""
         while True:
             try:
-                # Interval configurable, default 30s
-                interval = float(self.config.get("summary_interval", 30))
+                # Interval configurable, default 20s (normal danmaku)
+                interval = float(self.config.get("danmaku_interval", 20))
                 await asyncio.sleep(interval)
                 
                 if not self._danmaku_buffer:
                     continue
                 
-                # Take all items from buffer
-                items = list(self._danmaku_buffer)
+                # Take all items from buffer (limit to max 50 to avoid overflow)
+                max_items = int(self.config.get("danmaku_batch_size", 50))
+                items = list(self._danmaku_buffer[:max_items])
+                # Keep remaining if any? No, usually we clear to avoid stale data.
+                # But if traffic is huge, we might drop. Let's just clear.
                 self._danmaku_buffer.clear()
                 
                 # Summarize
                 summary = await self.summarize_danmaku_batch(items)
                 if summary:
-                    print(f"[{self.name}] Sending danmaku summary to Main Brain...")
+                    print(f"[{self.name}] Sending danmaku summary to Main Brain: {summary[:50]}...")
                     # Construct prompt for the AI
                     prompt_template = self.config.get("prompt_danmaku", 
-                        "Current Danmaku Summary: {summary}. "
-                        "Please allow the main brain to understand the current audience atmosphere. "
-                        "If there are questions or interactions, please respond briefly."
+                        "Current Danmaku Summary: {summary}.\n"
+                        "This is a live feed from your stream audience. "
+                        "You MUST briefly acknowledge interesting comments, answer questions, or react to the atmosphere. "
+                        "Directly address the audience content."
                     )
                     content = prompt_template.format(summary=summary)
                     
@@ -124,11 +134,73 @@ class BilibiliLivePlugin(BasePlugin):
                         user_id="bilibili_agent", 
                         enable_backend_tts=True # Or false if we don't want TTS for summaries
                     )
+                    
+                    # Broadcast summary to frontend for display
+                    await live2d_manager.broadcast({
+                        "type": "chat_summary",
+                        "content": summary,
+                        "timestamp": int(time.time() * 1000)
+                    })
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 print(f"[{self.name}] Error in danmaku loop: {e}")
                 await asyncio.sleep(5) # Backoff
+
+    async def _loop_process_sc(self) -> None:
+        """Periodically check for Super Chats and send them with a delay."""
+        # Note: SCs are stored in _sc_buffer with a timestamp.
+        # We check every second if any SC has matured (passed the delay time).
+        while True:
+            try:
+                await asyncio.sleep(1)
+                
+                if not self._sc_buffer:
+                    continue
+                
+                now = time.time()
+                delay = float(self.config.get("sc_response_delay", 30)) # Default 30s delay
+                
+                # Filter items that are ready
+                ready_items = []
+                remaining_items = []
+                
+                for item in self._sc_buffer:
+                    if now - item["timestamp"] >= delay:
+                        ready_items.append(item)
+                    else:
+                        remaining_items.append(item)
+                
+                self._sc_buffer = remaining_items
+                
+                if ready_items:
+                    # Process ready SCs immediately (or batch them if multiple ready at once)
+                    print(f"[{self.name}] Processing {len(ready_items)} matured SCs...")
+                    
+                    # For SC, we might want to send them one by one or grouped.
+                    # Grouping is safer for the LLM context.
+                    summary_text = ""
+                    for sc in ready_items:
+                         summary_text += f"[SuperChat] {sc['user']} (¥{sc['price']}): {sc['content']}\n"
+                    
+                    prompt = (
+                        f"You received Super Chat(s)!\n{summary_text}\n"
+                        "Please respond to these supporters enthusiastically and specifically. "
+                        "Thank them for the support."
+                    )
+                    
+                    await self.chat_service.process_message(
+                        prompt, 
+                        user_id="bilibili_agent_sc", # Different ID to avoid memory pollution/confusion? Or same?
+                        # Using same ID might be better for continuity, but let's use bilibili_agent for now.
+                        enable_backend_tts=True
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[{self.name}] Error in SC loop: {e}")
+                await asyncio.sleep(5)
 
     async def on_config_updated(self) -> None:
         await self._stop_ws()
@@ -157,6 +229,14 @@ class BilibiliLivePlugin(BasePlugin):
             extra=extra
         )
         print(f"[{self.name}] Danmaku from {user_name}: {message}")
+        
+        # Broadcast to Live2D (Middle Display)
+        await live2d_manager.broadcast({
+            "type": "chat_message",
+            "text": message,
+            "sender": "chat_normal",
+            "senderName": user_name
+        })
 
     async def process_super_chat(self, message: str, user_name: str, price: float) -> None:
         # Ad Filtering
@@ -170,33 +250,25 @@ class BilibiliLivePlugin(BasePlugin):
             kind="super_chat",
             user=user_name,
             content=message,
-            price=price,
+            price=price
         )
-        print(f"[{self.name}] SC from {user_name} (￥{price}): {message}")
-
-        # Send to Main Brain immediately (High Priority)
-        prompt_template = self.config.get("prompt_sc", 
-            "SUPER CHAT ALERT! User {user} sent ¥{price}! Message: {content}. "
-            "This is a paid message! You MUST respond with high energy, enthusiasm, and gratitude! "
-            "Prioritize this over other context."
-        )
-        content = prompt_template.format(user=user_name, price=price, content=message)
+        print(f"[{self.name}] SuperChat from {user_name} (¥{price}): {message}")
         
-        await self.chat_service.process_message(
-            content, 
-            user_id="bilibili_sc_agent", # Use distinct ID or same 'bilibili_agent'
-            enable_backend_tts=True
-        )
-
-    # TODO: Implement future SSk-based ban functionality
-    # This will require user authentication (SSk/Cookies) and calling blivedm API to ban users.
-    # The user mentioned using 'SSk' (likely related to Bilibili's session/token mechanism) for agent-based moderation.
-    # We need to investigate how to obtain and use SSk for moderation actions (ban, mute).
-    # user_id = ...
-    # room_id = ...
-    # await self._client.send_danmaku(...) # Need to check if blivedm supports ban
-
-
+        # Add to SC Buffer for delayed processing
+        self._sc_buffer.append({
+            "user": user_name,
+            "content": message,
+            "price": price,
+            "timestamp": time.time()
+        })
+        
+        # Broadcast to Live2D
+        await live2d_manager.broadcast({
+            "type": "chat_message",
+            "text": f"【SC ¥{price}】{message}",
+            "sender": "chat_sc",
+            "senderName": user_name
+        })
 
     async def process_gift(self, message: web_models.GiftMessage) -> None:
         # 过滤掉低价值礼物以减少噪音（可选，这里先不过滤）
@@ -271,7 +343,10 @@ class BilibiliLivePlugin(BasePlugin):
 
         prompt = (
             "你是一名直播间弹幕整理助手。下面是一段时间内观众的弹幕与醒目留言，请你用中文做一个简洁总结："
-            "指出关键话题、整体情绪，以及需要主脑注意或回应的要点。"
+            "1. 弹幕趋势：(e.g., 刷屏'666'，讨论游戏，询问主播)"
+            "2. 关键话题：(大家在聊什么)"
+            "3. 观众情绪：(开心、愤怒、期待、无聊)"
+            "请以 '趋势：... | 话题：... | 情绪：...' 的格式输出，保持在一行或简短的三行以内。"
         )
 
         messages = [

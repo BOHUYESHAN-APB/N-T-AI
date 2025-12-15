@@ -21,7 +21,7 @@ class DiagnosticsService {
     // 1. Check Backend Connectivity
     try {
       final uri = Uri.parse('$backendUrl/static/live2d/index.html');
-      final response = await http.get(uri);
+      final response = await http.get(uri).timeout(const Duration(seconds: 3));
       if (response.statusCode == 200 || response.statusCode == 304) {
         _backendStatus = "Connected (HTTP ${response.statusCode})";
         logger.info("[Diagnostics] Backend: $_backendStatus");
@@ -38,7 +38,8 @@ class DiagnosticsService {
     if (Platform.isWindows) {
       try {
         final webview = WebviewController();
-        await webview.initialize();
+        // Add timeout to prevent hanging if runtime is stuck
+        await webview.initialize().timeout(const Duration(seconds: 5));
         _isWebViewAvailable = true;
         _pluginStatus = "Initialized Successfully";
         logger.info("[Diagnostics] WebView2: $_pluginStatus");

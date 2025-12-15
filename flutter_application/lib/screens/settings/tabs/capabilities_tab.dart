@@ -59,59 +59,91 @@ class CapabilitiesTab extends StatelessWidget {
                       ),
                     ),
                     Switch(
-                      value: settings.enablePythonBackend,
-                      onChanged: (v) => controller.setEnablePythonBackend(v),
+                      value: true, // 强制开启
+                      onChanged: null, // 禁止关闭
                     ),
                   ],
                 ),
-                if (settings.enablePythonBackend) ...[
-                  const Divider(height: 24),
-                  _buildBackendControls(context, controller, settings),
-                ],
+                // 强制显示后端控制
+                const Divider(height: 24),
+                _buildBackendControls(context, controller, settings),
+                
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('启用思维链 (Thinking Mode)'),
+                  subtitle: const Text('让模型展示推理过程 (需要模型支持，如 DeepSeek-R1)'),
+                  value: settings.ai.enableThinking,
+                  onChanged: (v) => controller.updateAiSettings(settings.ai.copyWith(enableThinking: v)),
+                  secondary: Icon(
+                    Icons.psychology,
+                    color: settings.ai.enableThinking ? Theme.of(context).colorScheme.primary : Colors.grey,
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('搭话模式 (Initiative Mode)'),
+                  subtitle: const Text('允许 AI 主动发起对话 (消耗 Tokens)'),
+                  value: settings.ai.initiativeMode,
+                  onChanged: (v) => controller.updateAiSettings(settings.ai.copyWith(initiativeMode: v)),
+                  secondary: Icon(
+                    Icons.record_voice_over,
+                    color: settings.ai.initiativeMode ? Theme.of(context).colorScheme.primary : Colors.grey,
+                  ),
+                ),
+                if (settings.ai.initiativeMode)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                         Row(
+                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                           children: [
+                             Text(
+                               '弹幕批处理间隔 (Danmaku Batch Interval)', 
+                               style: Theme.of(context).textTheme.bodyMedium
+                             ),
+                             Text(
+                               '${settings.ai.danmakuBatchInterval} 秒', 
+                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)
+                             ),
+                           ],
+                         ),
+                         Slider(
+                           value: settings.ai.danmakuBatchInterval.toDouble().clamp(5.0, 300.0),
+                           min: 5.0,
+                           max: 300.0,
+                           divisions: 59,
+                           label: '${settings.ai.danmakuBatchInterval}s',
+                           onChanged: (v) => controller.setAiDanmakuBatchInterval(v.toInt()),
+                         ),
+                         const Text(
+                           '设置 AI 处理弹幕的最小间隔。间隔越短反应越快，但消耗更多 Token。',
+                           style: TextStyle(fontSize: 12, color: Colors.grey),
+                         ),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
         ),
 
-        if (settings.enablePythonBackend) ...[
-          const SizedBox(height: 16),
-          _buildSectionHeader(context, '高级能力 (Advanced)'),
-          Opacity(
-            opacity: 0.5,
-            child: SwitchListTile(
-              title: const Text('深度研究 (Deep Research)'),
-              subtitle: const Text(
-                '🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)',
-              ),
-              value: false,
-              onChanged: null, // 禁用开关
-              secondary: const Icon(Icons.science_outlined),
-            ),
-          ),
-          // Vector memory is implicit when backend is active, but we could add a toggle if needed
-          // For now, we assume backend = vector memory enabled.
-        ] else ...[
-          const SizedBox(height: 16),
-          _buildSectionHeader(context, '高级能力 (Advanced)'),
-          ListTile(
-            leading: const Icon(Icons.science_outlined, color: Colors.grey),
-            title: const Text(
-              '深度研究 (Deep Research)',
-              style: TextStyle(color: Colors.grey),
-            ),
+        const SizedBox(height: 16),
+        _buildSectionHeader(context, '高级能力 (Advanced)'),
+        Opacity(
+          opacity: 0.5,
+          child: SwitchListTile(
+            title: const Text('深度研究 (Deep Research)'),
             subtitle: const Text(
-              '需要启用 Python 后端',
-              style: TextStyle(color: Colors.grey),
+              '🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)',
             ),
-            trailing: const Icon(Icons.lock_outline, color: Colors.grey),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('请先启用 Python 后端以解锁此功能')),
-              );
-            },
+            value: false,
+            onChanged: null, // 禁用开关
+            secondary: const Icon(Icons.science_outlined),
           ),
-        ],
+        ),
 
+        /* --- Frontend Basic Capabilities Removed ---
         const SizedBox(height: 16),
         _buildSectionHeader(context, '基础能力 (Basic)'),
         SwitchListTile(
@@ -144,6 +176,7 @@ class CapabilitiesTab extends StatelessWidget {
           onChanged: (v) => controller.setAgentShowThoughts(v),
           secondary: const Icon(Icons.psychology_outlined),
         ),
+        */
 
         const Divider(height: 32),
         _buildSectionHeader(context, '视觉中枢 (Vision)'),
@@ -779,8 +812,16 @@ class _PluginCenterPageState extends State<PluginCenterPage> {
                         children: [
                           Switch(
                             value: plugin.isEnabled,
-                            onChanged: (v) {
-                              globalPluginManager.togglePlugin(plugin.id, v);
+                            onChanged: (v) async {
+                              await globalPluginManager.togglePlugin(plugin.id, v);
+                              if (v) {
+                                await plugin.onSync(context);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('已同步 ${plugin.name} 配置')),
+                                  );
+                                }
+                              }
                             },
                           ),
                           if (hasSettings)
@@ -847,8 +888,16 @@ class PluginDetailPage extends StatelessWidget {
               subtitle: Text(plugin.description),
               trailing: Switch(
                 value: plugin.isEnabled,
-                onChanged: (v) {
-                  globalPluginManager.togglePlugin(plugin.id, v);
+                onChanged: (v) async {
+                  await globalPluginManager.togglePlugin(plugin.id, v);
+                  if (v) {
+                    await plugin.onSync(context);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('已同步 ${plugin.name} 配置')),
+                      );
+                    }
+                  }
                 },
               ),
             ),

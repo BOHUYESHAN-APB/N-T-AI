@@ -15,6 +15,9 @@ class SettingsController extends ChangeNotifier {
   static const _kAiBaseUrl = 'settings.ai.baseUrl';
   static const _kAiApiKey = 'settings.ai.apiKey';
   static const _kAiModel = 'settings.ai.model';
+  static const _kAiEnableThinking = 'settings.ai.enableThinking';
+  static const _kAiInitiativeMode = 'settings.ai.initiativeMode';
+  static const _kAiDanmakuBatchInterval = 'settings.ai.danmakuBatchInterval';
   static const _kAiProviders = 'settings.ai.providers';
   static const _kAiActiveId = 'settings.ai.activeId';
   static const _kAiActiveVisionId = 'settings.ai.activeVisionId';
@@ -57,6 +60,8 @@ class SettingsController extends ChangeNotifier {
   static const _kEnableTts = 'settings.audio.enableTts';
   static const _kEnableStt = 'settings.audio.enableStt';
   static const _kLogMaxErrors = 'settings.logs.maxErrors';
+  static const _kUserBubbleColor = 'settings.ui.userBubbleColor';
+  static const _kAiBubbleColor = 'settings.ui.aiBubbleColor';
   // Legacy font mode key (for migration only)
   static const _kFontMode = 'settings.ui.fontMode';
   // New font settings keys
@@ -97,6 +102,9 @@ class SettingsController extends ChangeNotifier {
     final aiBaseUrl = _prefs.getString(_kAiBaseUrl) ?? '';
     final aiApiKey = _prefs.getString(_kAiApiKey) ?? '';
     final aiModel = _prefs.getString(_kAiModel) ?? '';
+    final aiEnableThinking = _prefs.getBool(_kAiEnableThinking) ?? false;
+    final aiInitiativeMode = _prefs.getBool(_kAiInitiativeMode) ?? false;
+    final aiDanmakuBatchInterval = _prefs.getInt(_kAiDanmakuBatchInterval) ?? 20;
     final visionPrompt =
         _prefs.getString(_kVisionPrompt) ??
         '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
@@ -106,6 +114,8 @@ class SettingsController extends ChangeNotifier {
     final enableTts = _prefs.getBool(_kEnableTts) ?? false;
     final enableStt = _prefs.getBool(_kEnableStt) ?? false;
     final logMaxErrors = _prefs.getInt(_kLogMaxErrors) ?? 5;
+    final userBubbleColor = _prefs.getInt(_kUserBubbleColor);
+    final aiBubbleColor = _prefs.getInt(_kAiBubbleColor);
 
     // load legacy single-AI settings then attempt to load providers list
     final providersRaw = _prefs.getString(_kAiProviders);
@@ -145,10 +155,11 @@ class SettingsController extends ChangeNotifier {
     }
 
     final mcpServersRaw = _prefs.getString(_kAgentMcpServers);
-    final enablePythonBackend = _prefs.getBool(_kEnablePythonBackend) ?? false;
+    final enablePythonBackend = true; // 强制启用后端
     final pythonBackendUrl =
         _prefs.getString(_kPythonBackendUrl) ?? 'http://localhost:8000';
-    final enableDeepResearch = _prefs.getBool(_kEnableDeepResearch) ?? false;
+    final enableDeepResearch =
+        _prefs.getBool(_kEnableDeepResearch) ?? false;
     final searchRegionIdx = _prefs.getInt(_kSearchRegion);
     final systemPrompt = _prefs.getString(_kSystemPrompt) ?? '';
     final assistantName = _prefs.getString(_kAssistantName) ?? 'Firefly';
@@ -448,6 +459,9 @@ class SettingsController extends ChangeNotifier {
         baseUrl: aiBaseUrl,
         apiKey: aiApiKey,
         model: aiModel,
+        enableThinking: aiEnableThinking,
+        initiativeMode: aiInitiativeMode,
+        danmakuBatchInterval: aiDanmakuBatchInterval,
       ),
       providers: providers,
       activeProviderId: activeId ?? providers.first.id,
@@ -490,6 +504,8 @@ class SettingsController extends ChangeNotifier {
       enableTts: enableTts,
       enableStt: enableStt,
       logMaxErrors: logMaxErrors,
+      userBubbleColor: userBubbleColor,
+      aiBubbleColor: aiBubbleColor,
     );
     notifyListeners();
   }
@@ -497,6 +513,7 @@ class SettingsController extends ChangeNotifier {
   Future<void> setEnableExpressionAgent(bool v) async {
     _settings = _settings.copyWith(enableExpressionAgent: v);
     await _prefs.setBool(_kEnableExpressionAgent, v);
+    debugPrint('[Settings] Expression Agent Enabled: $v');
     notifyListeners();
   }
 
@@ -523,6 +540,7 @@ class SettingsController extends ChangeNotifier {
       _settings = _settings.copyWith(showExpressionFace: false);
     }
     await _prefs.setBool(_kShowExpressionFace, v);
+    debugPrint('[Settings] Show Expression Face: $v');
     notifyListeners();
   }
 
@@ -537,6 +555,7 @@ class SettingsController extends ChangeNotifier {
     }
     _settings = _settings.copyWith(enableLive2D: v);
     await _prefs.setBool(_kEnableLive2D, v);
+    debugPrint('[Settings] Live2D Enabled: $v');
     notifyListeners();
   }
 
@@ -560,6 +579,7 @@ class SettingsController extends ChangeNotifier {
       _settings = _settings.copyWith(showLive2D: false);
     }
     await _prefs.setBool(_kShowLive2D, v);
+    debugPrint('[Settings] Show Live2D Sidebar: $v');
     notifyListeners();
   }
 
@@ -583,6 +603,7 @@ class SettingsController extends ChangeNotifier {
       _settings = _settings.copyWith(enableFloatingWindow: false);
     }
     await _prefs.setBool(_kEnableFloatingWindow, v);
+    debugPrint('[Settings] Enable Floating Window: $v');
     notifyListeners();
   }
 
@@ -616,6 +637,7 @@ class SettingsController extends ChangeNotifier {
       _settings = _settings.copyWith(showLive2DMiniWindow: false);
       await _prefs.setBool(_kShowLive2DMiniWindow, false);
     }
+    debugPrint('[Settings] Show Live2D Mini Window: $v');
     notifyListeners();
   }
 
@@ -642,6 +664,26 @@ class SettingsController extends ChangeNotifier {
     if (n <= 0) return;
     _settings = _settings.copyWith(logMaxErrors: n);
     await _prefs.setInt(_kLogMaxErrors, n);
+    notifyListeners();
+  }
+
+  Future<void> setUserBubbleColor(int? color) async {
+    _settings = _settings.copyWith(userBubbleColor: color);
+    if (color == null) {
+      await _prefs.remove(_kUserBubbleColor);
+    } else {
+      await _prefs.setInt(_kUserBubbleColor, color);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setAiBubbleColor(int? color) async {
+    _settings = _settings.copyWith(aiBubbleColor: color);
+    if (color == null) {
+      await _prefs.remove(_kAiBubbleColor);
+    } else {
+      await _prefs.setInt(_kAiBubbleColor, color);
+    }
     notifyListeners();
   }
 
@@ -800,15 +842,23 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setAiDanmakuBatchInterval(int v) async {
+    _settings = _settings.copyWith(ai: _settings.ai.copyWith(danmakuBatchInterval: v));
+    await _prefs.setInt(_kAiDanmakuBatchInterval, v);
+    notifyListeners();
+  }
+
   Future<void> setAgentEnabled(bool v) async {
     _settings = _settings.copyWith(agentEnabled: v);
     await _prefs.setBool(_kAgentEnabled, v);
+    debugPrint('[Settings] Agent Enabled: $v');
     notifyListeners();
   }
 
   Future<void> setEnableBrowser(bool v) async {
     _settings = _settings.copyWith(enableBrowser: v);
     await _prefs.setBool(_kAgentEnableBrowser, v);
+    debugPrint('[Settings] Browser Enabled: $v');
     notifyListeners();
   }
 
@@ -932,6 +982,7 @@ class SettingsController extends ChangeNotifier {
   Future<void> setRotationEnabled(bool enabled) async {
     await _prefs.setBool(_kAiRotationEnabled, enabled);
     _settings = _settings.copyWith(rotationEnabled: enabled);
+    debugPrint('[Settings] Rotation Enabled: $enabled');
     notifyListeners();
   }
 
@@ -1009,6 +1060,21 @@ class SettingsController extends ChangeNotifier {
       await _saveProviders(list);
       notifyListeners();
     }
+  }
+
+  Future<void> updateAiSettings(AiSettings newSettings) async {
+    // Save enableThinking to prefs
+    await _prefs.setBool('settings.ai.enableThinking', newSettings.enableThinking);
+    // Save initiativeMode to prefs
+    await _prefs.setBool(_kAiInitiativeMode, newSettings.initiativeMode);
+    
+    debugPrint('[Settings] Thinking Mode: ${newSettings.enableThinking}');
+    debugPrint('[Settings] Initiative Mode: ${newSettings.initiativeMode}');
+    
+    // Update local state if necessary. 
+    // Since AiSettings in AppSettings might be derived or separate, we update the one in _settings.
+    _settings = _settings.copyWith(ai: newSettings);
+    notifyListeners();
   }
 
   Future<void> addOrUpdateProvider(AiProviderConfig cfg) async {
@@ -1200,8 +1266,12 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setEnablePythonBackend(bool v) async {
-    _settings = _settings.copyWith(enablePythonBackend: v);
-    await _prefs.setBool(_kEnablePythonBackend, v);
+    // 强制保持开启，忽略传入的 v (如果为 false)
+    const forcedValue = true;
+    if (_settings.enablePythonBackend == forcedValue) return;
+    
+    _settings = _settings.copyWith(enablePythonBackend: forcedValue);
+    await _prefs.setBool(_kEnablePythonBackend, forcedValue);
     notifyListeners();
   }
 

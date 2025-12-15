@@ -40,15 +40,21 @@ class ChatMessage {
   final String id;
   final String text;
   final bool isMine;
+  final String? role; // 'user', 'assistant', 'chat_normal', 'chat_sc', 'system'
   final String time;
   final List<Attachment> attachments;
+  final String? reasoningContent;
+  final List<dynamic>? toolCalls;
 
   ChatMessage({
     required this.id,
     required this.text,
     this.isMine = false,
+    this.role,
     required this.time,
     List<Attachment>? attachments,
+    this.reasoningContent,
+    this.toolCalls,
   }) : attachments = attachments ?? const [];
 }
 

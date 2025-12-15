@@ -31,7 +31,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   late Contact _current;
 
   bool _aiBusy = false;
-  StreamSubscription<String>? _aiSub;
+  StreamSubscription<AiChunk>? _aiSub;
   AiContactConfig? _aiCfg; // per-contact config
   bool _showDetails = false; // 右侧详情面板（默认隐藏）
 
@@ -132,7 +132,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     try {
       // 限速（如果设置了 rpm）— 已移除 rpm 字段，按默认限速策略
       await RateLimiterManager.instance.waitIfNeeded(picked.id);
-      final stream = AiClient.streamChat(
+      final stream = AiClient.streamChatEvents(
         ai: settings,
         messages: msgs,
         modelOverride: _aiCfg?.model,
@@ -146,11 +146,22 @@ class _ChatsScreenState extends State<ChatsScreen> {
         if (!mounted) return;
         setState(() {
           final cur = _messages[aiIndex];
+          String newText = cur.text;
+          String? newReasoning = cur.reasoningContent;
+
+          if (chunk.content != null) {
+            newText += chunk.content!;
+          }
+          if (chunk.reasoning != null) {
+            newReasoning = (newReasoning ?? '') + chunk.reasoning!;
+          }
+
           _messages[aiIndex] = ChatMessage(
             id: cur.id,
-            text: cur.text + chunk,
+            text: newText,
             isMine: false,
             time: cur.time,
+            reasoningContent: newReasoning,
           );
         });
       }, onDone: () async {
@@ -166,6 +177,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             text: cur.text,
             isMine: false,
             time: '$hh:$mm',
+            reasoningContent: cur.reasoningContent,
           );
         });
         await ChatStorage.saveMessagesFor(_current.id, _messages);

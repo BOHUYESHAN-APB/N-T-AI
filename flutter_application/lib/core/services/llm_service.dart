@@ -25,8 +25,15 @@ class TokenUsage {
 class AiResponse {
   final String content;
   final String? emotion;
+  final String? reasoningContent;
+  final List<dynamic>? toolCalls;
   
-  AiResponse({required this.content, this.emotion});
+  AiResponse({
+    required this.content, 
+    this.emotion, 
+    this.reasoningContent,
+    this.toolCalls
+  });
 }
 
 class LLMService {
@@ -167,6 +174,7 @@ class LLMService {
     if (provider == null) throw Exception("No active AI provider configured");
 
     final prefs = await SharedPreferences.getInstance();
+    final userNickname = prefs.getString('settings.user.nickname') ?? '';
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
@@ -189,6 +197,18 @@ class LLMService {
       else personaMode = 'full';
     }
     
+    // Parse Chat Mode (persona vs standard)
+    final chatModeIdx = prefs.getInt('settings.ui.chatMode');
+    String chatMode = 'persona';
+    if (chatModeIdx != null) {
+      if (chatModeIdx == ChatModeOption.standard.index) {
+        chatMode = 'standard';
+      }
+    }
+    
+    // Deep Research flag (backend-only orchestration mode)
+    final enableDeepResearch = prefs.getBool('settings.backend.deepResearch') ?? false;
+    
     // Debug logging
     debugPrint('[LLM] enablePythonBackend: $enablePythonBackend');
     debugPrint('[LLM] enableBrowser from prefs: $enableBrowser');
@@ -208,6 +228,9 @@ class LLMService {
       
       // Pass the underlying provider's config to the backend
       headers['X-Target-Api-Key'] = provider.apiKey;
+      if (userNickname.isNotEmpty) {
+        headers['X-User-Nickname'] = userNickname;
+      }
       
       // Sanitize Base URL for backend (remove /chat/completions if present)
       var targetBaseUrl = provider.baseUrl;
@@ -223,6 +246,8 @@ class LLMService {
       headers['X-Usage-Type'] = usageType;
       headers['X-Temperature'] = temperature.toString();
       headers['X-Persona-Mode'] = personaMode;
+      headers['X-Chat-Mode'] = chatMode;
+      headers['X-Deep-Research'] = enableDeepResearch.toString();
 
       try {
         final providersRaw = prefs.getString('settings.ai.providers');
@@ -253,32 +278,47 @@ class LLMService {
       } catch (_) {}
       
       // --- Vision Agent Configuration ---
-      // Read vision settings to pass to backend
-      final activeVisionId = prefs.getString('settings.ai.activeVisionId');
-      final visionFallbackAgent = prefs.getBool('settings.vision.fallbackAgent') ?? true;
-      final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
-      
-      if (activeVisionId != null && activeVisionId.isNotEmpty) {
-        final visionProvider = await _getProviderById(activeVisionId);
-        if (visionProvider != null) {
-          headers['X-Vision-Api-Key'] = visionProvider.apiKey;
-          
-          var visionBaseUrl = visionProvider.baseUrl;
-          if (visionBaseUrl.endsWith('/chat/completions')) {
-            visionBaseUrl = visionBaseUrl.replaceAll('/chat/completions', '');
+      // Only send vision headers when the current request actually uses image content.
+      bool hasImageTag = false;
+      for (final m in messages) {
+        final content = m['content'] ?? '';
+        if (content.contains('[IMAGE:')) {
+          hasImageTag = true;
+          break;
+        }
+      }
+      if (hasImageTag) {
+        final activeVisionId = prefs.getString('settings.ai.activeVisionId');
+        final visionFallbackAgent = prefs.getBool('settings.vision.fallbackAgent') ?? true;
+        final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
+        
+        if (activeVisionId != null && activeVisionId.isNotEmpty) {
+          final visionProvider = await _getProviderById(activeVisionId);
+          if (visionProvider != null) {
+            headers['X-Vision-Api-Key'] = visionProvider.apiKey;
+            
+            var visionBaseUrl = visionProvider.baseUrl;
+            if (visionBaseUrl.endsWith('/chat/completions')) {
+              visionBaseUrl = visionBaseUrl.replaceAll('/chat/completions', '');
+            }
+            if (visionBaseUrl.endsWith('/')) visionBaseUrl = visionBaseUrl.substring(0, visionBaseUrl.length - 1);
+            headers['X-Vision-Base-Url'] = visionBaseUrl;
+            
+            headers['X-Vision-Model'] = visionProvider.model;
+            headers['X-Vision-Prompt'] = Uri.encodeComponent(visionPrompt);
+            headers['X-Vision-Fallback'] = visionFallbackAgent.toString();
+            debugPrint('[LLM] Sending Vision Agent Config: ${visionProvider.model}');
           }
-          if (visionBaseUrl.endsWith('/')) visionBaseUrl = visionBaseUrl.substring(0, visionBaseUrl.length - 1);
-          headers['X-Vision-Base-Url'] = visionBaseUrl;
-          
-          headers['X-Vision-Model'] = visionProvider.model;
-          headers['X-Vision-Prompt'] = Uri.encodeComponent(visionPrompt);
-          headers['X-Vision-Fallback'] = visionFallbackAgent.toString();
-          debugPrint('[LLM] Sending Vision Agent Config: ${visionProvider.model}');
         }
       }
       
       debugPrint('[LLM] Sending X-Enable-Browser: ${enableBrowser.toString()}');
       debugPrint('[LLM] Sending X-Search-Region: $searchRegion');
+
+      // Enable Thinking Mode (DeepSeek)
+      final enableThinking = prefs.getBool('settings.ai.enableThinking') ?? false;
+      headers['X-Enable-Thinking'] = enableThinking.toString();
+      debugPrint('[LLM] Sending X-Enable-Thinking: $enableThinking');
       
       // Note: We don't need Authorization header for the local backend unless it requires it.
       // But we might want to pass it if the backend is secured. For now, assume local is open.
@@ -355,10 +395,19 @@ class LLMService {
         ));
       }
 
-      final content = data['choices'][0]['message']['content'];
-      final emotion = data['emotion'] as String?; // Custom field from MaiBot backend
-      
-      return AiResponse(content: content, emotion: emotion);
+      final choice = data['choices'][0];
+      final message = choice['message'];
+      final content = message['content'];
+      final emotion = data['emotion'] as String?;
+      final reasoningContent = message['reasoning_content'];
+      final toolCalls = message['tool_calls'];
+
+      return AiResponse(
+        content: content, 
+        emotion: emotion,
+        reasoningContent: reasoningContent,
+        toolCalls: toolCalls
+      );
     } else {
       throw Exception('Failed to chat: ${response.body}');
     }

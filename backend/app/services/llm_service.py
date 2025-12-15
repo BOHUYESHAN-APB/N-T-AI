@@ -10,7 +10,7 @@ class LLMService:
             timeout=60.0 # Explicit 60s timeout
         )
 
-    async def get_response(self, messages: list, api_key: str = None, base_url: str = None, model: str = None, temperature: float = 0.7, timeout: float = 60.0) -> str:
+    async def get_response(self, messages: list, api_key: str = None, base_url: str = None, model: str = None, temperature: float = 0.7, timeout: float = 60.0, return_full: bool = False, enable_thinking: bool = False) -> str:
         try:
             # Determine client and config to use
             client = self.default_client
@@ -23,13 +23,32 @@ class LLMService:
                     timeout=timeout
                 )
             
+            # Check for DeepSeek to enable thinking
+            # deepseek-reasoner forces thinking (native), deepseek-chat needs explicit flag
+            extra_body = {}
+            if target_model and "deepseek" in target_model.lower():
+                 if "reasoner" not in target_model.lower() and enable_thinking:
+                     extra_body["thinking"] = {"type": "enabled"}
+            
             response = await client.chat.completions.create(
                 model=target_model,
                 messages=messages,
                 temperature=temperature,
-                timeout=timeout
+                timeout=timeout,
+                extra_body=extra_body if extra_body else None
             )
-            return response.choices[0].message.content
+            
+            message = response.choices[0].message
+            content = message.content
+            
+            if return_full:
+                return {
+                    "content": content,
+                    "reasoning_content": getattr(message, "reasoning_content", None),
+                    "tool_calls": getattr(message, "tool_calls", None)
+                }
+            
+            return content
         except Exception as e:
             print(f"LLM Error: {e}")
             # Re-raise exception so caller (ChatService) can handle fallbacks (e.g. downgrade to text-only)

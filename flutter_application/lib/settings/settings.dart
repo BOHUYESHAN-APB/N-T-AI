@@ -38,12 +38,18 @@ class AiSettings {
   final String baseUrl; // 对于 openai 可留空（使用默认），custom 需要填写
   final String apiKey; // 对于 local 可留空
   final String model; // 例如 gpt-4o, llama3.1:8b 等
+  final bool enableThinking;
+  final bool initiativeMode; // 搭话模式：AI 主动发起对话
+  final int danmakuBatchInterval; // 弹幕批处理间隔（秒）
 
   const AiSettings({
     this.provider = AiProvider.local,
     this.baseUrl = '',
     this.apiKey = '',
     this.model = '',
+    this.enableThinking = false,
+    this.initiativeMode = false,
+    this.danmakuBatchInterval = 20,
   });
 
   AiSettings copyWith({
@@ -51,11 +57,17 @@ class AiSettings {
     String? baseUrl,
     String? apiKey,
     String? model,
+    bool? enableThinking,
+    bool? initiativeMode,
+    int? danmakuBatchInterval,
   }) => AiSettings(
     provider: provider ?? this.provider,
     baseUrl: baseUrl ?? this.baseUrl,
     apiKey: apiKey ?? this.apiKey,
     model: model ?? this.model,
+    enableThinking: enableThinking ?? this.enableThinking,
+    initiativeMode: initiativeMode ?? this.initiativeMode,
+    danmakuBatchInterval: danmakuBatchInterval ?? this.danmakuBatchInterval,
   );
 }
 
@@ -347,6 +359,8 @@ class AppSettings {
   final bool enableTts; // 启用语音合成输出
   final bool enableStt; // 启用语音识别输入
   final int logMaxErrors; // 最近错误日志条数
+  final int? userBubbleColor; // 用户气泡颜色 (ARGB)
+  final int? aiBubbleColor; // AI 气泡颜色 (ARGB)
 
   const AppSettings({
     this.themeMode = ThemeModeOption.system,
@@ -405,6 +419,8 @@ class AppSettings {
     this.enableTts = false,
     this.enableStt = false,
     this.logMaxErrors = 5,
+    this.userBubbleColor,
+    this.aiBubbleColor,
   });
   AppSettings copyWith({
     ThemeModeOption? themeMode,
@@ -461,6 +477,8 @@ class AppSettings {
     bool? enableTts,
     bool? enableStt,
     int? logMaxErrors,
+    int? userBubbleColor,
+    int? aiBubbleColor,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     locale: locale ?? this.locale,
@@ -521,6 +539,8 @@ class AppSettings {
     enableTts: enableTts ?? this.enableTts,
     enableStt: enableStt ?? this.enableStt,
     logMaxErrors: logMaxErrors ?? this.logMaxErrors,
+    userBubbleColor: userBubbleColor ?? this.userBubbleColor,
+    aiBubbleColor: aiBubbleColor ?? this.aiBubbleColor,
   );
 
   ThemeMode get materialThemeMode => switch (themeMode) {

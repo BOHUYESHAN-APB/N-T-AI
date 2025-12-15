@@ -15,6 +15,16 @@ class AiMessage {
       };
 }
 
+class AiChunk {
+  final String? content;
+  final String? reasoning;
+  // toolCall structure can be complex, for now we might focus on reasoning
+  // but let's leave a slot for it.
+  final dynamic toolCall; 
+
+  AiChunk({this.content, this.reasoning, this.toolCall});
+}
+
 class AiClient {
   // 查询可用模型列表（OpenAI 兼容 /models）
   static Future<List<String>> fetchModels({
@@ -178,8 +188,8 @@ class AiClient {
     }
   }
 
-  // 流式：返回文本增量块（OpenAI 风格 SSE: text/event-stream）
-  static Stream<String> streamChat({
+  // 流式：返回结构化增量块（支持 DeepSeek Thinking）
+  static Stream<AiChunk> streamChatEvents({
     required AiSettings ai,
     required List<AiMessage> messages,
     String? modelOverride,
@@ -258,12 +268,16 @@ class AiClient {
             final choices = obj['choices'];
             if (choices is List && choices.isNotEmpty) {
               final delta = choices[0]['delta'];
-              if (delta is Map && delta['content'] is String) {
-                yield delta['content'] as String;
+              if (delta is Map) {
+                final content = delta['content'] as String?;
+                final reasoning = delta['reasoning_content'] as String?;
+                if (content != null || reasoning != null) {
+                  yield AiChunk(content: content, reasoning: reasoning);
+                }
               }
             } else if (obj['content'] is String) {
               // 兼容：部分实现直接返回 content
-              yield obj['content'] as String;
+              yield AiChunk(content: obj['content'] as String);
             }
           } catch (_) {
             // 忽略无法解析的片段
@@ -272,6 +286,25 @@ class AiClient {
       }
     } finally {
       client.close();
+    }
+  }
+
+  // 兼容旧版：只返回文本内容
+  static Stream<String> streamChat({
+    required AiSettings ai,
+    required List<AiMessage> messages,
+    String? modelOverride,
+    bool baseUrlIsRoot = true,
+    String? userId,
+  }) async* {
+    await for (final chunk in streamChatEvents(
+      ai: ai, 
+      messages: messages, 
+      modelOverride: modelOverride, 
+      baseUrlIsRoot: baseUrlIsRoot, 
+      userId: userId
+    )) {
+      if (chunk.content != null) yield chunk.content!;
     }
   }
 

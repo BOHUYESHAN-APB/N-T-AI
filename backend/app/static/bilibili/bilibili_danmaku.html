@@ -9,6 +9,10 @@
     :root {
       /* Base Colors (Overridden by themes) */
       --bg-color: radial-gradient(circle at top, #2b2bff 0, #080820 55%, #02020a 100%);
+      --frame-bg: linear-gradient(145deg, rgba(10, 10, 30, 0.8), rgba(10, 10, 20, 0.9));
+      --frame-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
+      --frame-border: rgba(255, 255, 255, 0.04);
+      
       --accent: #6b8bff;
       --accent-soft: rgba(107, 139, 255, 0.25);
       --accent-strong: rgba(107, 139, 255, 0.9);
@@ -49,10 +53,10 @@
       height: 90vh;
       max-height: 740px;
       border-radius: 24px;
-      background: linear-gradient(145deg, rgba(10, 10, 30, 0.8), rgba(10, 10, 20, 0.9));
+      background: var(--frame-bg);
       box-shadow:
-        0 32px 80px rgba(0, 0, 0, 0.55),
-        0 0 0 1px rgba(255, 255, 255, 0.04);
+        var(--frame-shadow),
+        0 0 0 1px var(--frame-border);
       padding: 16px 18px 14px;
       display: flex;
       flex-direction: column;
@@ -402,97 +406,124 @@
     var theme = params.get("theme") || "default";
 
     // Theme Definitions
-    var themes = {
-      default: {
-        // Default Blue Dark
-        "--bg-color": "radial-gradient(circle at top, #2b2bff 0, #080820 55%, #02020a 100%)",
-        "--accent": "#6b8bff",
-        "--accent-soft": "rgba(107, 139, 255, 0.25)",
-        "--accent-strong": "rgba(107, 139, 255, 0.9)",
-        "--text-main": "#ffffff",
-        "--text-sub": "#b0b5d9",
-        "--bubble-bg-1": "rgba(12, 28, 80, 0.9)",
-        "--bubble-bg-2": "rgba(15, 40, 110, 0.9)",
-        "--bubble-border": "rgba(107, 139, 255, 0.24)",
-        "--bubble-shadow": "rgba(0, 0, 0, 0.4)",
-        "--panel-border": "rgba(255, 255, 255, 0.06)",
-        "--btn-bg": "rgba(255, 255, 255, 0.08)",
-        "--btn-hover": "rgba(255, 255, 255, 0.15)"
-      },
-      light: {
-        // Light Blue
-        "--bg-color": "linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%)",
-        "--accent": "#3b82f6",
-        "--accent-soft": "rgba(59, 130, 246, 0.15)",
-        "--accent-strong": "rgba(59, 130, 246, 0.9)",
-        "--text-main": "#1e293b",
-        "--text-sub": "#64748b",
-        "--bubble-bg-1": "#ffffff",
-        "--bubble-bg-2": "#f8fafc",
-        "--bubble-border": "rgba(59, 130, 246, 0.2)",
-        "--bubble-shadow": "rgba(0, 0, 0, 0.05)",
-        "--panel-border": "rgba(0, 0, 0, 0.06)",
-        "--btn-bg": "rgba(0, 0, 0, 0.04)",
-        "--btn-hover": "rgba(0, 0, 0, 0.08)"
-      },
-      dark_gold: {
-        // Dark Gold
-        "--bg-color": "radial-gradient(circle at top, #ffd700 0, #1a1a00 55%, #0a0a00 100%)",
-        "--accent": "#ffd700",
-        "--accent-soft": "rgba(255, 215, 0, 0.25)",
-        "--accent-strong": "rgba(255, 215, 0, 0.9)",
-        "--text-main": "#ffffff",
-        "--text-sub": "#dcdcb0",
-        "--bubble-bg-1": "rgba(40, 35, 10, 0.9)",
-        "--bubble-bg-2": "rgba(50, 40, 5, 0.9)",
-        "--bubble-border": "rgba(255, 215, 0, 0.2)",
-        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
-        "--panel-border": "rgba(255, 255, 255, 0.06)",
-        "--btn-bg": "rgba(255, 255, 255, 0.08)",
-        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+    // 1. Color Palettes (Accents)
+    var palettes = {
+      blue: {
+        accent: "#6b8bff",
+        accent_soft: "rgba(107, 139, 255, 0.25)",
+        accent_strong: "rgba(107, 139, 255, 0.9)",
+        bubble_border: "rgba(107, 139, 255, 0.24)"
       },
       pink: {
-        // Pink
-        "--bg-color": "radial-gradient(circle at top, #ff69b4 0, #200510 55%, #0a0005 100%)",
-        "--accent": "#ff69b4",
-        "--accent-soft": "rgba(255, 105, 180, 0.25)",
-        "--accent-strong": "rgba(255, 105, 180, 0.9)",
-        "--text-main": "#ffffff",
-        "--text-sub": "#ffcce0",
-        "--bubble-bg-1": "rgba(60, 10, 30, 0.9)",
-        "--bubble-bg-2": "rgba(80, 15, 40, 0.9)",
-        "--bubble-border": "rgba(255, 105, 180, 0.2)",
-        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
-        "--panel-border": "rgba(255, 255, 255, 0.06)",
-        "--btn-bg": "rgba(255, 255, 255, 0.08)",
-        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+        accent: "#ff69b4",
+        accent_soft: "rgba(255, 105, 180, 0.25)",
+        accent_strong: "rgba(255, 105, 180, 0.9)",
+        bubble_border: "rgba(255, 105, 180, 0.24)"
+      },
+      gold: {
+        accent: "#ffd700",
+        accent_soft: "rgba(255, 215, 0, 0.25)",
+        accent_strong: "rgba(255, 215, 0, 0.9)",
+        bubble_border: "rgba(255, 215, 0, 0.24)"
       },
       green: {
-        // Green
-        "--bg-color": "radial-gradient(circle at top, #4ade80 0, #052010 55%, #000a02 100%)",
-        "--accent": "#4ade80",
-        "--accent-soft": "rgba(74, 222, 128, 0.25)",
-        "--accent-strong": "rgba(74, 222, 128, 0.9)",
-        "--text-main": "#ffffff",
-        "--text-sub": "#a6ffcc",
-        "--bubble-bg-1": "rgba(10, 40, 20, 0.9)",
-        "--bubble-bg-2": "rgba(15, 50, 25, 0.9)",
-        "--bubble-border": "rgba(74, 222, 128, 0.2)",
-        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
-        "--panel-border": "rgba(255, 255, 255, 0.06)",
-        "--btn-bg": "rgba(255, 255, 255, 0.08)",
-        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+        accent: "#4ade80",
+        accent_soft: "rgba(74, 222, 128, 0.25)",
+        accent_strong: "rgba(74, 222, 128, 0.9)",
+        bubble_border: "rgba(74, 222, 128, 0.24)"
       }
     };
 
-    function applyTheme(themeName) {
-      var t = themes[themeName] || themes["default"];
-      for (var key in t) {
-        document.documentElement.style.setProperty(key, t[key]);
+    // 2. Modes (Backgrounds & Text)
+    var modes = {
+      dark: {
+        bg_color: "radial-gradient(circle at top, var(--accent-mixed-dark) 0, #080820 55%, #02020a 100%)",
+        frame_bg: "linear-gradient(145deg, rgba(10, 10, 30, 0.8), rgba(5, 5, 15, 0.9))",
+        frame_shadow: "0 32px 80px rgba(0, 0, 0, 0.55)",
+        frame_border: "rgba(255, 255, 255, 0.04)",
+        text_main: "#ffffff",
+        text_sub: "rgba(255, 255, 255, 0.6)",
+        bubble_bg_1: "rgba(20, 20, 35, 0.9)",
+        bubble_bg_2: "rgba(25, 25, 45, 0.9)",
+        bubble_shadow: "rgba(0, 0, 0, 0.4)",
+        panel_border: "rgba(255, 255, 255, 0.06)",
+        btn_bg: "rgba(255, 255, 255, 0.08)",
+        btn_hover: "rgba(255, 255, 255, 0.15)"
+      },
+      light: {
+        bg_color: "linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%)",
+        frame_bg: "rgba(255, 255, 255, 0.85)",
+        frame_shadow: "0 20px 60px rgba(0, 0, 0, 0.1)",
+        frame_border: "rgba(0, 0, 0, 0.05)",
+        text_main: "#1e293b",
+        text_sub: "#64748b",
+        bubble_bg_1: "#ffffff",
+        bubble_bg_2: "#f8fafc",
+        bubble_shadow: "rgba(0, 0, 0, 0.05)",
+        panel_border: "rgba(0, 0, 0, 0.06)",
+        btn_bg: "rgba(0, 0, 0, 0.04)",
+        btn_hover: "rgba(0, 0, 0, 0.08)"
       }
+    };
+
+    function applyTheme(themeName, modeName) {
+      // Resolve Palette
+      var palette = palettes[themeName] || palettes["blue"];
+      // Resolve Mode
+      var modeObj = modes[modeName] || modes["dark"];
+
+      // Set Palette Vars
+      document.documentElement.style.setProperty("--accent", palette.accent);
+      document.documentElement.style.setProperty("--accent-soft", palette.accent_soft);
+      document.documentElement.style.setProperty("--accent-strong", palette.accent_strong);
+      document.documentElement.style.setProperty("--bubble-border", palette.bubble_border);
+      
+      // Helper for dark mode radial gradient mixing
+      // We can't easily mix colors in pure CSS vars without Calc() on RGB values, 
+      // but we can just use the accent color directly in the gradient string logic if we injected it.
+      // Instead, let's just use a semi-transparent overlay or hardcode the mix logic in JS if needed.
+      // For simplicity, we'll set a variable --accent-mixed-dark that approximates the top glow.
+      // But CSS gradients need the color. 
+      // Workaround: We set --bg-color in JS based on the mode + accent.
+      
+      var finalBg = modeObj.bg_color;
+      if (modeName === "dark") {
+          // Replace placeholder with actual accent
+          finalBg = finalBg.replace("var(--accent-mixed-dark)", palette.accent);
+          // Darken the accent for the background glow
+          // Since we can't easily darken a hex string in vanilla JS without a helper, 
+          // we will rely on the accent being semi-valid or just use the accent color but rely on the opacity/gradient stops.
+          // Actually, let's just use the accent color but heavily transparent in the gradient if possible, 
+          // OR just use the accent color. The gradient '0' stop usually looks fine with the accent color.
+      }
+      
+      document.documentElement.style.setProperty("--bg-color", finalBg);
+      document.documentElement.style.setProperty("--frame-bg", modeObj.frame_bg);
+      document.documentElement.style.setProperty("--frame-shadow", modeObj.frame_shadow);
+      document.documentElement.style.setProperty("--frame-border", modeObj.frame_border);
+      document.documentElement.style.setProperty("--text-main", modeObj.text_main);
+      document.documentElement.style.setProperty("--text-sub", modeObj.text_sub);
+      document.documentElement.style.setProperty("--bubble-bg-1", modeObj.bubble_bg_1);
+      document.documentElement.style.setProperty("--bubble-bg-2", modeObj.bubble_bg_2);
+      document.documentElement.style.setProperty("--bubble-shadow", modeObj.bubble_shadow);
+      document.documentElement.style.setProperty("--panel-border", modeObj.panel_border);
+      document.documentElement.style.setProperty("--btn-bg", modeObj.btn_bg);
+      document.documentElement.style.setProperty("--btn-hover", modeObj.btn_hover);
     }
 
-    applyTheme(theme);
+    // Parse params
+    // theme: blue, pink, gold, green (default: blue)
+    // mode: light, dark (default: dark)
+    var pTheme = params.get("theme") || "blue";
+    var pMode = params.get("mode") || "dark";
+    
+    // Handle legacy mappings if user passes old theme names
+    if (pTheme === "default") { pTheme = "blue"; pMode = "dark"; }
+    if (pTheme === "light") { pTheme = "blue"; pMode = "light"; }
+    if (pTheme === "dark_gold") { pTheme = "gold"; pMode = "dark"; }
+    // If user passed "pink" (legacy was dark pink), we keep pMode default (which is dark) unless specified.
+    
+    applyTheme(pTheme, pMode);
 
     var danmakuIncludeSc = false;
     var scFilterMode = "all";

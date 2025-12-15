@@ -68,7 +68,9 @@ async def get_certificates():
 app.include_router(memory_routes.router)
 app.include_router(model_routes.router)
 app.include_router(live2d_routes.router)
+# Mount audio routes at both /api/audio and /v1/audio for compatibility
 app.include_router(audio_routes.router, prefix="/api/audio", tags=["audio"])
+app.include_router(audio_routes.router, prefix="/v1/audio", tags=["audio_v1"])
 
 # Mount static files for Live2D/3D renderer
 static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
@@ -270,9 +272,15 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     target_model = raw_request.headers.get("X-Target-Model")
     enable_search_str = raw_request.headers.get("X-Enable-Browser", "false")
     enable_search = enable_search_str.lower() == "true"
+    enable_thinking_str = raw_request.headers.get("X-Enable-Thinking", "false")
+    enable_thinking = enable_thinking_str.lower() in ["true", "1", "yes"]
     search_region = raw_request.headers.get("X-Search-Region", "zh-CN")
     usage_type = raw_request.headers.get("X-Usage-Type", "main")
     persona_mode = raw_request.headers.get("X-Persona-Mode", "full")
+    chat_mode = raw_request.headers.get("X-Chat-Mode", "persona")
+    deep_research_str = raw_request.headers.get("X-Deep-Research", "false")
+    deep_research = deep_research_str.lower() in ["true", "1", "yes"]
+    user_nickname = raw_request.headers.get("X-User-Nickname")
     
     # Extract Temperature from Header (if provided by frontend logic) or Body
     # Frontend sends X-Temperature header now.
@@ -359,6 +367,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 tts_base_url=tts_base_url,
                 tts_voice=tts_voice,
                 enable_search=enable_search,
+                enable_thinking=enable_thinking,
                 search_region=search_region,
                 persona_mode=persona_mode,
                 vision_config={
@@ -370,7 +379,10 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 },
                 temperature=temperature,
                 background_tasks=background_tasks,
-                enable_backend_tts=enable_backend_tts
+                enable_backend_tts=enable_backend_tts,
+                chat_mode=chat_mode,
+                deep_research=deep_research,
+                user_nickname=user_nickname
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)
         

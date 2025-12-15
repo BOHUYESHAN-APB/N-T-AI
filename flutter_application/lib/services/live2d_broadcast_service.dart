@@ -36,6 +36,7 @@ class Live2DBroadcastService {
 
   /// 启用/禁用广播
   void setEnabled(bool enabled) {
+    if (_enabled == enabled) return;
     _enabled = enabled;
     debugPrint('[Live2DBroadcast] Enabled: $enabled');
   }

@@ -13,15 +13,147 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Special handling for Plugin Messages (Centered)
+    if (message.role == 'chat_summary') {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 32),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.9), // Slightly different background
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+              width: 1.0
+            ),
+            boxShadow: [
+               BoxShadow(
+                 color: Colors.black.withOpacity(0.05), 
+                 blurRadius: 4, 
+                 offset: const Offset(0, 2)
+               ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.insights, size: 14, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    "弹幕趋势", 
+                    style: TextStyle(
+                      fontSize: 11, 
+                      fontWeight: FontWeight.bold, 
+                      color: Theme.of(context).colorScheme.primary,
+                      letterSpacing: 1.0
+                    )
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message.text,
+                style: TextStyle(
+                  fontSize: 13, 
+                  color: Theme.of(context).colorScheme.onSurface,
+                  height: 1.4
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (message.role == 'chat_normal') {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey.withOpacity(0.3)),
+            boxShadow: [
+               BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Text(
+            message.text,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    if (message.role == 'chat_sc') {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFFFF3CD), Color(0xFFFFECB3)], // Gold/Yellow
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFFFEEBA)),
+            boxShadow: [
+               BoxShadow(color: Colors.orange.withOpacity(0.2), blurRadius: 6, offset: const Offset(0, 3)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+               Row(
+                 mainAxisSize: MainAxisSize.min,
+                 children: const [
+                   Icon(Icons.star, size: 12, color: Color(0xFF856404)),
+                   SizedBox(width: 4),
+                   Text("SUPER CHAT", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF856404), letterSpacing: 1.5)),
+                   SizedBox(width: 4),
+                   Icon(Icons.star, size: 12, color: Color(0xFF856404)),
+                 ],
+               ),
+               const SizedBox(height: 4),
+               Text(
+                message.text,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF856404)),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final theme = Theme.of(context);
     final chat = theme.extension<ChatColors>();
     final isMine = message.isMine;
-    
+    final settings = SettingsScope.of(context).settings;
+
+    // Helper to get Color from int
+    Color? getColor(int? argb) => argb != null ? Color(argb) : null;
+
+    final userOverride = getColor(settings.userBubbleColor);
+    final aiOverride = getColor(settings.aiBubbleColor);
+
     // Colors
-    final bgMine = chat?.mineBubbleBg ?? theme.colorScheme.primary;
-    final bgOther = chat?.otherBubbleBg ?? theme.colorScheme.surface;
-    final txtMine = chat?.mineText ?? theme.colorScheme.onPrimary;
-    final txtOther = chat?.otherText ?? theme.colorScheme.onSurface;
+    final bgMine = userOverride ?? chat?.mineBubbleBg ?? theme.colorScheme.primary;
+    final bgOther = aiOverride ?? chat?.otherBubbleBg ?? theme.colorScheme.surface;
+    
+    final txtMine = userOverride != null 
+        ? (userOverride.computeLuminance() > 0.5 ? Colors.black : Colors.white)
+        : (chat?.mineText ?? theme.colorScheme.onPrimary);
+    final txtOther = aiOverride != null
+        ? (aiOverride.computeLuminance() > 0.5 ? Colors.black : Colors.white)
+        : (chat?.otherText ?? theme.colorScheme.onSurface);
 
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
@@ -76,7 +208,20 @@ class MessageBubble extends StatelessWidget {
                               bottomRight: Radius.circular(isMine ? 4 : 16),
                             ),
                           ),
-                          child: _buildContent(context, block['segments'] as List<Map<String, dynamic>>, isMine ? txtMine : txtOther, isMine),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Reasoning Content (DeepSeek)
+                              if (!isMine && message.reasoningContent != null && message.reasoningContent!.isNotEmpty)
+                                _buildReasoningBlock(context, message.reasoningContent!),
+                              
+                              // Tool Calls
+                              if (!isMine && message.toolCalls != null && message.toolCalls!.isNotEmpty)
+                                _buildToolCallsBlock(context, message.toolCalls!),
+
+                              _buildContent(context, block['segments'] as List<Map<String, dynamic>>, isMine ? txtMine : txtOther, isMine),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -249,6 +394,73 @@ class MessageBubble extends StatelessWidget {
   void _copyText(BuildContext context, String text) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制内容'), duration: Duration(seconds: 1)));
+  }
+
+  Widget _buildReasoningBlock(BuildContext context, String reasoning) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: ExpansionTile(
+        title: const Text(
+          "Thinking Process",
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+        ),
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        dense: true,
+        initiallyExpanded: true,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border(left: BorderSide(color: Colors.grey.shade400, width: 3)),
+            ),
+            child: Text(
+              reasoning,
+              style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.black87),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolCallsBlock(BuildContext context, List<dynamic> toolCalls) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: toolCalls.map<Widget>((tool) {
+          final func = tool['function'];
+          final name = func['name'];
+          final args = func['arguments'];
+          return Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.build, size: 14, color: Colors.blue),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    "Called: $name($args)",
+                    style: const TextStyle(fontSize: 11, color: Colors.blue),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _parseMessageBlocks(String text) {

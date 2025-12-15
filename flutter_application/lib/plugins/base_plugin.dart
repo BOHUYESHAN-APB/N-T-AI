@@ -31,4 +31,7 @@ abstract class BasePlugin {
 
   /// Optional: Provide a widget to be displayed in the main dashboard/overlay
   Widget? buildDashboardWidget(BuildContext context) => null;
+
+  /// Called to sync configuration with backend (if applicable)
+  Future<void> onSync(BuildContext context) async {}
 }

@@ -15,7 +15,7 @@ from fastapi import BackgroundTasks
 import asyncio
 import base64
 
-from typing import Union, List, Dict, Any
+from typing import Union, List, Dict, Any, Optional
 import re
 import ast
 from datetime import datetime
@@ -195,7 +195,11 @@ class ChatService:
                             temperature: float = 0.7,
                             background_tasks: BackgroundTasks = None,
                             enable_backend_tts: bool = False,
-                            persona_mode: str = "full") -> str:
+                            enable_thinking: bool = False,
+                            persona_mode: str = "full",
+                            chat_mode: str = "persona",
+                            deep_research: bool = False,
+                            user_nickname: Optional[str] = None) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
 
@@ -225,7 +229,12 @@ class ChatService:
             history.reverse() # Oldest first
 
         # 3. Gather Advanced Context (MaiBot Features)
-        current_mood = self.mood_service.get_current_mood(user_id)
+        current_mood = "neutral"
+        try:
+            current_mood = self.mood_service.get_current_mood(user_id)
+        except Exception as e:
+            logger.warning(f"Mood retrieval failed, using default: {e}")
+
         react_context = ""
         try:
             react_context = await self.memory_system.retrieve_context(
@@ -237,7 +246,12 @@ class ChatService:
             )
         except Exception as e:
             logger.warning(f"Memory context retrieval failed, continuing without it: {e}")
-        style_suggestion = self.expression_service.get_style_suggestion(text_content)
+
+        style_suggestion = ""
+        try:
+            style_suggestion = self.expression_service.get_style_suggestion(text_content)
+        except Exception as e:
+            logger.warning(f"Expression style retrieval failed, continuing without it: {e}")
         
         # 4. Build Prompt
         if persona_mode == "basic":
@@ -258,6 +272,19 @@ class ChatService:
         
         if style_suggestion:
             system_prompt += f"\n\n[Style Instruction]: {style_suggestion}"
+
+        if user_nickname:
+            system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{user_nickname}。在称呼对方时请自然地使用这个昵称，不要使用“用户”等泛称。"
+
+        # Output style rules based on chat mode
+        if chat_mode == "persona" and not deep_research:
+            system_prompt += """
+
+[Output Style]:
+- 在日常拟人聊天模式下，请使用纯文本回复。
+- 不要使用 Markdown 格式（例如粗体 **文本**、列表符号 - 或标题 #）。
+- 只有在用户明确要求使用 Markdown、或者需要展示代码片段 / 表格 / 结构化数据时，才可以使用 Markdown 或代码块。
+"""
 
         # Inject Agent Instructions if enabled
         if enable_search:
@@ -283,11 +310,74 @@ class ChatService:
         
         while current_turn < max_turns:
             try:
-                response_text = await self.llm.get_response(messages, 
+                response_data = await self.llm.get_response(messages, 
                                                           api_key=target_api_key, 
                                                           base_url=target_base_url, 
                                                           model=target_model,
-                                                          temperature=temperature)
+                                                          temperature=temperature,
+                                                          return_full=True,
+                                                          enable_thinking=enable_thinking)
+                
+                reasoning_content = None
+                native_tool_calls = None
+                
+                if isinstance(response_data, dict):
+                    response_text = response_data.get("content", "")
+                    reasoning_content = response_data.get("reasoning_content")
+                    native_tool_calls = response_data.get("tool_calls")
+                else:
+                    response_text = response_data
+
+                # Broadcast Thinking Process
+                if reasoning_content:
+                    print(f"[DeepSeek] Thinking: {reasoning_content[:50]}...")
+                    await live2d_manager.broadcast({
+                        "type": "gemini_response", # Reuse existing type
+                        "text": "", # No text yet, just thinking
+                        "reasoning_content": reasoning_content,
+                        "isNewMessage": current_turn == 0 # Only new if first turn? Or handled by frontend?
+                    })
+                    
+                    # Trigger Live2D Thinking Expression
+                    # Only trigger periodically or on first chunk? 
+                    # Since this is a full response from llm_service (non-streaming in this loop), 
+                    # we get the whole thinking block at once.
+                    await live2d_manager.broadcast({
+                        "type": "expression",
+                        "data": {
+                            "mouth": 0.0,
+                            "eyes": 1.0,
+                            "eyebrow": 0.4,
+                            "blush": 0.0,
+                            "pupilX": 0.0,
+                            "pupilY": 0.6, # Look up
+                            "headTilt": 8.0
+                        }
+                    })
+                
+                # Broadcast Tool Calls (Native)
+                if native_tool_calls:
+                    print(f"[DeepSeek] Tool Calls: {len(native_tool_calls)}")
+                    await live2d_manager.broadcast({
+                        "type": "gemini_response",
+                        "text": "",
+                        "tool_calls": [t.model_dump() for t in native_tool_calls] if hasattr(native_tool_calls[0], 'model_dump') else native_tool_calls
+                    })
+                    
+                    # Trigger Live2D Tool/Search Expression
+                    await live2d_manager.broadcast({
+                        "type": "expression",
+                        "data": {
+                            "mouth": 0.2,
+                            "eyes": 1.0,
+                            "eyebrow": 0.2,
+                            "blush": 0.0,
+                            "pupilX": 0.8, # Look side
+                            "pupilY": 0.0,
+                            "headTilt": -5.0
+                        }
+                    })
+
             except Exception as e:
                 # Fallback for models that don't support vision/multimodal
                 error_msg = str(e).lower()
@@ -330,12 +420,13 @@ class ChatService:
                                                                       api_key=target_api_key, 
                                                                       base_url=target_base_url, 
                                                                       model=target_model,
-                                                                      temperature=temperature)
+                                                                      temperature=temperature,
+                                                                      enable_thinking=enable_thinking)
                         else:
                              # No images found to analyze, just retry as text
                              if messages[-1]["role"] == "user":
                                 messages[-1]["content"] = text_content
-                             response_text = await self.llm.get_response(messages, api_key=target_api_key, base_url=target_base_url, model=target_model, temperature=temperature)
+                             response_text = await self.llm.get_response(messages, api_key=target_api_key, base_url=target_base_url, model=target_model, temperature=temperature, enable_thinking=enable_thinking)
 
                     else:
                         print("No Vision Agent configured. Downgrading to text-only.")
@@ -347,7 +438,8 @@ class ChatService:
                                                                   api_key=target_api_key, 
                                                                   base_url=target_base_url, 
                                                                   model=target_model,
-                                                                  temperature=temperature)
+                                                                  temperature=temperature,
+                                                                  enable_thinking=enable_thinking)
                         response_text += "\n\n(注：当前模型不支持视觉输入，已自动转为纯文本模式)"
                 else:
                     raise e

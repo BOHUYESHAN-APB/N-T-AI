@@ -38,6 +38,7 @@ class BilibiliLivePlugin extends BasePlugin {
 
   int batchSize = 20;
   int intervalSeconds = 5;
+  int scDelaySeconds = 0; // Delay before processing SC
   String? agentProviderId;
   String themePreset = 'default';
   bool enableDanmakuWindow = false;
@@ -73,6 +74,7 @@ class BilibiliLivePlugin extends BasePlugin {
     agentModelController.text = prefs.getString('${prefix}agentModel') ?? '';
     batchSize = prefs.getInt('${prefix}batchSize') ?? 20;
     intervalSeconds = prefs.getInt('${prefix}intervalSeconds') ?? 5;
+    scDelaySeconds = prefs.getInt('${prefix}scDelaySeconds') ?? 0;
     agentProviderId = prefs.getString('${prefix}agentProviderId');
     themePreset = prefs.getString('${prefix}themePreset') ?? 'default';
     enableDanmakuWindow =
@@ -102,6 +104,7 @@ class BilibiliLivePlugin extends BasePlugin {
         '${prefix}agentModel', agentModelController.text.trim());
     await prefs.setInt('${prefix}batchSize', batchSize);
     await prefs.setInt('${prefix}intervalSeconds', intervalSeconds);
+    await prefs.setInt('${prefix}scDelaySeconds', scDelaySeconds);
     await prefs.setString('${prefix}themePreset', themePreset);
     await prefs.setBool('${prefix}enableDanmakuWindow', enableDanmakuWindow);
     await prefs.setBool('${prefix}enableScWindow', enableScWindow);
@@ -165,6 +168,7 @@ class BilibiliLivePlugin extends BasePlugin {
       'access_key_secret': accessKeySecretController.text.trim(),
       'batch_size': batchSize,
       'interval_seconds': intervalSeconds,
+      'sc_delay_seconds': scDelaySeconds,
       'enable_danmaku_window': enableDanmakuWindow,
       'enable_sc_window': enableScWindow,
       'sess_data': sessDataController.text.trim(),
@@ -190,6 +194,11 @@ class BilibiliLivePlugin extends BasePlugin {
       headers: const {'Content-Type': 'application/json'},
       body: body,
     );
+  }
+
+  @override
+  Future<void> onSync(BuildContext context) async {
+    await syncConfigToBackend(context);
   }
 
   @override
@@ -572,6 +581,27 @@ class BilibiliLivePlugin extends BasePlugin {
                         ),
                       ],
                     ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('SC 回应延迟 (秒) - 0 为立即'),
+                  Slider(
+                    min: 0,
+                    max: 60,
+                    divisions: 12,
+                    label: '$scDelaySeconds',
+                    value: scDelaySeconds.toDouble(),
+                    onChanged: (v) {
+                      setState(() {
+                        scDelaySeconds = v.round();
+                      });
+                    },
                   ),
                 ],
               ),

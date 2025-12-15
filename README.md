@@ -75,7 +75,7 @@ N-T-AI adopts a **Client-Server** architecture to balance performance, privacy, 
 *   **Tech Stack**: Flutter (Windows, Android, Linux, macOS).
 *   **Responsibilities**: 
     *   User Interface (UI) and Interaction.
-    *   **Perception**: Handling TTS (Text-to-Speech) generation and STT (Speech-to-Text) recording directly.
+    *   **Perception (CRITICAL)**: Handling TTS (Text-to-Speech) generation and STT (Speech-to-Text) recording directly. **This MUST stay in the frontend to guarantee Live2D Lip-Sync accuracy.**
     *   **Rendering**: Displaying Live2D models and animations.
     *   **Secure Storage**: Encrypted storage of user configurations and API keys.
 

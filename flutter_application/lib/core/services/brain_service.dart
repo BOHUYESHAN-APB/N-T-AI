@@ -88,8 +88,17 @@ class BrainService {
     await tempFile.writeAsBytes(bytes);
     try {
       _audioPlayer ??= AudioPlayer();
-      await _audioPlayer!.stop();
+      final completer = Completer<void>();
+      StreamSubscription<void>? sub;
+      sub = _audioPlayer!.onPlayerComplete.listen((_) {
+        sub?.cancel();
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      });
+
       await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+      await completer.future;
     } catch (e) {
       debugPrint('AudioPlayer error (ignored): $e');
     }
@@ -123,6 +132,11 @@ class BrainService {
   }
 
   Future<void> speak(String text, AiProviderConfig ttsProvider) async {
+    // CRITICAL: TTS MUST BE PERFORMED IN THE FRONTEND.
+    // Do NOT move this logic to the backend. 
+    // The Live2D model relies on local audio playback for precise Lip-Sync.
+    // Backend generation + Network streaming introduces latency that breaks sync.
+    
     final cleanText = text.replaceAll(RegExp(r'\（.*?\）|\(.*?\)|\[.*?\]'), '').trim();
     if (cleanText.isEmpty) return;
 
@@ -159,28 +173,30 @@ class BrainService {
     final sessionId = ++_ttsSessionId;
     _ttsStopped = false;
 
-    for (final part in cleanedParts) {
-      if (_ttsStopped || _ttsSessionId != sessionId) {
-        break;
-      }
-      try {
-        final bytes = await AiClient.generateSpeech(
+    try {
+      final tasks = <Future<Uint8List>>[];
+      for (final part in cleanedParts) {
+        tasks.add(AiClient.generateSpeech(
           config: ttsProvider,
           text: part,
           voice: ttsProvider.meta['voice'] as String?,
-        );
-
-        if (_ttsStopped || _ttsSessionId != sessionId) {
-          break;
-        }
-
-        await _playTtsBytes(bytes);
-      } catch (e) {
-        print('TTS Error: $e');
-        if (_ttsStopped || _ttsSessionId != sessionId) {
-          break;
-        }
+        ));
       }
+
+      final results = await Future.wait(tasks);
+
+      if (_ttsStopped || _ttsSessionId != sessionId) {
+        return;
+      }
+
+      for (final bytes in results) {
+        if (_ttsStopped || _ttsSessionId != sessionId) {
+          break;
+        }
+        await _playTtsBytes(bytes);
+      }
+    } catch (e) {
+      print('TTS Error: $e');
     }
   }
 
@@ -197,6 +213,8 @@ class BrainService {
   }
 
   Future<String> transcribe(String filePath, AiProviderConfig sttProvider) async {
+    // CRITICAL: STT MUST BE PERFORMED IN THE FRONTEND.
+    // Audio recording and initial processing happens locally.
     return await AiClient.transcribe(config: sttProvider, filePath: filePath);
   }
 
@@ -228,7 +246,107 @@ class BrainService {
     return 0.6;
   }
 
-  Future<String> processMessage(String userMessage, {
+  // Initiative Mode Stream
+  final _initiativeController = StreamController<AiResponse>.broadcast();
+  Stream<AiResponse> get initiativeStream => _initiativeController.stream;
+
+  List<String> _danmakuBuffer = [];
+  Timer? _initiativeTimer;
+  bool _isProcessing = false;
+
+  void feedDanmaku(String content) {
+    _danmakuBuffer.add(content);
+    if (_danmakuBuffer.length > 50) {
+      _danmakuBuffer.removeAt(0);
+    }
+  }
+
+  void startInitiativeLoop() {
+    _initiativeTimer?.cancel();
+    debugPrint("[BrainService] Starting Initiative Loop...");
+    
+    SharedPreferences.getInstance().then((prefs) {
+      final interval = prefs.getInt('settings.ai.danmakuBatchInterval') ?? 20;
+      final safeInterval = interval < 5 ? 5 : interval;
+      
+      _initiativeTimer = Timer.periodic(Duration(seconds: safeInterval), (timer) async {
+        final prefs = await SharedPreferences.getInstance();
+        final enabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
+        
+        if (!enabled) return;
+        if (_isProcessing) return;
+        if (_danmakuBuffer.isEmpty) return;
+
+        // Simple rate limiting/cooldown could be added here
+        
+        await _runInitiativeCheck();
+      });
+    });
+  }
+
+  void stopInitiativeLoop() {
+    _initiativeTimer?.cancel();
+    debugPrint("[BrainService] Stopping Initiative Loop...");
+  }
+
+  Future<void> _runInitiativeCheck() async {
+    _isProcessing = true;
+    try {
+      // Snapshot and clear buffer (or keep sliding window)
+      // We take last 10 messages for context
+      final recent = _danmakuBuffer.length > 15 
+          ? _danmakuBuffer.sublist(_danmakuBuffer.length - 15) 
+          : List<String>.from(_danmakuBuffer);
+      
+      // Don't clear buffer immediately to allow context continuity, 
+      // but maybe clear it if we speak to avoid repetition.
+      
+      final contextText = recent.join("\n");
+      final prompt = """
+[Initiative Mode]
+Here are the recent comments from the audience (Danmaku):
+$contextText
+
+Based on these comments, do you want to proactively say something to the audience?
+- If yes, provide a natural, engaging response (as the streamer/character).
+- If no (e.g., comments are boring or you just spoke), reply with exactly: NO_ACTION
+- Keep it short and conversational.
+""";
+
+      final messages = <Map<String, String>>[];
+      
+      // 1. Add context first (if available) to provide conversation history
+      if (_context.isNotEmpty) {
+        messages.addAll(_context.sublist(max(0, _context.length - 2)));
+      }
+
+      // 2. Add the initiative prompt as a USER message at the end
+      // This ensures the backend receives a valid user input to respond to.
+      messages.add({'role': 'user', 'content': prompt});
+
+      final response = await _llmService.chat(messages, usageType: 'initiative', temperature: 0.7);
+      
+      if (response.content.trim() != "NO_ACTION") {
+        debugPrint("[BrainService] Initiative Triggered: ${response.content}");
+        
+        // Add to local context
+        _context.add({'role': 'assistant', 'content': response.content});
+        
+        // Emit to UI
+        _initiativeController.add(response);
+        
+        // Clear buffer after speaking to avoid reacting to same comments?
+        // Or just clear the ones we used.
+        _danmakuBuffer.clear(); 
+      }
+    } catch (e) {
+      debugPrint("[BrainService] Initiative Error: $e");
+    } finally {
+      _isProcessing = false;
+    }
+  }
+
+  Future<AiResponse> processMessage(String userMessage, {
     bool agentEnabled = false, 
     bool enableBrowser = false,
     bool enableNoteAccess = false,
@@ -241,6 +359,9 @@ class BrainService {
   }) async {
     _statusController.add("Thinking...");
     
+    String finalResponse = ""; // Defined here to be accessible throughout the method
+    AiResponse? serverResponse; // Capture full response
+    
     // Determine dynamic temperature
     final dynamicTemperature = _determineTemperature(userMessage);
     debugPrint("[BRAIN] Dynamic Temperature: $dynamicTemperature");
@@ -248,9 +369,10 @@ class BrainService {
     // 0. Check Orchestration Mode
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
     final prefs = await SharedPreferences.getInstance();
-    final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
+    // Force Backend Enabled
+    final backendEnabled = true; // prefs.getBool('settings.backend.enabled') ?? false;
     final enableSearchRetry = prefs.getBool('settings.agent.enableSearchRetry') ?? true;
-    final isServerMode = backendEnabled || (providerConfig?.orchestrationMode == OrchestrationMode.server);
+    final isServerMode = true; // Force Server Mode
 
     debugPrint("[BRAIN] Process Message Start");
     debugPrint("[BRAIN] Backend Enabled: $backendEnabled");
@@ -285,8 +407,9 @@ class BrainService {
       _context = _context.sublist(_context.length - 20);
     }
 
-    // === SERVER ORCHESTRATION MODE ===
-    if (isServerMode) {
+    // === SERVER ORCHESTRATION MODE (FORCED) ===
+    // User requested to disable lightweight client-side logic and rely on backend.
+    // We proceed unconditionally.
       _statusController.add("Connecting to Neural Backend...");
       debugPrint("[BRAIN] Entering Server Mode");
       debugPrint("[BRAIN] enableBrowser: $enableBrowser");
@@ -306,6 +429,11 @@ class BrainService {
         // Call LLM (which points to Python Backend)
         final aiResponse = await _llmService.chat(messages, usageType: 'main', temperature: dynamicTemperature);
         String response = aiResponse.content;
+        
+        // Handle Reasoning Content & Tool Calls (DeepSeek Thinking Mode)
+        if (aiResponse.reasoningContent != null) {
+          debugPrint("[BRAIN] Received Reasoning Content: ${aiResponse.reasoningContent!.length} chars");
+        }
         
         debugPrint("[BRAIN] Received response length: ${response.length}");
         debugPrint("[BRAIN] Response contains [IMAGE: tags: ${response.contains('[IMAGE')}");
@@ -332,16 +460,27 @@ class BrainService {
         // Update Context
         _context.add({'role': 'assistant', 'content': response});
         
+        finalResponse = response; // Assign for later use (memes, etc.)
+        serverResponse = aiResponse; // Capture full response
+
         // In Server Mode, we skip local learning and compression, assuming backend handles it.
         _statusController.add(""); 
-        return response;
-
+        // We continue instead of returning immediately to allow post-processing (memes, expression inference)
+        // return aiResponse; 
       } catch (e) {
         _statusController.add("Backend Error: $e");
-        return "Error connecting to backend: $e";
+        return AiResponse(content: "Error connecting to backend: $e");
       }
+    /* 
+    // CLIENT SIDE LIGHTWEIGHT MODE - DISABLED
+    } else {
+      // ReAct Loop (Client Side)
+      // ... (Code commented out as requested)
+      return AiResponse(content: "Client-side lightweight mode is disabled. Please enable Backend in System Settings.");
     }
-
+    */
+    
+    /*
     // === CLIENT ORCHESTRATION MODE (Legacy/Standalone) ===
 
     // 2. Retrieve Long-term Memories (RAG)
@@ -440,6 +579,9 @@ class BrainService {
       unawaited(_fanOutSidecars(sidecarCommands));
     }
 
+    // === CLIENT ORCHESTRATION MODE (DISABLED) ===
+    // This entire section is disabled to force reliance on the Python Backend.
+    
     // 5. Agent Loop
     int steps = 0;
     int webSearchCount = 0;
@@ -549,6 +691,7 @@ class BrainService {
       finalResponse = "I'm sorry, I got stuck in a loop while trying to use tools.";
       _context.add({'role': 'assistant', 'content': finalResponse});
     }
+    */
 
     // Process Memes (Resolve [MEME: tag] to [IMAGE: path])
     finalResponse = await _processMemes(finalResponse);
@@ -587,7 +730,29 @@ class BrainService {
     }
 
     _statusController.add(""); // Clear status
-    return finalResponse;
+    
+    // Construct AiResponse including reasoning/tool calls if available
+    // Since we forced server mode, the actual AiResponse object (containing reasoning) 
+    // was lost when we didn't return it immediately.
+    // However, the current logic only returns `finalResponse` as content.
+    // To properly support reasoning display, we should probably capture the original `aiResponse` object
+    // or at least its fields.
+    
+    // For now, returning simple content is safe for basic function, but we might lose reasoning data
+    // if we don't return the original object.
+    // Let's rely on the fact that `finalResponse` contains the text content.
+    // If we want to preserve reasoning, we need to capture it in the server block.
+    
+    if (serverResponse != null) {
+        return AiResponse(
+            content: finalResponse,
+            emotion: serverResponse!.emotion,
+            reasoningContent: serverResponse!.reasoningContent,
+            toolCalls: serverResponse!.toolCalls
+        );
+    }
+    
+    return AiResponse(content: finalResponse);
   }
 
   Future<void> _fanOutSidecars(Map<String, dynamic> sidecar) async {

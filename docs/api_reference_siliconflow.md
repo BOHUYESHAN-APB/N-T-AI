@@ -1,5 +1,10 @@
 # SiliconFlow API Reference & Standardization Guide
 
+> **CRITICAL ARCHITECTURE WARNING**:
+> **TTS (Text-to-Speech) and STT (Speech-to-Text) MUST be implemented and executed in the FRONTEND (Flutter).**
+> Do NOT move the core generation/recording logic to the Backend.
+> Reason: The Live2D model requires precise, low-latency audio data for accurate Lip-Sync (mouth movement). Generating audio in the frontend ensures the audio stream is immediately available for the WebView/Renderer without network round-trip delays, guaranteeing synchronization.
+
 为了确保本地部署（Local Backend）与云端服务（SiliconFlow）的无缝切换，我们将参考 SiliconFlow 的 API 设计规范来构建我们未来的 TTS/STT 接口。
 
 > **Note**: This document serves as a reference for backend API development. Our goal is to maintain protocol compatibility where possible.
