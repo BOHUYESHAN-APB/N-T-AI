@@ -778,11 +778,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
   ) {
     return Row(
       children: [
-        // Left Sidebar (History)
         if (_historyOpen)
           SizedBox(width: 300, child: _buildHistoryPanel(context, l10n)),
-
-        // Main Chat Area
         Expanded(
           child: Stack(
             children: [
@@ -799,7 +796,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   ),
                 ],
               ),
-              // Top-left toggle button for history
               Positioned(
                 top: 12,
                 left: 12,
@@ -811,7 +807,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   ),
                 ),
               ),
-              // Dynamic Island (Expression) - 表情系统与 Live2D 互斥
               if (settings.showExpressionFace)
                 Positioned(
                   top: 12,
@@ -826,7 +821,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     ),
                   ),
                 ),
-              // 右上角显示模式下拉菜单
               Positioned(
                 top: 12,
                 right: 12,
@@ -838,14 +832,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   ),
                 ),
               ),
-              // Mini Live2D overlay (left-side arrow + expandable controls)
               if (settings.enableLive2D && settings.showLive2DMiniWindow)
                 _buildLive2DMiniWindowOverlay(context, settings),
             ],
           ),
         ),
-
-        // Right Sidebar (Live2D)
         if (settings.enableLive2D &&
             settings.showLive2D &&
             !settings.enableFloatingWindow)
@@ -863,7 +854,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               expressionAgent: _brain.expressionAgent,
               controller: _live2dController,
               floatingUi: true,
-              showControls: true, // 明确启用侧边栏的悬浮工具栏
+              showControls: true,
             ),
           ),
       ],

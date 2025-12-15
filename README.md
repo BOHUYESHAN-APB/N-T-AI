@@ -55,7 +55,10 @@ If you find this project helpful, please consider supporting us:
 
 ### 3. Memory & Personalization
 *   **Long-term Memory**: Remembers user preferences, facts, and past conversations to build a continuous relationship.
-*   **Persona System**: Customizable system prompts and "Thinking" styles (e.g., the default "Firefly" persona).
+*   **Persona System**: Customizable system prompts and "Thinking" styles.
+    *   **Basic**: Sets the core identity and name, ideal for low-latency or pure assistant tasks.
+    *   **Advanced**: Adds detailed personality traits, curiosity, and empathy layers.
+    *   **Full (Default)**: The complete "Digital Life" experience, including self-awareness, emotional memory, and autonomous behavior simulation.
 
 ### 4. Cross-Platform Display
 *   **Standard Mode**: Full-screen chat interface with Live2D character.
@@ -196,6 +199,11 @@ To control the "Brain" on your PC from your Android phone:
 ### Future Research: Autonomous Behavior
 - [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).
 - [ ] **3D Engine**: Implementing Babylon.js renderer for 3D avatars.
+
+## 🧩 Extending & Plugins
+
+Interested in developing plugins or understanding how we integrate third-party tools?
+Check out our **[Plugin Development Guide](PLUGIN_DEV_GUIDE.md)**.
 
 ### Future Research: Omni Models, Memory, and Persona
 - [ ] **Neuron Count & Digital Life**: Current AI models, despite having parameter counts (often in the trillions) that rival or exceed the synapse counts of some biological organisms, differ fundamentally in architecture. A human brain operates with ~86 billion neurons and ~100 trillion synapses, functioning as a continuous, plastic, and energy-efficient system. In contrast, LLMs are static snapshots of compressed knowledge. N-T-AI acknowledges this distinction: we do not claim to create biological life, but rather to simulate a "Digital Life" form—an entity that uses these massive computational resources to emulate memory, emotion, and agency, creating a convincing and meaningful companion experience.

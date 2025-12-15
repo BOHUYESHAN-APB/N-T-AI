@@ -1,7 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union
+import asyncio
+import json
 import time
 import os
 from urllib.parse import unquote
@@ -12,14 +14,20 @@ from app.services.chat_service import ChatService
 from app.core.logger import logger
 from app.core.logger import get_recent_errors, set_recent_error_max
 from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes
+from app.plugins import startup_plugins, shutdown_plugins, get_plugin
+from app.plugins.bilibili_live import BilibiliLivePlugin
 
 # Lifecycle manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Astra-Me Backend...")
     create_db_and_tables()
-    yield
-    logger.info("Shutting down Astra-Me Backend...")
+    await startup_plugins()
+    try:
+        yield
+    finally:
+        logger.info("Shutting down Astra-Me Backend...")
+        await shutdown_plugins()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -103,6 +111,30 @@ class EmbeddingRequest(BaseModel):
 chat_service = ChatService()
 _frontend_recent_errors = []
 
+
+class PluginConfigUpdate(BaseModel):
+    config: dict = Field(default_factory=dict)
+
+
+class DanmakuItem(BaseModel):
+    user: str
+    content: str
+    price: Optional[float] = None
+    timestamp: Optional[float] = None
+
+
+class DanmakuBatchRequest(BaseModel):
+    items: list[DanmakuItem]
+
+
+class BilibiliEvent(BaseModel):
+    room_id: str
+    user: str
+    content: str
+    price: Optional[float] = None
+    kind: str = "danmaku"
+    timestamp: Optional[float] = None
+
 class FrontendLogItem(BaseModel):
     timestamp: float
     level: str
@@ -142,6 +174,80 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
             "total_tokens": 0
         }
     }
+
+
+@app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/config")
+async def update_plugin_config(plugin_id: str, payload: PluginConfigUpdate):
+    plugin = get_plugin(plugin_id)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    plugin.config.update(payload.config)
+    try:
+        await plugin.on_config_updated()
+    except AttributeError:
+        pass
+    return {"status": "ok"}
+
+
+@app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/danmaku_batch")
+async def summarize_danmaku_batch(plugin_id: str, payload: DanmakuBatchRequest):
+    plugin = get_plugin(plugin_id)
+    if not plugin or not isinstance(plugin, BilibiliLivePlugin):
+        raise HTTPException(status_code=404, detail="Bilibili Live plugin not found")
+    items = [item.model_dump() for item in payload.items]
+    summary = await plugin.summarize_danmaku_batch(items or None)
+    return {"summary": summary}
+
+
+@app.post(f"{settings.API_V1_STR}/live/bilibili/event")
+async def ingest_bilibili_event(payload: BilibiliEvent):
+    plugin = get_plugin("bilibili_live")
+    if not plugin or not isinstance(plugin, BilibiliLivePlugin):
+        raise HTTPException(status_code=404, detail="Bilibili Live plugin not found")
+
+    event = payload.model_dump()
+    kind = event.get("kind") or "danmaku"
+    user = event.get("user") or ""
+    content = event.get("content") or ""
+    price = event.get("price")
+
+    if kind == "super_chat":
+        await plugin.process_super_chat(content, user, price or 0.0)
+    else:
+        await plugin.process_danmaku(content, user)
+
+    return {"status": "ok"}
+
+
+@app.websocket(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/stream")
+async def plugin_event_stream(websocket: WebSocket, plugin_id: str):
+    await websocket.accept()
+    plugin = get_plugin(plugin_id)
+    if not plugin or not isinstance(plugin, BilibiliLivePlugin):
+        await websocket.close(code=1008)
+        return
+
+    last_ts: Optional[float] = None
+
+    try:
+        while True:
+            events = plugin.get_events_since(last_ts)
+            if events:
+                last_ts = float(events[-1].get("timestamp") or 0.0)
+                payload = {"events": events}
+                await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+            try:
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                break
+    except WebSocketDisconnect:
+        return
+    except Exception as e:
+        logger.error(f"Bilibili plugin WebSocket stream error: {e}")
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 @app.post("/v1/chat/completions", response_model=OpenAIResponse)
 async def chat_completions(request: OpenAIRequest, raw_request: Request, background_tasks: BackgroundTasks):

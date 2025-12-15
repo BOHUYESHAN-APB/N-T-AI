@@ -9,6 +9,8 @@ ddgs>=6.0.0
 beautifulsoup4
 requests
 cryptography
-
-
-
+websockets
+aiohttp
+brotli
+pure-protobuf
+yarl

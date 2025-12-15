@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <title>Bilibili Danmaku Window</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      /* Base Colors (Overridden by themes) */
+      --bg-color: radial-gradient(circle at top, #2b2bff 0, #080820 55%, #02020a 100%);
+      --accent: #6b8bff;
+      --accent-soft: rgba(107, 139, 255, 0.25);
+      --accent-strong: rgba(107, 139, 255, 0.9);
+      
+      --text-main: #f5f5ff;
+      --text-sub: #9fa4c7;
+      
+      /* Component Colors */
+      --bubble-bg-1: rgba(12, 28, 80, 0.96);
+      --bubble-bg-2: rgba(15, 40, 110, 0.96);
+      --bubble-border: rgba(107, 139, 255, 0.24);
+      --bubble-shadow: rgba(0, 0, 0, 0.55);
+      
+      --panel-border: rgba(255, 255, 255, 0.06);
+      --btn-bg: rgba(255, 255, 255, 0.08);
+      --btn-hover: rgba(255, 255, 255, 0.15);
+      
+      --sc-accent: #ffb347;
+      --sc-soft: rgba(255, 179, 71, 0.25);
+      --bubble-radius: 18px;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-color);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--text-main);
+    }
+    .frame {
+      width: 420px;
+      max-width: 100%;
+      height: 90vh;
+      max-height: 740px;
+      border-radius: 24px;
+      background: linear-gradient(145deg, rgba(10, 10, 30, 0.8), rgba(10, 10, 20, 0.9));
+      box-shadow:
+        0 32px 80px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+      padding: 16px 18px 14px;
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(22px);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+      box-shadow:
+        0 0 0 4px var(--accent-soft),
+        0 0 18px var(--accent-strong);
+    }
+    .title-text {
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      color: var(--text-main);
+    }
+    .pill {
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-sub);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .pill:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .pill-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #4ade80;
+      box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.18);
+    }
+    .timeline {
+      flex: 1;
+      margin-top: 4px;
+      padding: 8px 2px 4px;
+      border-radius: 18px;
+      background: rgba(0, 0, 0, 0.2);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      overflow: hidden;
+      position: relative;
+    }
+    .timeline-inner {
+      position: absolute;
+      inset: 8px 10px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-right: 4px;
+    }
+    
+    /* 滚动条美化 */
+    .timeline-inner::-webkit-scrollbar {
+      width: 4px; /* 更细 */
+    }
+    .timeline-inner::-webkit-scrollbar-track {
+      background: transparent; /* 透明轨道 */
+    }
+    .timeline-inner::-webkit-scrollbar-thumb {
+      background: var(--accent-soft); /* 使用主题色 */
+      border-radius: 999px;
+    }
+    .timeline-inner::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+
+    .bubble {
+      max-width: 92%;
+      border-radius: var(--bubble-radius);
+      padding: 8px 11px 9px;
+      display: inline-flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--text-main);
+      backdrop-filter: blur(18px);
+      transform-origin: center;
+      animation: bubble-in var(--anim-speed, 260ms) ease-out;
+      border: 1px solid transparent; /* Placeholder for border alignment */
+    }
+    
+    /* 底部控制栏 */
+    .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--panel-border);
+    }
+    .btn-icon {
+        background: var(--btn-bg);
+        border: none;
+        color: var(--text-sub);
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+    .btn-icon:hover {
+        background: var(--btn-hover);
+        color: var(--text-main);
+    }
+    .slider-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--text-sub);
+    }
+    input[type=range] {
+        flex: 1;
+        height: 4px;
+        background: var(--btn-bg);
+        border-radius: 2px;
+        -webkit-appearance: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+        box-shadow: 0 0 0 2px var(--bg-color);
+    }
+
+    /* Bubble Variants */
+    .bubble-danmaku {
+      background: linear-gradient(135deg, var(--bubble-bg-1), var(--bubble-bg-2));
+      box-shadow:
+        0 4px 12px var(--bubble-shadow),
+        0 0 0 1px var(--bubble-border);
+    }
+    
+    .bubble-left {
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+    .bubble-right {
+      align-self: flex-start; /* 统一靠左，或者保持靠右? Live chat usually all left. User code had right. Let's keep right for variety or unify? */
+      /* Actually, standard live chats are all left. The 'right' is usually 'me'. */
+      /* I'll stick to left for everyone to look cleaner, or keep the alternation if user liked it. */
+      /* User didn't complain about alignment, only scrollbar/colors. I'll keep the logic but maybe unify style. */
+      align-self: flex-start; /* Changed to start for cleaner look like Bilibili web */
+      border-bottom-left-radius: 4px;
+    }
+    /* Note: Overriding bubble-right to behave like left for consistency in a monitor window */
+
+    .bubble-sc {
+      background: radial-gradient(circle at top left, rgba(255, 195, 113, 0.95), rgba(255, 138, 76, 0.96));
+      box-shadow:
+        0 14px 42px rgba(255, 138, 76, 0.4),
+        0 0 0 1px rgba(255, 220, 180, 0.62);
+      color: #201010; /* SC text always dark */
+    }
+    .bubble-gift {
+      background: linear-gradient(135deg, rgba(255, 105, 180, 0.9), rgba(219, 112, 147, 0.95));
+      box-shadow:
+        0 10px 30px rgba(255, 105, 180, 0.3),
+        0 0 0 1px rgba(255, 192, 203, 0.4);
+      color: #fff0f5;
+    }
+    .bubble-guard {
+      background: linear-gradient(135deg, rgba(100, 149, 237, 0.9), rgba(65, 105, 225, 0.95));
+      box-shadow:
+        0 10px 30px rgba(65, 105, 225, 0.3),
+        0 0 0 1px rgba(176, 224, 230, 0.4);
+      color: #f0f8ff;
+    }
+    .bubble-sc-selected {
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.85),
+        0 20px 46px rgba(255, 190, 120, 0.95);
+      transform: translateY(-1px) scale(1.02);
+    }
+    .bubble-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      opacity: 0.9;
+    }
+    .user {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+    .avatar {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+    }
+    .amount-pill {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(0, 0, 0, 0.16);
+      color: inherit;
+    }
+    .text {
+      margin-top: 4px;
+      word-break: break-word;
+      font-weight: 400;
+    }
+    .footer {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+    }
+    .legend-normal {
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent-soft);
+    }
+    .legend-sc {
+      background: var(--sc-accent);
+      box-shadow: 0 0 6px var(--sc-soft);
+    }
+    .status {
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.03);
+      letter-spacing: 0.06em;
+    }
+    @keyframes bubble-in {
+      from {
+        transform: translateY(8px) scale(0.98);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+    }
+    @media (max-width: 480px) {
+      .frame {
+        width: 100%;
+        height: 100vh;
+        max-height: none;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="header">
+      <div class="title">
+        <div class="title-dot"></div>
+        <div class="title-text" id="title-text">直播弹幕</div>
+      </div>
+      <div class="pill" id="mode-pill">
+        <span class="pill-dot"></span>
+        <span id="pill-text">实时</span>
+      </div>
+    </div>
+    <div class="timeline">
+      <div class="timeline-inner" id="bubble-list"></div>
+    </div>
+    <div class="footer">
+      <div class="legend">
+        <div class="legend-item">
+          <span class="legend-dot legend-normal"></span>
+          <span>弹幕</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot legend-sc"></span>
+          <span>SC</span>
+        </div>
+      </div>
+      <div class="status" id="status-text">预览模式 · 尚未接入实时数据</div>
+    </div>
+    <div class="controls">
+        <button class="btn-icon" id="btn-refresh" title="刷新页面">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+        </button>
+        <button class="btn-icon" id="btn-clear" title="清空弹幕">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        </button>
+        <div class="slider-container">
+            <span>速度</span>
+            <input type="range" id="speed-slider" min="100" max="1000" value="260" step="10">
+        </div>
+    </div>
+  </div>
+  <script>
+    function getSearchParams() {
+      return new URLSearchParams(window.location.search || "");
+    }
+    var params = getSearchParams();
+    var mode = params.get("mode") || "danmaku";
+    var theme = params.get("theme") || "default";
+
+    // Theme Definitions
+    var themes = {
+      default: {
+        // Default Blue Dark
+        "--bg-color": "radial-gradient(circle at top, #2b2bff 0, #080820 55%, #02020a 100%)",
+        "--accent": "#6b8bff",
+        "--accent-soft": "rgba(107, 139, 255, 0.25)",
+        "--accent-strong": "rgba(107, 139, 255, 0.9)",
+        "--text-main": "#ffffff",
+        "--text-sub": "#b0b5d9",
+        "--bubble-bg-1": "rgba(12, 28, 80, 0.9)",
+        "--bubble-bg-2": "rgba(15, 40, 110, 0.9)",
+        "--bubble-border": "rgba(107, 139, 255, 0.24)",
+        "--bubble-shadow": "rgba(0, 0, 0, 0.4)",
+        "--panel-border": "rgba(255, 255, 255, 0.06)",
+        "--btn-bg": "rgba(255, 255, 255, 0.08)",
+        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+      },
+      light: {
+        // Light Blue
+        "--bg-color": "linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%)",
+        "--accent": "#3b82f6",
+        "--accent-soft": "rgba(59, 130, 246, 0.15)",
+        "--accent-strong": "rgba(59, 130, 246, 0.9)",
+        "--text-main": "#1e293b",
+        "--text-sub": "#64748b",
+        "--bubble-bg-1": "#ffffff",
+        "--bubble-bg-2": "#f8fafc",
+        "--bubble-border": "rgba(59, 130, 246, 0.2)",
+        "--bubble-shadow": "rgba(0, 0, 0, 0.05)",
+        "--panel-border": "rgba(0, 0, 0, 0.06)",
+        "--btn-bg": "rgba(0, 0, 0, 0.04)",
+        "--btn-hover": "rgba(0, 0, 0, 0.08)"
+      },
+      dark_gold: {
+        // Dark Gold
+        "--bg-color": "radial-gradient(circle at top, #ffd700 0, #1a1a00 55%, #0a0a00 100%)",
+        "--accent": "#ffd700",
+        "--accent-soft": "rgba(255, 215, 0, 0.25)",
+        "--accent-strong": "rgba(255, 215, 0, 0.9)",
+        "--text-main": "#ffffff",
+        "--text-sub": "#dcdcb0",
+        "--bubble-bg-1": "rgba(40, 35, 10, 0.9)",
+        "--bubble-bg-2": "rgba(50, 40, 5, 0.9)",
+        "--bubble-border": "rgba(255, 215, 0, 0.2)",
+        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
+        "--panel-border": "rgba(255, 255, 255, 0.06)",
+        "--btn-bg": "rgba(255, 255, 255, 0.08)",
+        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+      },
+      pink: {
+        // Pink
+        "--bg-color": "radial-gradient(circle at top, #ff69b4 0, #200510 55%, #0a0005 100%)",
+        "--accent": "#ff69b4",
+        "--accent-soft": "rgba(255, 105, 180, 0.25)",
+        "--accent-strong": "rgba(255, 105, 180, 0.9)",
+        "--text-main": "#ffffff",
+        "--text-sub": "#ffcce0",
+        "--bubble-bg-1": "rgba(60, 10, 30, 0.9)",
+        "--bubble-bg-2": "rgba(80, 15, 40, 0.9)",
+        "--bubble-border": "rgba(255, 105, 180, 0.2)",
+        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
+        "--panel-border": "rgba(255, 255, 255, 0.06)",
+        "--btn-bg": "rgba(255, 255, 255, 0.08)",
+        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+      },
+      green: {
+        // Green
+        "--bg-color": "radial-gradient(circle at top, #4ade80 0, #052010 55%, #000a02 100%)",
+        "--accent": "#4ade80",
+        "--accent-soft": "rgba(74, 222, 128, 0.25)",
+        "--accent-strong": "rgba(74, 222, 128, 0.9)",
+        "--text-main": "#ffffff",
+        "--text-sub": "#a6ffcc",
+        "--bubble-bg-1": "rgba(10, 40, 20, 0.9)",
+        "--bubble-bg-2": "rgba(15, 50, 25, 0.9)",
+        "--bubble-border": "rgba(74, 222, 128, 0.2)",
+        "--bubble-shadow": "rgba(0, 0, 0, 0.5)",
+        "--panel-border": "rgba(255, 255, 255, 0.06)",
+        "--btn-bg": "rgba(255, 255, 255, 0.08)",
+        "--btn-hover": "rgba(255, 255, 255, 0.15)"
+      }
+    };
+
+    function applyTheme(themeName) {
+      var t = themes[themeName] || themes["default"];
+      for (var key in t) {
+        document.documentElement.style.setProperty(key, t[key]);
+      }
+    }
+
+    applyTheme(theme);
+
+    var danmakuIncludeSc = false;
+    var scFilterMode = "all";
+    var wsConnected = false;
+    if (mode === "sc") {
+      document.documentElement.style.setProperty("--bg-color", "radial-gradient(circle at top, #ffb347 0, #301010 55%, #060208 100%)");
+      document.documentElement.style.setProperty("--accent", "#ffb347");
+      document.documentElement.style.setProperty("--accent-soft", "rgba(255, 179, 71, 0.24)");
+      document.documentElement.style.setProperty("--accent-strong", "rgba(255, 179, 71, 1)");
+    }
+    var titleText = document.getElementById("title-text");
+    var pillText = document.getElementById("pill-text");
+    var statusText = document.getElementById("status-text");
+    var modePill = document.getElementById("mode-pill");
+    if (mode === "sc") {
+      titleText.textContent = "醒目留言";
+      scFilterMode = params.get("sc_filter") === "selected" ? "selected" : "all";
+      pillText.textContent = scFilterMode === "all" ? "全部 SC" : "仅加星";
+      statusText.textContent =
+        scFilterMode === "all"
+          ? "预览模式 · 展示全部醒目留言气泡"
+          : "预览模式 · 仅展示已加星醒目留言气泡";
+    } else {
+      danmakuIncludeSc =
+        params.get("with_sc") === "1" || params.get("with_sc") === "true";
+      pillText.textContent = danmakuIncludeSc ? "弹幕 + SC" : "仅弹幕";
+      statusText.textContent = danmakuIncludeSc
+        ? "预览模式 · 展示弹幕 + SC"
+        : "预览模式 · 仅展示弹幕";
+    }
+    var bubbles = [];
+    var listEl = document.getElementById("bubble-list");
+    var allScBubbles = [];
+    function firstLetter(name) {
+      if (!name) return "?";
+      return name.trim().charAt(0).toUpperCase();
+    }
+    function parseAmountValue(amount, fallback) {
+      if (typeof fallback === "number" && isFinite(fallback)) {
+        return fallback;
+      }
+      if (!amount) return 0;
+      if (typeof amount === "number") {
+        return amount;
+      }
+      var num = parseFloat(String(amount).replace(/[^\d.]/g, "")) || 0;
+      return num;
+    }
+    function getAmountColor(amount) {
+      if (!amount || amount <= 0) {
+        return "rgba(255, 179, 71, 0.9)";
+      }
+      if (amount >= 2000) return "rgba(255, 0, 0, 0.92)";
+      if (amount >= 1000) return "rgba(255, 80, 0, 0.92)";
+      if (amount >= 500) return "rgba(255, 140, 0, 0.92)";
+      if (amount >= 100) return "rgba(255, 190, 0, 0.92)";
+      if (amount >= 50) return "rgba(255, 230, 0, 0.92)";
+      if (amount >= 30) return "rgba(255, 255, 0, 0.92)";
+      return "rgba(255, 179, 71, 0.9)";
+    }
+    function applyScFilter() {
+      for (var i = 0; i < allScBubbles.length; i++) {
+        var item = allScBubbles[i];
+        if (scFilterMode === "all") {
+          item.el.style.display = "";
+        } else {
+          item.el.style.display = item.selected ? "" : "none";
+        }
+      }
+    }
+    if (modePill) {
+      modePill.addEventListener("click", function () {
+        if (mode === "danmaku") {
+          danmakuIncludeSc = !danmakuIncludeSc;
+          pillText.textContent = danmakuIncludeSc ? "弹幕 + SC" : "仅弹幕";
+          statusText.textContent = wsConnected
+            ? danmakuIncludeSc
+              ? "已连接 · 实时接收弹幕 + SC"
+              : "已连接 · 实时接收弹幕"
+            : danmakuIncludeSc
+            ? "预览模式 · 展示弹幕 + SC"
+            : "预览模式 · 仅展示弹幕";
+        } else {
+          scFilterMode = scFilterMode === "all" ? "selected" : "all";
+          pillText.textContent = scFilterMode === "all" ? "全部 SC" : "仅加星";
+          applyScFilter();
+          statusText.textContent = wsConnected
+            ? scFilterMode === "all"
+              ? "已连接 · 实时接收全部 SC"
+              : "已连接 · 实时接收已加星 SC"
+            : scFilterMode === "all"
+            ? "预览模式 · 展示全部醒目留言气泡"
+            : "预览模式 · 仅展示已加星醒目留言气泡";
+        }
+      });
+    }
+    var BILI_EMOJI_MAP = {};
+    
+    // Load external emoji map
+    fetch("bili_emoji.json")
+      .then(response => response.json())
+      .then(data => {
+        BILI_EMOJI_MAP = data;
+        console.log("Emoji map loaded:", Object.keys(BILI_EMOJI_MAP).length, "emojis");
+      })
+      .catch(err => console.error("Failed to load emoji map:", err));
+
+    function renderBubble(item, index) {
+      // var sideClass = index % 2 === 0 ? "bubble-left" : "bubble-right";
+      // Unified to always align left as per standard live chat
+      var sideClass = "bubble-left"; 
+      var typeClass = "bubble-danmaku";
+      if (item.type === "sc") typeClass = "bubble-sc";
+      else if (item.type === "gift") typeClass = "bubble-gift";
+      else if (item.type === "guard") typeClass = "bubble-guard";
+      
+      var bubbleEl = document.createElement("div");
+      bubbleEl.className = "bubble " + sideClass + " " + typeClass;
+      var headerEl = document.createElement("div");
+      headerEl.className = "bubble-header";
+      var userEl = document.createElement("div");
+      userEl.className = "user";
+      var avatarEl = document.createElement("div");
+      avatarEl.className = "avatar";
+      avatarEl.textContent = firstLetter(item.user);
+      var nameEl = document.createElement("span");
+      nameEl.textContent = item.user;
+      userEl.appendChild(avatarEl);
+      userEl.appendChild(nameEl);
+      headerEl.appendChild(userEl);
+      if (item.type === "sc" && item.amount) {
+        var pill = document.createElement("div");
+        pill.className = "amount-pill";
+        pill.textContent = item.amount;
+        headerEl.appendChild(pill);
+      }
+      var textEl = document.createElement("div");
+      textEl.className = "text";
+      
+      var content = item.text;
+      if (item.emoticon && item.emoticon.url) {
+         // Big Emoji
+         content = '<img src="' + item.emoticon.url + '" style="max-height: 50px; vertical-align: middle;" alt="emoji">';
+      } else {
+         // Text Emoji replacement
+         content = content.replace(/\[[^\]]+\]/g, function(match) {
+             var url = BILI_EMOJI_MAP[match];
+             if (url) {
+                 return '<img src="' + url + '" style="height: 20px; vertical-align: middle; margin: 0 1px;" alt="' + match + '">';
+             }
+             return match;
+         });
+      }
+      
+      textEl.innerHTML = content;
+      
+      bubbleEl.appendChild(headerEl);
+      bubbleEl.appendChild(textEl);
+      if (item.type === "sc") {
+        var value = parseAmountValue(item.amount, item.amountValue);
+        var color = getAmountColor(value);
+        bubbleEl.style.background = color;
+        var meta = { el: bubbleEl, selected: false };
+        allScBubbles.push(meta);
+        bubbleEl.addEventListener("click", function () {
+          meta.selected = !meta.selected;
+          if (meta.selected) {
+            bubbleEl.classList.add("bubble-sc-selected");
+          } else {
+            bubbleEl.classList.remove("bubble-sc-selected");
+          }
+          if (mode === "sc" && scFilterMode === "selected") {
+            bubbleEl.style.display = meta.selected ? "" : "none";
+          }
+        });
+      }
+      listEl.appendChild(bubbleEl);
+    }
+    function bubbleFromEvent(ev) {
+      var kind = ev.kind || "danmaku";
+      var type = "danmaku";
+      if (kind === "super_chat") type = "sc";
+      else if (kind === "gift") type = "gift";
+      else if (kind === "guard_buy") type = "guard";
+      
+      var price = ev.price;
+      var amount = null;
+      var amountValue = 0;
+      if (price !== null && price !== undefined && price !== 0) {
+        amountValue = Number(price) || 0;
+        amount = "¥" + amountValue;
+      }
+      return {
+        user: ev.user || "观众",
+        text: ev.content || "",
+        type: type,
+        amount: amount,
+        amountValue: amountValue,
+        emoticon: ev.emoticon // Pass emoticon info
+      };
+    }
+    var bubbleIndex = 0;
+    var previewLoaded = false;
+    function pushBubble(item) {
+      renderBubble(item, bubbleIndex++);
+    }
+    // function appendInitialPreview() { ... } // Removed to keep it clean and disabled
+    
+    function openWebSocket() {
+      var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      var wsUrl =
+        protocol + "//" + window.location.host + "/api/v1/plugins/bilibili_live/stream";
+      var ws;
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        statusText.textContent = "WebSocket 创建失败";
+        return;
+      }
+      ws.onopen = function () {
+        wsConnected = true;
+        if (mode === "sc") {
+          statusText.textContent =
+            scFilterMode === "all"
+              ? "已连接 · 实时接收全部 SC"
+              : "已连接 · 实时接收已加星 SC";
+        } else {
+          statusText.textContent = danmakuIncludeSc
+            ? "已连接 · 实时接收弹幕 + SC"
+            : "已连接 · 实时接收弹幕";
+        }
+      };
+      ws.onmessage = function (event) {
+        try {
+          var data = JSON.parse(event.data || "{}");
+          var events = data.events || [];
+          if (!Array.isArray(events) || events.length === 0) {
+            return;
+          }
+          events.forEach(function (ev) {
+            var item = bubbleFromEvent(ev);
+            if (mode === "sc" && item.type !== "sc") {
+              return;
+            }
+            if (mode === "danmaku") {
+              // Allow danmaku, sc, gift, guard
+              if (item.type !== "danmaku" && item.type !== "sc" && item.type !== "gift" && item.type !== "guard") {
+                return;
+              }
+              if (!danmakuIncludeSc && item.type === "sc") {
+                return;
+              }
+            }
+            pushBubble(item);
+          });
+          if (mode === "sc" && scFilterMode === "selected") {
+            applyScFilter();
+          }
+          listEl.scrollTop = listEl.scrollHeight;
+        } catch (e) {
+          console.log("WS parse error", e);
+        }
+      };
+      ws.onclose = function () {
+        wsConnected = false;
+        statusText.textContent = "连接已关闭";
+      };
+      ws.onerror = function () {
+        wsConnected = false;
+        statusText.textContent = "连接异常";
+      };
+    }
+    openWebSocket();
+    
+    // Bind Controls
+    var btnRefresh = document.getElementById("btn-refresh");
+    if (btnRefresh) {
+        btnRefresh.addEventListener("click", function() {
+            window.location.reload();
+        });
+    }
+    
+    var btnClear = document.getElementById("btn-clear");
+    if (btnClear) {
+        btnClear.addEventListener("click", function() {
+            listEl.innerHTML = "";
+            bubbles = [];
+            allScBubbles = [];
+            bubbleIndex = 0;
+        });
+    }
+    
+    var speedSlider = document.getElementById("speed-slider");
+    if (speedSlider) {
+        speedSlider.addEventListener("input", function(e) {
+            var val = e.target.value;
+            document.documentElement.style.setProperty("--anim-speed", val + "ms");
+        });
+    }
+  </script>
+</body>
+</html>

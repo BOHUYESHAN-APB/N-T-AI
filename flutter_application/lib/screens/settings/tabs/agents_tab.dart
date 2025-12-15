@@ -18,104 +18,105 @@ class _AgentsTabState extends State<AgentsTab> {
     final providers = ctrl.providers;
 
     return ListView(
-      padding: const EdgeInsets.all(12.0),
-      children: [
-        const Text(
-          '配置独立 Agent，用于分离任务（表情/视觉/自定义）',
-          style: TextStyle(fontSize: 14, color: Colors.grey),
-        ),
-        const SizedBox(height: 12),
-
-        // --- Special Agents Configuration Section ---
-        _buildSpecialAgentsSection(ctrl, providers),
-        const Divider(height: 32),
-
-        const Text(
-          '自定义 Agent 列表',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-
-        if (agents.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(
-              child: Text('暂无自定义 Agent', style: TextStyle(color: Colors.grey)),
-            ),
-          ),
-
-        ...agents.map((a) {
-          final provider = a.providerId == null
-              ? null
-              : ctrl.getProviderById(a.providerId!);
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(a.name),
-              subtitle: Text(
-                a.description.isNotEmpty
-                    ? a.description
-                    : (provider != null
-                          ? '关联 provider: ${provider.name}'
-                          : '未关联 provider'),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit),
-                    onPressed: () => _showEditDialog(ctrl, providers, a),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (d) => AlertDialog(
-                          title: const Text('删除 Agent'),
-                          content: Text('确定删除 Agent "${a.name}" 吗？'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(d, false),
-                              child: const Text('取消'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(d, true),
-                              child: const Text('删除'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (ok == true) {
-                        await ctrl.removeAgent(a.id);
-                        if (mounted) setState(() {});
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-          );
-        }).toList(),
-
-        const SizedBox(height: 16),
-        Row(
+          padding: const EdgeInsets.all(12.0),
           children: [
-            FilledButton.icon(
-              onPressed: () => _showEditDialog(ctrl, providers, null),
-              icon: const Icon(Icons.add),
-              label: const Text('新建 Agent'),
+            const Text(
+              '配置独立 Agent，用于分离任务（表情/视觉/自定义）',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
-            const SizedBox(width: 12),
-            TextButton(
-              onPressed: () => _showImportTemplate(ctrl, providers),
-              child: const Text('从 Provider 套用模板'),
+            const SizedBox(height: 12),
+
+            _buildSpecialAgentsSection(ctrl, providers),
+            const Divider(height: 32),
+
+            const Text(
+              '自定义 Agent 列表',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
+            const SizedBox(height: 8),
+
+            if (agents.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child:
+                      Text('暂无自定义 Agent', style: TextStyle(color: Colors.grey)),
+                ),
+              ),
+
+            ...agents.map((a) {
+              final provider = a.providerId == null
+                  ? null
+                  : ctrl.getProviderById(a.providerId!);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(a.name),
+                  subtitle: Text(
+                    a.description.isNotEmpty
+                        ? a.description
+                        : (provider != null
+                            ? '关联 provider: ${provider.name}'
+                            : '未关联 provider'),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        onPressed: () =>
+                            _showEditDialog(ctrl, providers, a),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (d) => AlertDialog(
+                              title: const Text('删除 Agent'),
+                              content: Text('确定删除 Agent "${a.name}" 吗？'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(d, false),
+                                  child: const Text('取消'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(d, true),
+                                  child: const Text('删除'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok == true) {
+                            await ctrl.removeAgent(a.id);
+                            if (mounted) setState(() {});
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: () => _showEditDialog(ctrl, providers, null),
+                  icon: const Icon(Icons.add),
+                  label: const Text('新建 Agent'),
+                ),
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: () => _showImportTemplate(ctrl, providers),
+                  child: const Text('从 Provider 套用模板'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 40),
           ],
-        ),
-        const SizedBox(height: 40), // Extra padding for bottom
-      ],
-    );
+        );
   }
 
   Widget _buildSpecialAgentsSection(
