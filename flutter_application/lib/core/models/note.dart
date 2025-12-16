@@ -6,6 +6,7 @@ class Note {
   final String type; // 'text' or 'whiteboard'
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String category;
 
   Note({
     required this.id,
@@ -15,6 +16,7 @@ class Note {
     this.type = 'text',
     required this.createdAt,
     required this.updatedAt,
+    this.category = 'default',
   });
 
   Map<String, dynamic> toMap() {
@@ -26,6 +28,7 @@ class Note {
       'type': type,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
+      'category': category,
     };
   }
 
@@ -38,6 +41,7 @@ class Note {
       type: map['type'] ?? 'text',
       createdAt: DateTime.parse(map['createdAt']),
       updatedAt: DateTime.parse(map['updatedAt']),
+      category: map['category'] ?? 'default',
     );
   }
 
@@ -47,6 +51,7 @@ class Note {
     String? summary,
     String? type,
     DateTime? updatedAt,
+    String? category,
   }) {
     return Note(
       id: id,
@@ -56,6 +61,7 @@ class Note {
       type: type ?? this.type,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      category: category ?? this.category,
     );
   }
 }

@@ -509,7 +509,6 @@ class MessageBubble extends StatelessWidget {
   }
 
   List<Map<String, dynamic>> _parseTextSegments(String text) {
-    // Matches content in parentheses: (text) or （text）
     final regex = RegExp(r'(\（.*?\）|\(.*?\))', dotAll: true);
     final matches = regex.allMatches(text);
     final List<Map<String, dynamic>> result = [];
@@ -525,7 +524,6 @@ class MessageBubble extends StatelessWidget {
         addText(text.substring(lastEnd, m.start), false);
       }
       String thought = text.substring(m.start, m.end);
-      // Strip brackets for cleaner look
       if (thought.startsWith('(') && thought.endsWith(')')) {
         thought = thought.substring(1, thought.length - 1);
       } else if (thought.startsWith('（') && thought.endsWith('）')) {
@@ -537,11 +535,26 @@ class MessageBubble extends StatelessWidget {
     if (lastEnd < text.length) {
       addText(text.substring(lastEnd), false);
     }
-    // If no matches, return original
     if (result.isEmpty && text.isNotEmpty) {
       result.add({'text': text, 'isThought': false});
     }
-    return result;
+
+    final List<Map<String, dynamic>> normalized = [];
+    for (final seg in result) {
+      final text = seg['text'] as String;
+      final isThought = seg['isThought'] as bool;
+      if (isThought && text.contains('\n')) {
+        final parts = text.split(RegExp(r'\n+'));
+        for (final p in parts) {
+          final t = p.trim();
+          if (t.isEmpty) continue;
+          normalized.add({'text': t, 'isThought': true});
+        }
+      } else {
+        normalized.add(seg);
+      }
+    }
+    return normalized;
   }
 }
 

@@ -281,6 +281,11 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     deep_research_str = raw_request.headers.get("X-Deep-Research", "false")
     deep_research = deep_research_str.lower() in ["true", "1", "yes"]
     user_nickname = raw_request.headers.get("X-User-Nickname")
+    if user_nickname:
+        try:
+            user_nickname = unquote(user_nickname)
+        except Exception:
+            pass
     
     # Extract Temperature from Header (if provided by frontend logic) or Body
     # Frontend sends X-Temperature header now.

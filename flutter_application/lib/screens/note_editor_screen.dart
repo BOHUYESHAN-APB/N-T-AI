@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:uuid/uuid.dart';
 import '../core/models/note.dart';
 import '../core/services/note_service.dart';
@@ -17,6 +18,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   final _contentController = TextEditingController();
   final _noteService = NoteService();
   bool _isDirty = false;
+  bool _isPreviewEnabled = false;
 
   @override
   void initState() {
@@ -68,6 +70,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       appBar: AppBar(
         title: Text(widget.note == null ? 'New Note' : 'Edit Note'),
         actions: [
+          IconButton(
+            icon: Icon(_isPreviewEnabled ? Icons.visibility_off : Icons.visibility),
+            tooltip: _isPreviewEnabled ? '关闭预览' : '预览 Markdown',
+            onPressed: () {
+              setState(() {
+                _isPreviewEnabled = !_isPreviewEnabled;
+              });
+            },
+          ),
           if (widget.note != null)
             IconButton(
               icon: const Icon(Icons.delete),
@@ -95,16 +106,54 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
             ),
             const Divider(),
             Expanded(
-              child: TextField(
-                controller: _contentController,
-                decoration: const InputDecoration(
-                  hintText: 'Start typing...',
-                  border: InputBorder.none,
-                ),
-                maxLines: null,
-                expands: true,
-                onChanged: (_) => _isDirty = true,
-              ),
+              child: _isPreviewEnabled
+                  ? Column(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _contentController,
+                            decoration: const InputDecoration(
+                              hintText: '支持 Markdown 语法，开始输入内容...',
+                              border: InputBorder.none,
+                            ),
+                            maxLines: null,
+                            expands: true,
+                            onChanged: (_) => _isDirty = true,
+                          ),
+                        ),
+                        const Divider(),
+                        Expanded(
+                          child: ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: _contentController,
+                            builder: (context, value, _) {
+                              final text = value.text;
+                              if (text.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    '预览区域：当前没有内容',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                );
+                              }
+                              return Markdown(
+                                data: text,
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    )
+                  : TextField(
+                      controller: _contentController,
+                      decoration: const InputDecoration(
+                        hintText: 'Start typing...',
+                        border: InputBorder.none,
+                      ),
+                      maxLines: null,
+                      expands: true,
+                      onChanged: (_) => _isDirty = true,
+                    ),
             ),
           ],
         ),

@@ -70,6 +70,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Timer? _floatingControlsHideTimer;
   bool _floatingControlsVisible = false;
   final Live2DController _live2dController = Live2DController();
+  bool _lastEnableTts = false;
 
   @override
   void initState() {
@@ -103,17 +104,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
       
       // Trigger TTS
       try {
-        final settings = SettingsScope.of(context).resolveFromConfig(
-          SettingsScope.of(context).selectProviderForNextCall() ?? 
-          SettingsScope.of(context).settings.providers.first
-        );
-        // We use the first available provider for TTS if not specified, 
-        // or we could use a specific TTS provider.
-        // For simplicity, we assume the active provider has TTS capabilities or handled by Brain.
-        // Actually BrainService.speak needs a provider config.
+        final rootSettings = SettingsScope.of(context).settings;
+        if (!rootSettings.enableTts) {
+          return;
+        }
         final providerConfig = SettingsScope.of(context).selectProviderForNextCall() ??
-            SettingsScope.of(context).settings.providers.first;
-            
+            rootSettings.providers.first;
+
         if (providerConfig != null) {
            _brain.speak(response.content, providerConfig);
         }
@@ -133,8 +130,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Check floating window setting and update accordingly
     final settings = SettingsScope.of(context).settings;
+    if (_lastEnableTts && !settings.enableTts) {
+      _stopTtsPlayback();
+    }
+    _lastEnableTts = settings.enableTts;
+    // Check floating window setting and update accordingly
     _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
     _wsService.connect(settings.pythonBackendUrl);
     
@@ -293,6 +294,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Future<void> _handleTtsForLive2D(Uint8List bytes) async {
     if (!mounted) return;
     final settings = SettingsScope.of(context).settings;
+    if (!settings.enableTts) return;
     final enableAnyLive2D = settings.enableFloatingWindow || settings.showLive2D || settings.showLive2DMiniWindow;
     if (!enableAnyLive2D) return;
     final b64 = base64Encode(bytes);
@@ -580,6 +582,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 learningProbability: settings.learningProbability,
                 enableExpressionAgent: settings.enableExpressionAgent,
                 systemPromptOverride: settings.systemPrompt,
+                sessionId: _currentSessionId,
               );
             }
           } catch (_) {
@@ -593,6 +596,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               learningProbability: settings.learningProbability,
               enableExpressionAgent: settings.enableExpressionAgent,
               systemPromptOverride: settings.systemPrompt,
+              sessionId: _currentSessionId,
             );
           }
         } else {
@@ -610,6 +614,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             enableExpressionAgent: settings.enableExpressionAgent,
             systemPromptOverride: settings.systemPrompt,
             providerOverride: provider,
+            sessionId: _currentSessionId,
           );
 
           if (provider != null) {
@@ -669,7 +674,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             }
           }
         } else {
-          final parts = cleanedResponse.split('[SPLIT]');
+          final parts = _splitPersonaText(cleanedResponse);
 
           setState(() {
             _isLoading = false;
@@ -754,6 +759,22 @@ class _FireflyScreenState extends State<FireflyScreen> {
       cleaned = cleaned.trim();
     }
     return cleaned;
+  }
+
+  List<String> _splitPersonaText(String text) {
+    final result = <String>[];
+    final primaryParts = text.split('[SPLIT]');
+    for (final raw in primaryParts) {
+      var p = raw.replaceAll('\r\n', '\n').trim();
+      if (p.isEmpty) continue;
+      final paragraphs = p.split(RegExp(r'\n{2,}'));
+      for (var para in paragraphs) {
+        final t = para.trim();
+        if (t.isEmpty) continue;
+        result.add(t);
+      }
+    }
+    return result;
   }
 
   Future<void> _attachImage() async {
@@ -1223,7 +1244,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     const double btnSize = 48.0;
 
     return Positioned(
-      top: 12,
+      top: 84,
       // Shift the mini-window left to avoid overlapping the top-right menu
       right: 84,
       child: SafeArea(

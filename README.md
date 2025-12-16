@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.3%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.7%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Afdian-pink)](https://afdian.com/a/N-T-AI)
@@ -64,6 +64,11 @@ If you find this project helpful, please consider supporting us:
 *   **Standard Mode**: Full-screen chat interface with Live2D character.
 *   **Mini-Window Mode**: Compact overlay showing only the Live2D character, ideal for multitasking.
 *   **Floating Window (Android)**: System-level floating window that stays on top of other apps.
+
+### 5. Notes, Whiteboard & Knowledge Base
+*   **Text Notes**: Built-in note system with basic Markdown support. Advanced Obsidian-like real-time overlay preview is currently in development (see Roadmap).
+*   **Whiteboard Notes**: Visual note type powered by an offline copy of [Excalidraw](https://github.com/excalidraw/excalidraw), used as a local-only drawing surface for sketches and diagrams.
+*   **RAG-Ready Design (Planned)**: Notes, whiteboard exports, and external documents will be connectable to the memory system as a Retrieval-Augmented Generation (RAG) source to improve answer accuracy and persona consistency.
 
 ---
 
@@ -188,8 +193,11 @@ To control the "Brain" on your PC from your Android phone:
 - [x] **Deployment Tools**: Docker support and One-click startup scripts.
 - [x] **Stateless Backend**: Per-request target configuration via headers (`X-Target-*`), no server-side key storage.
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
+- [ ] **Advanced Note Editor**: Implement Obsidian-style real-time overlay preview and seamless edit/view mode switching.
 - [ ] **Enhanced Live2D**: Continued optimization of motion smoothing and expression accuracy.
 - [ ] **Claude Skills + MCP**: Evaluate ability boxing and layered loading to integrate specialized task skills alongside MCP tool connectivity.
+- [ ] **Knowledge Base & RAG**: Import structured Markdown/notes and external professional knowledge bases, and expose them as a Retrieval-Augmented Generation source for Firefly.
+- [ ] **SQL Memory Optimization**: Optimize the long-term memory SQL backend (indexes, query strategies, and data layout) for large-scale memory retrieval without degrading latency.
 
 ### Phase 3: Pure Flutter / Standalone Mode (Target)
 - [ ] **Serverless Logic**: Porting Python "Brain" logic (Memory, Search, Tools) to Dart.
@@ -199,6 +207,15 @@ To control the "Brain" on your PC from your Android phone:
 ### Future Research: Autonomous Behavior
 - [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).
 - [ ] **3D Engine**: Implementing Babylon.js renderer for 3D avatars.
+
+## 🙏 Acknowledgements
+
+N-T-AI stands on the shoulders of many great open-source projects.
+
+- **Excalidraw**: The built-in whiteboard note type is powered by an offline copy of the [Excalidraw](https://github.com/excalidraw/excalidraw) project, which is licensed under the MIT License.[^excalidraw-license]
+- For a more complete list of upstream projects and inspiration, see the Chinese documentation: [`docs/README_zh-CN.md`](docs/README_zh-CN.md).
+
+[^excalidraw-license]: Excalidraw License (MIT): https://github.com/excalidraw/excalidraw/blob/master/LICENSE
 
 ## 🧩 Extending & Plugins
 

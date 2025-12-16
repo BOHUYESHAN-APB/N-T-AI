@@ -1,9 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import '../core/services/memory_service.dart';
-import '../core/models/memory.dart';
-import '../settings/settings_scope.dart';
-import 'memory_remote_manager_screen.dart';
+import 'package:intl/intl.dart';
+import '../core/services/remote_memory_service.dart';
 
 class MemoryManagerScreen extends StatefulWidget {
   final String? heroTag;
@@ -14,182 +11,282 @@ class MemoryManagerScreen extends StatefulWidget {
 }
 
 class _MemoryManagerScreenState extends State<MemoryManagerScreen> {
-  final MemoryService _memoryService = MemoryService();
-  List<Memory> _memories = [];
-  bool _isLoading = true;
-  StreamSubscription? _subscription;
+  final RemoteMemoryService _service = RemoteMemoryService();
+  final DateFormat _dateFormat = DateFormat('yyyy-MM-dd HH:mm');
+
+  List<RemoteMemory> _memories = [];
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     _loadMemories();
-    _subscription = _memoryService.updateStream.listen((_) {
-      if (mounted) _loadMemories();
-    });
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
     super.dispose();
   }
 
   Future<void> _loadMemories() async {
-    // Don't show loading spinner for background updates to avoid flickering
-    // setState(() => _isLoading = true); 
-    final db = await _memoryService.database;
-    final List<Map<String, dynamic>> maps = await db.query('memories', orderBy: 'created_at DESC');
-    if (mounted) {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await _service.fetchMemories(limit: 100);
+      if (!mounted) return;
       setState(() {
-        _memories = maps.map((e) => Memory.fromMap(e)).toList();
-        _isLoading = false;
+        _memories = data;
       });
-    }
-  }
-
-  Future<void> _deleteMemory(String id) async {
-    await _memoryService.deleteMemory(id);
-    // _loadMemories is called automatically via stream
-  }
-
-  Future<void> _clearAll() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('确认清除'),
-        content: const Text('确定要删除所有记忆吗？此操作不可恢复。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除')),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await _memoryService.clearAll();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
   Future<void> _addMemory() async {
-    final controller = TextEditingController();
-    final categoryController = TextEditingController(text: 'other');
-    
-    await showDialog(
+    await _showEditDialog();
+  }
+
+  Future<void> _showEditDialog({RemoteMemory? memory}) async {
+    final userController = TextEditingController(
+      text: memory?.userId ?? 'default_user',
+    );
+    final contentController = TextEditingController(
+      text: memory?.content ?? '',
+    );
+    final categoryController = TextEditingController(
+      text: memory?.category ?? 'other',
+    );
+    final weightController = TextEditingController(
+      text: (memory?.weight ?? 1.0).toString(),
+    );
+
+    final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('添加记忆'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(labelText: '记忆内容', hintText: '例如：用户喜欢吃苹果'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: categoryController,
-              decoration: const InputDecoration(labelText: '分类 (preference, identity, etc.)'),
-            ),
-          ],
+        title: Text(memory == null ? '新增记忆' : '编辑记忆 #${memory.id}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: userController,
+                decoration: const InputDecoration(labelText: 'User ID'),
+              ),
+              TextField(
+                controller: categoryController,
+                decoration: const InputDecoration(labelText: '类别'),
+              ),
+              TextField(
+                controller: weightController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(labelText: '权重'),
+              ),
+              TextField(
+                controller: contentController,
+                maxLines: 5,
+                decoration: const InputDecoration(labelText: '内容'),
+              ),
+            ],
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
-            onPressed: () async {
-              if (controller.text.isNotEmpty) {
-                await _memoryService.saveMemory(controller.text, categoryController.text);
-                if (mounted) Navigator.pop(context);
-                // _loadMemories(); // Handled by stream
-              }
-            },
-            child: const Text('保存'),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(memory == null ? '创建' : '保存'),
           ),
         ],
       ),
     );
+
+    if (result != true) return;
+
+    try {
+      final weight = double.tryParse(weightController.text) ?? 1.0;
+      if (memory == null) {
+        await _service.createMemory(
+          userId: userController.text.trim(),
+          content: contentController.text.trim(),
+          category: categoryController.text.trim(),
+          weight: weight,
+        );
+      } else {
+        await _service.updateMemory(
+          id: memory.id,
+          content: contentController.text.trim(),
+          category: categoryController.text.trim(),
+          weight: weight,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(memory == null ? '创建成功' : '更新成功')));
+      await _loadMemories();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('操作失败: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
-  void _openRemoteMemoryManager() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const RemoteMemoryManagerScreen(),
+  Future<void> _deleteMemory(RemoteMemory memory) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('删除记忆 #${memory.id}?'),
+        content: const Text('此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
       ),
     );
+
+    if (confirm != true) return;
+
+    try {
+      await _service.deleteMemory(memory.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('删除成功')));
+      await _loadMemories();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final settings = SettingsScope.of(context).settings;
-    final isBackendEnabled = settings.enablePythonBackend;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('记忆管理'),
         actions: [
-          if (isBackendEnabled)
-            TextButton.icon(
-              onPressed: _openRemoteMemoryManager,
-              icon: const Icon(Icons.cloud_sync_outlined),
-              label: const Text('Python后端管理'),
-              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.primary),
-            ),
           IconButton(
-            icon: const Icon(Icons.delete_forever),
-            tooltip: '一键清除',
-            onPressed: _clearAll,
+            icon: const Icon(Icons.refresh),
+            tooltip: '刷新',
+            onPressed: _loadMemories,
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
         heroTag: widget.heroTag ?? 'memory_fab',
-        onPressed: _addMemory,
+        onPressed: () => _addMemory(),
         child: const Icon(Icons.add),
-        tooltip: '快速添加',
+        tooltip: '新增记忆',
       ),
       body: Column(
         children: [
-          if (isBackendEnabled)
-            Container(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '当前已启用 Python 后端。下方的列表仅显示本地缓存的记忆。要管理后端的高级记忆（如长期记忆、向量库），请点击右上角的“Python后端管理”。',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           Expanded(
-            child: _isLoading
+            child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _memories.isEmpty
-                    ? const Center(child: Text('暂无记忆'))
-                    : ListView.builder(
-                        itemCount: _memories.length,
-                        itemBuilder: (context, index) {
-                          final memory = _memories[index];
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            child: ListTile(
-                              title: Text(memory.content),
-                              subtitle: Text('${memory.category} · ${memory.createdAt.toString().split('.')[0]}'),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => _deleteMemory(memory.id),
+                : _error != null
+                    ? _buildErrorState()
+                    : RefreshIndicator(
+                        onRefresh: _loadMemories,
+                        child: ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.all(12),
+                          itemCount: _memories.length,
+                          itemBuilder: (context, index) {
+                            final memory = _memories[index];
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  child: Text(
+                                    memory.category.isNotEmpty
+                                        ? memory.category[0].toUpperCase()
+                                        : '?',
+                                  ),
+                                ),
+                                title: Text(
+                                  memory.content,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '用户: ${memory.userId} | 类别: ${memory.category} | 权重: ${memory.weight.toStringAsFixed(1)}',
+                                    ),
+                                    Text('创建: ${_dateFormat.format(memory.createdAt)}'),
+                                  ],
+                                ),
+                                trailing: Wrap(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.edit_outlined),
+                                      onPressed: () => _showEditDialog(memory: memory),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () => _deleteMemory(memory),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.wifi_off, size: 48, color: Colors.redAccent),
+            const SizedBox(height: 12),
+            Text(_error ?? '未知错误', textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _loadMemories,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
       ),
     );
   }

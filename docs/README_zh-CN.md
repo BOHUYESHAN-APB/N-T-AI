@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.3%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.7%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-爱发电-pink)](https://afdian.com/a/N-T-AI)
@@ -67,6 +67,10 @@
     *   **本地优先架构**：所有聊天记录、设置、记忆均存储在本地 SQLite 与 SharedPreferences 中。
     *   **数据主权**：设置中明确区分 "本地备份" 与 "后端数据"。
 
+### 4. 笔记、白板与知识库
+*   **文本笔记**: 内置笔记系统，提供基础 Markdown 支持。高级的 Obsidian 风格实时叠加预览正在开发中（详见路线图）。
+*   **白板笔记**: 基于 [Excalidraw](https://github.com/excalidraw/excalidraw) 离线副本的可视化笔记，用作本地绘图和草图工具。
+*   **RAG 就绪设计 (计划中)**: 笔记、白板导出及外部文档将可接入记忆系统，作为检索增强生成 (RAG) 的数据源，以提升回答准确度和人设一致性。
 
 ---
 
@@ -212,6 +216,7 @@ flutter build apk --release
 - [x] **前端 TTS/STT**：将音频相关逻辑迁移到 Flutter，降低延迟。
 - [x] **部署工具**：完善 Docker 支持与一键启动脚本。
 - [x] **日志增强**：提升前端与后端的错误日志与诊断能力。
+- [ ] **高级笔记编辑器**：实现 Obsidian 风格的实时叠加预览与无缝编辑/预览切换。
 - [ ] **Live2D 增强**：继续优化动作平滑与表情准确度。
 - [ ] **Claude Skills × MCP**：评估“能力装箱 + 分层加载”的工程化方案，与 MCP 工具连接正交组合。
 - [ ] **前端迁移**: 优先将后端逻辑 (ReAct Agent, 记忆系统) 迁移至 Flutter 前端，减少对 Python 环境的依赖。
@@ -220,6 +225,8 @@ flutter build apk --release
     - 将通过网盘分发这些兼容的副本。
 - [ ] **Live2D 增强**: 优化人物神态、动作及表情的互动效果。
 - [ ] **3D 引擎**: 基于 Babylon.js 实现 3D 形象渲染 (Havok 物理引擎) - *制作中*。
+- [ ] **笔记系统与知识库 RAG**：强化内置 Markdown/Excalidraw 笔记能力，支持导入专业知识库，并作为检索增强生成 (RAG) 的数据源，提升回答准确度与人设一致性。
+- [ ] **SQL 记忆系统优化**：针对大规模长期记忆数据设计索引与分层检索策略，保证在记忆变得庞大时仍能高效利用。
 
 ### 第三阶段：通用 AI Agent 与高级能力
 - [ ] **深度研究 (Deep Research)**: 支持访问专业数据库 (如校园网环境) 进行深度科学研究。
@@ -258,6 +265,9 @@ flutter build apk --release
 *   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**:
     *   感谢其为我们正在制作中的 **3D 渲染引擎** 提供的架构灵感。
     *   *许可证*: MIT License.
+*   **[Excalidraw](https://github.com/excalidraw/excalidraw)**：
+    *   内置白板笔记功能基于 Excalidraw 的离线副本，用于在本地创建和编辑手绘风格的图表和草图，所有数据均保存在本机。
+    *   *许可证*: MIT License。我们严格遵守其 MIT 许可条款，未对原项目作任何与许可冲突的修改。
 *   **GitHub Copilot**:
     *   感谢 AI 编程助手在开发过程中提供的代码逻辑梳理与支持。
 

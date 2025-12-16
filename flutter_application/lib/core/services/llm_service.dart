@@ -169,7 +169,13 @@ class LLMService {
     }
   }
 
-  Future<AiResponse> chat(List<Map<String, String>> messages, {String usageType = 'main', double temperature = 0.7, AiProviderConfig? providerOverride}) async {
+  Future<AiResponse> chat(
+    List<Map<String, String>> messages, {
+    String usageType = 'main',
+    double temperature = 0.7,
+    AiProviderConfig? providerOverride,
+    String? sessionId,
+  }) async {
     final provider = providerOverride ?? await _getActiveProvider();
     if (provider == null) throw Exception("No active AI provider configured");
 
@@ -229,7 +235,7 @@ class LLMService {
       // Pass the underlying provider's config to the backend
       headers['X-Target-Api-Key'] = provider.apiKey;
       if (userNickname.isNotEmpty) {
-        headers['X-User-Nickname'] = userNickname;
+        headers['X-User-Nickname'] = Uri.encodeComponent(userNickname);
       }
       
       // Sanitize Base URL for backend (remove /chat/completions if present)
@@ -248,6 +254,9 @@ class LLMService {
       headers['X-Persona-Mode'] = personaMode;
       headers['X-Chat-Mode'] = chatMode;
       headers['X-Deep-Research'] = enableDeepResearch.toString();
+      if (sessionId != null && sessionId.isNotEmpty) {
+        headers['X-Session-Id'] = sessionId;
+      }
 
       try {
         final providersRaw = prefs.getString('settings.ai.providers');

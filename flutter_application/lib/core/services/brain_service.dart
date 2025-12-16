@@ -356,6 +356,7 @@ Based on these comments, do you want to proactively say something to the audienc
     String? systemPromptOverride,
     Map<String, dynamic>? sidecarCommands, // concurrent side agents payload
     AiProviderConfig? providerOverride,
+    String? sessionId,
   }) async {
     _statusController.add("Thinking...");
     
@@ -427,7 +428,12 @@ Based on these comments, do you want to proactively say something to the audienc
         
         debugPrint("[BRAIN] Sending ${messages.length} messages to backend");
         // Call LLM (which points to Python Backend)
-        final aiResponse = await _llmService.chat(messages, usageType: 'main', temperature: dynamicTemperature);
+        final aiResponse = await _llmService.chat(
+          messages,
+          usageType: 'main',
+          temperature: dynamicTemperature,
+          sessionId: sessionId,
+        );
         String response = aiResponse.content;
         
         // Handle Reasoning Content & Tool Calls (DeepSeek Thinking Mode)

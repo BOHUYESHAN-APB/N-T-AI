@@ -1,5 +1,31 @@
 # 更新日志 (Changelog)
 
+## [0.3.7-beta] - 2025-12-16
+
+### 新增 (Added)
+- **笔记编辑器 (Note Editor)**:
+    - 实现了基础的 Markdown 预览支持 (Split-screen)，允许用户在编辑的同时查看渲染效果。
+    - 优化了笔记编辑器的布局，添加了预览切换按钮。
+
+### 文档 (Documentation)
+- **README 更新**:
+    - 更新了核心特性描述，明确了笔记系统的 Markdown 支持现状及未来 Obsidian 风格预览的规划。
+    - 同步了中英文文档的最新状态。
+
+## [0.3.6-beta] - 2025-12-10
+
+- **Live2D 增强**:
+    - 优化了待机动作 (Idle Motion) 的触发逻辑，现在会更自然地进行随机动作 (20% 概率，12s 检查周期)。
+    - 修复了模型加载的 Fallback 机制，确保旧版模型也能正确加载 Expression 和 Motion。
+    - 实现了 Smart Parameter Overlay，允许 Flutter 端实时覆盖控制 Live2D 参数 (如眼神跟随、口型)。
+    - **[修复] 口型同步 (Lip Sync)**: 实现了 TTS 音频数据从 Flutter 到 Live2D WebView 的直通机制，确保在所有模式（侧边栏、独立窗口、小窗）下都能正确驱动 Live2D 口型动画。
+    - 优化了小窗模式 UI，移除了冗余的 "眼神跟随" 开关。
+    - 增加了待机动作触发的绿色高亮日志，方便调试验证。
+
+- **浮动工具栏功能修复**: 独立悬浮窗和侧边栏的专属Web控件（悬浮工具栏）现在可以正确显示，并且不会错误地添加到内置小窗中。已确保在生成浮动窗口的URL时包含 `controls=true` 参数。
+
+### 修复 (Fixed)
+
 ## [0.3.5-beta] - 2025-12-09
 
 ### 新增 (Added)
@@ -12,6 +38,11 @@
 
 - **脚本与构建**:
     - 新增/使用 `scripts/update_version.ps1`，用于从根目录 `CHANGELOG.md` 解析最新版本并更新 `flutter_application/pubspec.yaml` 的 `version:` 字段，同时复制 `CHANGELOG.md` 至 `flutter_application/CHANGELOG.md`。
+
+### 优化 (Changed)
+- 优化了 Live2D 模型的加载逻辑，减少了不必要的重复加载。
+- 调整了 Live2D 模型的默认参数，使其在启动时表现更自然。
+- 修复了 Live2D 模型在特定情况下可能出现的渲染层级问题.
 
 
 ## [0.3.4-beta] - 2025-12-08
