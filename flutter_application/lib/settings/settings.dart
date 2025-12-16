@@ -41,6 +41,7 @@ class AiSettings {
   final bool enableThinking;
   final bool initiativeMode; // 搭话模式：AI 主动发起对话
   final int danmakuBatchInterval; // 弹幕批处理间隔（秒）
+  final bool allowEmojis;
 
   const AiSettings({
     this.provider = AiProvider.local,
@@ -50,6 +51,7 @@ class AiSettings {
     this.enableThinking = false,
     this.initiativeMode = false,
     this.danmakuBatchInterval = 20,
+    this.allowEmojis = false,
   });
 
   AiSettings copyWith({
@@ -60,6 +62,7 @@ class AiSettings {
     bool? enableThinking,
     bool? initiativeMode,
     int? danmakuBatchInterval,
+    bool? allowEmojis,
   }) => AiSettings(
     provider: provider ?? this.provider,
     baseUrl: baseUrl ?? this.baseUrl,
@@ -68,6 +71,41 @@ class AiSettings {
     enableThinking: enableThinking ?? this.enableThinking,
     initiativeMode: initiativeMode ?? this.initiativeMode,
     danmakuBatchInterval: danmakuBatchInterval ?? this.danmakuBatchInterval,
+    allowEmojis: allowEmojis ?? this.allowEmojis,
+  );
+}
+
+class DeepResearchSettings {
+  final String? plannerProviderId; // Model for Planning
+  final String? researcherProviderId; // Model for Search & Analysis
+  final String? writerProviderId; // Model for Writing Reports
+
+  const DeepResearchSettings({
+    this.plannerProviderId,
+    this.researcherProviderId,
+    this.writerProviderId,
+  });
+
+  DeepResearchSettings copyWith({
+    String? plannerProviderId,
+    String? researcherProviderId,
+    String? writerProviderId,
+  }) => DeepResearchSettings(
+    plannerProviderId: plannerProviderId ?? this.plannerProviderId,
+    researcherProviderId: researcherProviderId ?? this.researcherProviderId,
+    writerProviderId: writerProviderId ?? this.writerProviderId,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'plannerProviderId': plannerProviderId,
+    'researcherProviderId': researcherProviderId,
+    'writerProviderId': writerProviderId,
+  };
+
+  factory DeepResearchSettings.fromJson(Map<String, dynamic> json) => DeepResearchSettings(
+    plannerProviderId: json['plannerProviderId'] as String?,
+    researcherProviderId: json['researcherProviderId'] as String?,
+    writerProviderId: json['writerProviderId'] as String?,
   );
 }
 
@@ -333,7 +371,8 @@ class AppSettings {
   final bool enableNoteAccess; // 启用笔记读取权限
   final bool showAgentThoughts; // 显示 Agent 思考过程
   final List<McpServerConfig> mcpServers; // MCP 服务器列表
-  final List<AgentConfig> agents; // 独立 Agent 配置
+  final List<AgentConfig> agents; // 独立 Agent 配置 (Standard Mode)
+  final DeepResearchSettings deepResearch; // 深度研究模式配置
 
   // Python Backend / Neural Hub Settings
   final bool enablePythonBackend; // 是否启用 Python 后端
@@ -402,6 +441,7 @@ class AppSettings {
     this.showAgentThoughts = false,
     this.mcpServers = const [],
     this.agents = const [],
+    this.deepResearch = const DeepResearchSettings(),
     this.enablePythonBackend = false,
     this.pythonBackendUrl = 'http://localhost:8000',
     this.enableDeepResearch = false,
@@ -461,6 +501,7 @@ class AppSettings {
     bool? showAgentThoughts,
     List<McpServerConfig>? mcpServers,
     List<AgentConfig>? agents,
+    DeepResearchSettings? deepResearch,
     bool? enablePythonBackend,
     String? pythonBackendUrl,
     bool? enableDeepResearch,
@@ -523,6 +564,7 @@ class AppSettings {
     showAgentThoughts: showAgentThoughts ?? this.showAgentThoughts,
     mcpServers: mcpServers ?? this.mcpServers,
     agents: agents ?? this.agents,
+    deepResearch: deepResearch ?? this.deepResearch,
     enablePythonBackend: enablePythonBackend ?? this.enablePythonBackend,
     pythonBackendUrl: pythonBackendUrl ?? this.pythonBackendUrl,
     enableDeepResearch: enableDeepResearch ?? this.enableDeepResearch,

@@ -212,7 +212,18 @@ To control the "Brain" on your PC from your Android phone:
 
 N-T-AI stands on the shoulders of many great open-source projects.
 
+- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Thanks to the N.E.K.O. project for inspiration around Live2D interaction logic, emotive parameter layering, WebRTC/audio utilities, and related tooling. *License*: MIT.
+- **dlp3d.ai**: Thanks to the dlp3d.ai project for architecture and design ideas used in our 3D rendering and scene management efforts. *License*: MIT.
 - **Excalidraw**: The built-in whiteboard note type is powered by an offline copy of the [Excalidraw](https://github.com/excalidraw/excalidraw) project, which is licensed under the MIT License.[^excalidraw-license]
+- **GitHub Copilot**: Thanks for code-assist help during development.
+- **Trae (AI coding IDE)**: Provided major assistance in model programming and model-related implementation during development.
+- **Qoder (AI coding IDE)**: Although Qoder sometimes introduced issues during AI coding, its generated project Wiki satisfied basic needs and will be used as a foundation to further improve the repository Wiki; the current Wiki is an acceptable starting point.
+- **DeepResearchAgent**: Thanks for the inspiration on hierarchical multi-agent architecture and the Tool-Environment-Agent (TEA) protocol. *License*: MIT.
+- **free-OKC (OK Computer Virtual Machine)**: Thanks for the innovative HTML-to-PPTX generation logic and sandboxed tool execution concepts. *License*: MIT.
+- **OpenManus**: Thanks for the insights on "Deep Research" planning workflows, browser automation strategies, and ReAct agent patterns. *License*: MIT.
+
+We respect the open-source community and strictly follow these upstream projects' MIT license terms.
+
 - For a more complete list of upstream projects and inspiration, see the Chinese documentation: [`docs/README_zh-CN.md`](docs/README_zh-CN.md).
 
 [^excalidraw-license]: Excalidraw License (MIT): https://github.com/excalidraw/excalidraw/blob/master/LICENSE

@@ -27,6 +27,11 @@ import '../../settings/settings.dart';
 import '../../services/ai_client.dart';
 
 class BrainService {
+  static final RegExp _emojiRegex = RegExp(
+    r'[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{200D}\u{FE0E}\u{FE0F}]',
+    unicode: true,
+  );
+
   // 角色职责说明:
   // BrainService: 仅负责主对话与工具循环，不再要求模型内联输出表情 JSON；
   // ExpressionInferenceAgentService: 基于最终文本进行轻量情绪→参数推理（启发式或独立小模型）；
@@ -289,6 +294,14 @@ class BrainService {
     debugPrint("[BrainService] Stopping Initiative Loop...");
   }
 
+  String _stripEmojis(String text) {
+    final cleaned = text.replaceAll(_emojiRegex, '');
+    return cleaned
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trimRight();
+  }
+
   Future<void> _runInitiativeCheck() async {
     _isProcessing = true;
     try {
@@ -314,6 +327,12 @@ Based on these comments, do you want to proactively say something to the audienc
 """;
 
       final messages = <Map<String, String>>[];
+
+      final prefs = await SharedPreferences.getInstance();
+      final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
+      if (!allowEmojis) {
+        messages.add({'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'});
+      }
       
       // 1. Add context first (if available) to provide conversation history
       if (_context.isNotEmpty) {
@@ -325,15 +344,25 @@ Based on these comments, do you want to proactively say something to the audienc
       messages.add({'role': 'user', 'content': prompt});
 
       final response = await _llmService.chat(messages, usageType: 'initiative', temperature: 0.7);
-      
-      if (response.content.trim() != "NO_ACTION") {
+
+      var content = response.content;
+      if (!allowEmojis) {
+        content = _stripEmojis(content);
+      }
+
+      if (content.trim() != "NO_ACTION") {
         debugPrint("[BrainService] Initiative Triggered: ${response.content}");
         
         // Add to local context
-        _context.add({'role': 'assistant', 'content': response.content});
+        _context.add({'role': 'assistant', 'content': content});
         
         // Emit to UI
-        _initiativeController.add(response);
+        _initiativeController.add(AiResponse(
+          content: content,
+          emotion: response.emotion,
+          reasoningContent: response.reasoningContent,
+          toolCalls: response.toolCalls,
+        ));
         
         // Clear buffer after speaking to avoid reacting to same comments?
         // Or just clear the ones we used.
@@ -370,6 +399,7 @@ Based on these comments, do you want to proactively say something to the audienc
     // 0. Check Orchestration Mode
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
     final prefs = await SharedPreferences.getInstance();
+    final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
     // Force Backend Enabled
     final backendEnabled = true; // prefs.getBool('settings.backend.enabled') ?? false;
     final enableSearchRetry = prefs.getBool('settings.agent.enableSearchRetry') ?? true;
@@ -425,6 +455,12 @@ Based on these comments, do you want to proactively say something to the audienc
         // The backend (main.py) expects OpenAIRequest.
         
         List<Map<String, String>> messages = List.from(_context);
+        if (!allowEmojis) {
+          messages = [
+            {'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'},
+            ...messages,
+          ];
+        }
         
         debugPrint("[BRAIN] Sending ${messages.length} messages to backend");
         // Call LLM (which points to Python Backend)
@@ -435,6 +471,9 @@ Based on these comments, do you want to proactively say something to the audienc
           sessionId: sessionId,
         );
         String response = aiResponse.content;
+        if (!allowEmojis) {
+          response = _stripEmojis(response);
+        }
         
         // Handle Reasoning Content & Tool Calls (DeepSeek Thinking Mode)
         if (aiResponse.reasoningContent != null) {

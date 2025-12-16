@@ -89,6 +89,16 @@ class CapabilitiesTab extends StatelessWidget {
                     color: settings.ai.initiativeMode ? Theme.of(context).colorScheme.primary : Colors.grey,
                   ),
                 ),
+                SwitchListTile(
+                  title: const Text('允许 AI 使用表情'),
+                  subtitle: const Text('允许 AI 回复中包含 emoji/表情符号'),
+                  value: settings.ai.allowEmojis,
+                  onChanged: (v) => controller.updateAiSettings(settings.ai.copyWith(allowEmojis: v)),
+                  secondary: Icon(
+                    Icons.emoji_emotions_outlined,
+                    color: settings.ai.allowEmojis ? Theme.of(context).colorScheme.primary : Colors.grey,
+                  ),
+                ),
                 if (settings.ai.initiativeMode)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -125,21 +135,6 @@ class CapabilitiesTab extends StatelessWidget {
                   ),
               ],
             ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-        _buildSectionHeader(context, '高级能力 (Advanced)'),
-        Opacity(
-          opacity: 0.5,
-          child: SwitchListTile(
-            title: const Text('深度研究 (Deep Research)'),
-            subtitle: const Text(
-              '🚧 开发中：多步网络搜索、阅读与综合报告生成 (仅 Python 后端模式下可用)',
-            ),
-            value: false,
-            onChanged: null, // 禁用开关
-            secondary: const Icon(Icons.science_outlined),
           ),
         ),
 

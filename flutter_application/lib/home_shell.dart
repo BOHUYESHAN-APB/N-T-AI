@@ -4,6 +4,7 @@ import 'screens/notes_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/memory_manager_screen.dart';
 import 'screens/tarot_screen.dart';
+import 'screens/deep_research/deep_research_screen.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({Key? key}) : super(key: key);
@@ -18,10 +19,12 @@ class _HomeShellState extends State<HomeShell> {
   static final List<Widget> _pages = <Widget>[
     const FireflyScreen(),
     const MemoryManagerScreen(heroTag: 'memory_fab_home'),
+    const DeepResearchScreen(), // Deep Research
     NotesScreen(),
     const TarotScreen(),
     SettingsScreen(),
   ];
+
 
   void _onItemTapped(int index) {
     setState(() {
@@ -48,7 +51,7 @@ class _HomeShellState extends State<HomeShell> {
             body: Row(
               children: [
                 NavigationRail(
-                  selectedIndex: _selectedIndex < 4 ? _selectedIndex : null,
+                  selectedIndex: _selectedIndex < 5 ? _selectedIndex : null,
                   onDestinationSelected: _onItemTapped,
                   labelType: NavigationRailLabelType.all,
                   groupAlignment: -1.0, // Align to top
@@ -72,6 +75,11 @@ class _HomeShellState extends State<HomeShell> {
                       label: Text('记忆'),
                     ),
                     NavigationRailDestination(
+                      icon: Icon(Icons.science_outlined),
+                      selectedIcon: Icon(Icons.science),
+                      label: Text('研究'),
+                    ),
+                    NavigationRailDestination(
                       icon: Icon(Icons.edit_note_outlined),
                       selectedIcon: Icon(Icons.edit_note),
                       label: Text('笔记'),
@@ -93,11 +101,11 @@ class _HomeShellState extends State<HomeShell> {
                           children: [
                             IconButton(
                               icon: Icon(
-                                _selectedIndex == 4 ? Icons.settings : Icons.settings_outlined,
-                                color: _selectedIndex == 4 ? Theme.of(context).colorScheme.primary : null,
+                                _selectedIndex == 5 ? Icons.settings : Icons.settings_outlined,
+                                color: _selectedIndex == 5 ? Theme.of(context).colorScheme.primary : null,
                               ),
                               tooltip: '系统设置',
-                              onPressed: () => _onItemTapped(4),
+                              onPressed: () => _onItemTapped(5),
                             ),
                             const SizedBox(height: 8),
                             const Text('系统', style: TextStyle(fontSize: 12)),
@@ -133,14 +141,39 @@ class _HomeShellState extends State<HomeShell> {
           return Scaffold(
             body: content,
             bottomNavigationBar: NavigationBar(
-              selectedIndex: _selectedIndex,
               onDestinationSelected: _onItemTapped,
+              selectedIndex: _selectedIndex,
               destinations: const [
-                NavigationDestination(icon: Icon(Icons.chat_bubble_outlined), selectedIcon: Icon(Icons.chat_bubble), label: 'Firefly'),
-                NavigationDestination(icon: Icon(Icons.psychology_outlined), selectedIcon: Icon(Icons.psychology), label: '记忆'),
-                NavigationDestination(icon: Icon(Icons.edit_note_outlined), selectedIcon: Icon(Icons.edit_note), label: '笔记'),
-                NavigationDestination(icon: Icon(Icons.style_outlined), selectedIcon: Icon(Icons.style), label: '塔罗'),
-                NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: '系统'),
+                NavigationDestination(
+                  icon: Icon(Icons.chat_bubble_outlined),
+                  selectedIcon: Icon(Icons.chat_bubble),
+                  label: 'Firefly',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.psychology_outlined),
+                  selectedIcon: Icon(Icons.psychology),
+                  label: '记忆',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.science_outlined),
+                  selectedIcon: Icon(Icons.science),
+                  label: '研究',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.edit_note_outlined),
+                  selectedIcon: Icon(Icons.edit_note),
+                  label: '笔记',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.style_outlined),
+                  selectedIcon: Icon(Icons.style),
+                  label: '塔罗',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: '系统',
+                ),
               ],
             ),
           );

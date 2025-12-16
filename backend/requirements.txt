@@ -14,3 +14,10 @@ aiohttp
 brotli
 pure-protobuf
 yarl
+python-pptx
+python-docx
+pandas
+openpyxl
+pdfplumber
+markdown
+PyPDF2

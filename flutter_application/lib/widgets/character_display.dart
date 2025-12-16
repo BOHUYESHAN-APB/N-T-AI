@@ -68,7 +68,9 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
       widget.controller!.detach();
     }
     if (Platform.isWindows) {
-      _windowsController.dispose();
+      try {
+        _windowsController.dispose();
+      } catch (_) {}
     }
     super.dispose();
   }

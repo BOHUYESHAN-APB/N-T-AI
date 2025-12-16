@@ -8,6 +8,8 @@ abstract class BasePlugin {
   String get description;
   IconData get icon;
 
+  bool get isDanmakuPlugin => false;
+
   /// Whether the plugin is currently enabled
   bool isEnabled = false;
 

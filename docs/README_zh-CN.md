@@ -271,6 +271,19 @@ flutter build apk --release
 *   **GitHub Copilot**:
     *   感谢 AI 编程助手在开发过程中提供的代码逻辑梳理与支持。
 
+*   **Trae（AI 编程 IDE）**：在模型编程与模型相关实现方面提供了主要支持，帮助完成关键的模型代码实现。
+
+*   **Qoder（AI 编程 IDE）**：尽管 Qoder 在 AI 编程过程中曾带来一些阻碍，但其生成的项目 Wiki 满足基本需求，后续计划基于 Qoder 的 Repo Wiki 功能进一步完善仓库文档；当前 Wiki 可作为可用的起点。
+*   **DeepResearchAgent**:
+    *   感谢其在分层多智能体架构 (Hierarchical Multi-Agent Architecture) 和 TEA (Tool-Environment-Agent) 协议方面的启发。
+    *   *许可证*: MIT License.
+*   **free-OKC (OK Computer Virtual Machine)**:
+    *   感谢其创新的 "HTML 转 PPTX" 生成逻辑以及沙箱工具执行 (Sandboxed Tool Execution) 的概念。
+    *   *许可证*: MIT License.
+*   **OpenManus**:
+    *   感谢其在 "深度研究" (Deep Research) 规划工作流、浏览器自动化策略以及 ReAct Agent 模式方面的宝贵参考。
+    *   *许可证*: MIT License.
+
 我们尊重开源社区，并严格遵守这些上游项目的 MIT 许可条款。
 
 ---

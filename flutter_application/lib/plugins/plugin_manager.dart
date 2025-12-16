@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'base_plugin.dart';
 import 'bilibili_live/bilibili_live_plugin.dart';
 
@@ -9,22 +10,26 @@ class PluginManager extends ChangeNotifier {
 
   PluginManager();
 
-  void ensureInitialized() {
+  Future<void> ensureInitialized() async {
     if (_initialized) return;
     _initialized = true;
-    _registerDefaultPlugins();
+    await _registerDefaultPlugins();
   }
 
-  void _registerDefaultPlugins() {
-    registerPlugin(BilibiliLivePlugin());
+  Future<void> _registerDefaultPlugins() async {
+    await registerPlugin(BilibiliLivePlugin());
   }
 
-  void registerPlugin(BasePlugin plugin) {
+  Future<void> registerPlugin(BasePlugin plugin) async {
     if (_plugins.containsKey(plugin.id)) {
       return;
     }
     _plugins[plugin.id] = plugin;
-    plugin.onInit();
+    await plugin.onInit();
+    final enabled = await _loadEnabled(plugin.id);
+    if (enabled) {
+      await plugin.onEnable();
+    }
     notifyListeners();
   }
 
@@ -37,6 +42,7 @@ class PluginManager extends ChangeNotifier {
   Future<void> togglePlugin(String id, bool enabled) async {
     final plugin = _plugins[id];
     if (plugin != null) {
+      await _saveEnabled(id, enabled);
       if (enabled) {
         await plugin.onEnable();
       } else {
@@ -44,6 +50,16 @@ class PluginManager extends ChangeNotifier {
       }
       notifyListeners();
     }
+  }
+
+  Future<bool> _loadEnabled(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('plugin.$id.enabled') ?? false;
+  }
+
+  Future<void> _saveEnabled(String id, bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('plugin.$id.enabled', enabled);
   }
 }
 

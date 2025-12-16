@@ -19,15 +19,37 @@ class BilibiliHandler(BaseHandler):
         self.plugin = plugin
 
     def _on_danmaku(self, client: BLiveClient, message: web_models.DanmakuMessage):
-        # 异步调用插件的处理逻辑
-        # 尝试提取 emoticon_options
         emoticon_data = None
         try:
-            if hasattr(message, 'emoticon_options_dict'):
-                 emoticon_data = message.emoticon_options_dict
+            dm_type = int(getattr(message, 'dm_type', 0) or 0)
         except Exception:
-            pass
-            
+            dm_type = 0
+
+        if dm_type == 1:
+            url = ""
+            unique = ""
+            try:
+                url = str(getattr(message, 'emoji_img_url', '') or '')
+            except Exception:
+                url = ""
+
+            if not url:
+                try:
+                    raw = getattr(message, 'emoticon_options_dict', None)
+                    options = raw() if callable(raw) else raw
+                    if isinstance(options, dict):
+                        unique = str(options.get('emoticon_unique') or '')
+                        url = str(options.get('url') or '')
+                except Exception:
+                    pass
+
+            if url or unique:
+                emoticon_data = {}
+                if unique:
+                    emoticon_data['emoticon_unique'] = unique
+                if url:
+                    emoticon_data['url'] = url
+
         asyncio.create_task(self.plugin.process_danmaku(message.msg, message.uname, emoticon_data))
 
     def _on_super_chat(self, client: BLiveClient, message: web_models.SuperChatMessage):
@@ -52,6 +74,10 @@ class BilibiliLivePlugin(BasePlugin):
         self._sc_buffer: List[Dict[str, Any]] = []
         self._summary_task: Optional[asyncio.Task] = None
         self._sc_task: Optional[asyncio.Task] = None
+        self._emoticon_cache: Dict[str, str] = {}
+        self._emoticon_cache_ts: float = 0.0
+        self._emoticon_cache_ttl: float = 600.0
+        self._emoticon_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -126,6 +152,9 @@ class BilibiliLivePlugin(BasePlugin):
                         "Directly address the audience content."
                     )
                     content = prompt_template.format(summary=summary)
+
+                    if not bool(self.config.get("allow_ai_emojis", False)):
+                        content += "\n\n要求：回复中不要使用任何 emoji/表情符号。"
                     
                     # Send to ChatService
                     # We use a special user_id to indicate this is a system/agent input
@@ -188,6 +217,9 @@ class BilibiliLivePlugin(BasePlugin):
                         "Please respond to these supporters enthusiastically and specifically. "
                         "Thank them for the support."
                     )
+
+                    if not bool(self.config.get("allow_ai_emojis", False)):
+                        prompt += "\n\nDo not use any emoji in your reply."
                     
                     await self.chat_service.process_message(
                         prompt, 
@@ -209,31 +241,149 @@ class BilibiliLivePlugin(BasePlugin):
     async def handle_event(self, event_type: str, data: Any) -> Optional[Any]:
         return None
 
+    def _normalize_emoticon_key(self, key: str) -> str:
+        v = str(key or '').strip()
+        if v.startswith('#'):
+            v = v[1:]
+        if v.startswith('[') and v.endswith(']') and len(v) >= 2:
+            v = v[1:-1]
+        return v.strip()
+
+    def _collect_emoticon_urls(self, obj: Any, out: Dict[str, str]) -> None:
+        if isinstance(obj, dict):
+            unique = obj.get('emoticon_unique') or obj.get('emoticon_id') or obj.get('id')
+            url = obj.get('url') or obj.get('img_url') or obj.get('image')
+            if isinstance(unique, str) and isinstance(url, str):
+                u = self._normalize_emoticon_key(unique)
+                s = url.strip()
+                if u and s and u not in out:
+                    out[u] = s
+            for v in obj.values():
+                self._collect_emoticon_urls(v, out)
+            return
+        if isinstance(obj, list):
+            for it in obj:
+                self._collect_emoticon_urls(it, out)
+
+    def _get_room_id(self) -> Optional[int]:
+        try:
+            room_id_str = str(self.config.get('room_id') or '').strip()
+            return int(room_id_str)
+        except Exception:
+            return None
+
+    async def _get_emoticon_map(self) -> Dict[str, str]:
+        now = time.time()
+        if self._emoticon_cache and (now - self._emoticon_cache_ts) < self._emoticon_cache_ttl:
+            return self._emoticon_cache
+
+        async with self._emoticon_lock:
+            now = time.time()
+            if self._emoticon_cache and (now - self._emoticon_cache_ts) < self._emoticon_cache_ttl:
+                return self._emoticon_cache
+
+            room_id = self._get_room_id()
+            if not room_id or not self._session:
+                return self._emoticon_cache
+
+            url = 'https://api.live.bilibili.com/xlive/web-ucenter/v2/emoticon/GetEmoticons'
+            params = {
+                'platform': 'pc',
+                'room_id': str(room_id),
+            }
+
+            collected: Dict[str, str] = {}
+            try:
+                async with self._session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    data = await resp.json(content_type=None)
+                    self._collect_emoticon_urls(data, collected)
+            except Exception:
+                collected = {}
+
+            if collected:
+                self._emoticon_cache = collected
+                self._emoticon_cache_ts = time.time()
+
+            return self._emoticon_cache
+
+    async def _resolve_emoticon_url(self, unique: str) -> Optional[str]:
+        key = self._normalize_emoticon_key(unique)
+        if not key:
+            return None
+        mapping = await self._get_emoticon_map()
+        return mapping.get(key)
+
     async def process_danmaku(self, message: str, user_name: str, emoticon_options: Optional[Dict] = None) -> None:
         extra = {}
-        if emoticon_options:
-            extra["emoticon"] = emoticon_options
+        display_message = message
+
+        emoticon: Dict[str, str] = {}
+        url = None
+        unique = None
+        if emoticon_options and isinstance(emoticon_options, dict):
+            url = emoticon_options.get('url')
+            unique = emoticon_options.get('emoticon_unique')
+
+        if isinstance(unique, str):
+            unique = unique.strip()
+        else:
+            unique = None
+        if isinstance(url, str):
+            url = url.strip()
+        else:
+            url = None
+
+        if unique and not url:
+            url = await self._resolve_emoticon_url(unique)
+
+        if not unique and not url:
+            m = re.search(r'#([A-Za-z0-9_]{3,64})', str(message or ''))
+            if m:
+                unique = self._normalize_emoticon_key(m.group(1))
+                if unique:
+                    url = await self._resolve_emoticon_url(unique)
+
+        if not unique and not url:
+            m = re.search(r'\[([^\]\n]{1,64})\]', str(message or ''))
+            if m:
+                unique = self._normalize_emoticon_key(m.group(1))
+                if unique:
+                    url = await self._resolve_emoticon_url(unique)
+
+        if unique:
+            emoticon['emoticon_unique'] = unique
+        if url:
+            emoticon['url'] = url
+
+        if emoticon:
+            extra['emoticon'] = emoticon
+            if not str(display_message or '').strip():
+                display_message = f"[{emoticon.get('emoticon_unique') or '表情'}]"
+            else:
+                tag = emoticon.get('emoticon_unique')
+                if tag and f'[{tag}]' not in display_message:
+                    display_message = f"{display_message} [{tag}]"
 
         # Buffer for summary
         self._danmaku_buffer.append({
             "user": user_name,
-            "content": message,
+            "content": display_message,
             "timestamp": time.time()
         })
 
         await self._append_event(
             kind="danmaku",
             user=user_name,
-            content=message,
+            content=display_message,
             price=None,
             extra=extra
         )
-        print(f"[{self.name}] Danmaku from {user_name}: {message}")
+        print(f"[{self.name}] Danmaku from {user_name}: {display_message}")
         
         # Broadcast to Live2D (Middle Display)
         await live2d_manager.broadcast({
             "type": "chat_message",
-            "text": message,
+            "text": display_message,
             "sender": "chat_normal",
             "senderName": user_name
         })
@@ -333,6 +483,13 @@ class BilibiliLivePlugin(BasePlugin):
         for item in items:
             user = str(item.get("user", ""))
             content = str(item.get("content", ""))
+            emoticon = item.get("emoticon")
+            if not content.strip() and isinstance(emoticon, dict):
+                unique = str(emoticon.get("emoticon_unique") or "").strip()
+                if unique:
+                    content = f"[{unique}]"
+                elif str(emoticon.get("url") or "").strip():
+                    content = "[表情]"
             price = item.get("price")
             if price is not None:
                 lines.append(f"{user} (¥{price}): {content}")

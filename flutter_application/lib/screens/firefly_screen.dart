@@ -23,6 +23,7 @@ import '../core/services/llm_service.dart';
 import '../core/services/chat_history_service.dart' hide ChatMessage;
 import 'memory_manager_screen.dart'; // Import MemoryManagerScreen
 import 'settings/settings_screen.dart'; // Import SettingsScreen
+import 'deep_research/deep_research_screen.dart'; // Import DeepResearchScreen
 import 'first_run_dialog.dart'; // Import FirstRunDialog
 import '../services/floating_window_factory.dart'; // Import FloatingWindowService
 import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
@@ -47,6 +48,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Uint8List? _pendingImageBytes;
   late final ExpressionController _faceController;
   bool _historyOpen = false; // 左侧历史与功能面板
+
+  String? _latestDanmakuSummary;
+  DateTime? _latestDanmakuSummaryAt;
 
   // Multi-session state
   List<ChatSession> _sessions = [];
@@ -75,6 +79,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   @override
   void initState() {
     super.initState();
+    globalPluginManager.ensureInitialized();
     _faceController = ExpressionController();
     // Bind expression stream to UI controller (best-effort)
     _faceSubscription = _brain.expressionAgent.bind(_faceController);
@@ -108,11 +113,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
         if (!rootSettings.enableTts) {
           return;
         }
-        final providerConfig = SettingsScope.of(context).selectProviderForNextCall() ??
-            rootSettings.providers.first;
-
-        if (providerConfig != null) {
-           _brain.speak(response.content, providerConfig);
+        final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+        if (ttsProvider != null) {
+          _brain.speak(response.content, ttsProvider);
         }
       } catch (e) {
         debugPrint("[Initiative] TTS Error: $e");
@@ -277,6 +280,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
               return; 
             }
 
+            if (role == 'chat_summary') {
+              setState(() {
+                _latestDanmakuSummary = content;
+                _latestDanmakuSummaryAt = DateTime.now();
+              });
+              return;
+            }
+
             // Explicitly allow summaries or agent output
             // (role == 'assistant' is standard, 'chat_summary' might be custom)
             
@@ -289,6 +300,86 @@ class _FireflyScreenState extends State<FireflyScreen> {
             });
             _scrollToBottom();
           }
+  }
+
+  Widget _buildDanmakuSummaryCard(BuildContext context) {
+    return AnimatedBuilder(
+      animation: globalPluginManager,
+      builder: (context, _) {
+        final settings = SettingsScope.of(context).settings;
+        final hasDanmakuPlugin = globalPluginManager.enabledPlugins
+            .any((p) => p.isDanmakuPlugin);
+        final summary = _latestDanmakuSummary;
+        if (!hasDanmakuPlugin || summary == null || summary.trim().isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final displaySummary = settings.ai.allowEmojis ? summary : _stripEmojis(summary);
+
+        final theme = Theme.of(context);
+        final colorScheme = theme.colorScheme;
+        final time = _latestDanmakuSummaryAt;
+        final timeStr = time == null ? null : DateFormat('HH:mm:ss').format(time);
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withOpacity(0.35),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.insights,
+                          size: 16,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '弹幕 Agent 汇总',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (timeStr != null)
+                          Text(
+                            timeStr,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      displaySummary,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurface,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _handleTtsForLive2D(Uint8List bytes) async {
@@ -527,15 +618,25 @@ class _FireflyScreenState extends State<FireflyScreen> {
             if (useMainIfCapable && mainVisionCapable) {
               final defaultHint =
                   '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+              final visionMessages = _messages
+                  .map(
+                    (m) => {
+                      'role': m['role'].toString(),
+                      'content': m['content'].toString(),
+                    },
+                  )
+                  .toList();
+              if (!s.ai.allowEmojis) {
+                visionMessages.insert(
+                  0,
+                  {
+                    'role': 'system',
+                    'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。',
+                  },
+                );
+              }
               final content = await _llmService.chatWithImage(
-                messages: _messages
-                    .map(
-                      (m) => {
-                        'role': m['role'].toString(),
-                        'content': m['content'].toString(),
-                      },
-                    )
-                    .toList(),
+                messages: visionMessages,
                 imageBytes: _pendingImageBytes!,
                 prompt: text.isNotEmpty ? text : defaultHint,
                 usageType: 'main',
@@ -545,15 +646,25 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 selectedVisionProviderId.isNotEmpty) {
               final defaultHint =
                   '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
+              final visionMessages = _messages
+                  .map(
+                    (m) => {
+                      'role': m['role'].toString(),
+                      'content': m['content'].toString(),
+                    },
+                  )
+                  .toList();
+              if (!s.ai.allowEmojis) {
+                visionMessages.insert(
+                  0,
+                  {
+                    'role': 'system',
+                    'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。',
+                  },
+                );
+              }
               final content = await _llmService.chatWithImage(
-                messages: _messages
-                    .map(
-                      (m) => {
-                        'role': m['role'].toString(),
-                        'content': m['content'].toString(),
-                      },
-                    )
-                    .toList(),
+                messages: visionMessages,
                 imageBytes: _pendingImageBytes!,
                 prompt: text.isNotEmpty ? text : defaultHint,
                 usageType: 'main',
@@ -638,7 +749,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
       response = aiResponse.content;
 
       if (mounted) {
-        final cleanedResponse = _stripExpressionBlocks(response);
+        var cleanedResponse = _stripExpressionBlocks(response);
+        if (!settings.ai.allowEmojis) {
+          cleanedResponse = _stripEmojis(cleanedResponse);
+        }
 
         if (settings.chatMode == ChatModeOption.standard) {
           final displayContent =
@@ -759,6 +873,19 @@ class _FireflyScreenState extends State<FireflyScreen> {
       cleaned = cleaned.trim();
     }
     return cleaned;
+  }
+
+  static final RegExp _emojiRegex = RegExp(
+    r'[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{200D}\u{FE0E}\u{FE0F}]',
+    unicode: true,
+  );
+
+  String _stripEmojis(String text) {
+    final cleaned = text.replaceAll(_emojiRegex, '');
+    return cleaned
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trimRight();
   }
 
   List<String> _splitPersonaText(String text) {
@@ -892,6 +1019,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               Column(
                 children: [
                   _buildHeader(context, settings, titleFontFamily),
+                  _buildDanmakuSummaryCard(context),
                   Expanded(child: _buildMessageList(context, settings)),
                   _buildInputArea(
                     context,
@@ -1456,6 +1584,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           child: Column(
             children: [
               _buildHeader(context, settings, titleFontFamily),
+              _buildDanmakuSummaryCard(context),
               Expanded(child: _buildMessageList(context, settings)),
               _buildInputArea(
                 context,
@@ -1843,11 +1972,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Text(
-                    l10n.historyTitle,
-                    style: Theme.of(context).textTheme.titleLarge,
+                  Expanded(
+                    child: Text(
+                      l10n.historyTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
                   ),
-                  const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.settings_outlined),
                     onPressed: () {

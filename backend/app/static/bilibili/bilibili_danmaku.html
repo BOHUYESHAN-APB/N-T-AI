@@ -620,16 +620,6 @@
         }
       });
     }
-    var BILI_EMOJI_MAP = {};
-    
-    // Load external emoji map
-    fetch("bili_emoji.json")
-      .then(response => response.json())
-      .then(data => {
-        BILI_EMOJI_MAP = data;
-        console.log("Emoji map loaded:", Object.keys(BILI_EMOJI_MAP).length, "emojis");
-      })
-      .catch(err => console.error("Failed to load emoji map:", err));
 
     function renderBubble(item, index) {
       // var sideClass = index % 2 === 0 ? "bubble-left" : "bubble-right";
@@ -665,18 +655,11 @@
       
       var content = item.text;
       if (item.emoticon && item.emoticon.url) {
-         // Big Emoji
+         // Big Emoji (Sticker) - Use URL from API
          content = '<img src="' + item.emoticon.url + '" style="max-height: 50px; vertical-align: middle;" alt="emoji">';
-      } else {
-         // Text Emoji replacement
-         content = content.replace(/\[[^\]]+\]/g, function(match) {
-             var url = BILI_EMOJI_MAP[match];
-             if (url) {
-                 return '<img src="' + url + '" style="height: 20px; vertical-align: middle; margin: 0 1px;" alt="' + match + '">';
-             }
-             return match;
-         });
-      }
+      } 
+      // Note: Text emojis (e.g. [doge]) are displayed as text unless the API provides parsing info.
+      // We removed the local BILI_EMOJI_MAP to rely on official API data.
       
       textEl.innerHTML = content;
       

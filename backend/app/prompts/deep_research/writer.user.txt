@@ -1,0 +1,4 @@
+User Request: "{{user_input}}"
+
+Research Findings:
+{{research_findings}}

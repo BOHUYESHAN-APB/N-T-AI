@@ -43,6 +43,7 @@ class BilibiliLivePlugin extends BasePlugin {
   String themePreset = 'default';
   bool enableDanmakuWindow = false;
   bool enableScWindow = false;
+  bool allowAiEmojis = false;
   bool useCustomUrl = false;
 
   Webview? _danmakuWebview;
@@ -63,6 +64,9 @@ class BilibiliLivePlugin extends BasePlugin {
   IconData get icon => Icons.live_tv;
 
   @override
+  bool get isDanmakuPlugin => true;
+
+  @override
   Future<void> onInit() async {
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'plugin.$id.';
@@ -80,6 +84,7 @@ class BilibiliLivePlugin extends BasePlugin {
     enableDanmakuWindow =
         prefs.getBool('${prefix}enableDanmakuWindow') ?? false;
     enableScWindow = prefs.getBool('${prefix}enableScWindow') ?? false;
+    allowAiEmojis = prefs.getBool('${prefix}allowAiEmojis') ?? false;
     useCustomUrl = prefs.getBool('${prefix}useCustomUrl') ?? false;
     customDanmakuUrlController.text =
         prefs.getString('${prefix}customDanmakuUrl') ?? '';
@@ -108,6 +113,7 @@ class BilibiliLivePlugin extends BasePlugin {
     await prefs.setString('${prefix}themePreset', themePreset);
     await prefs.setBool('${prefix}enableDanmakuWindow', enableDanmakuWindow);
     await prefs.setBool('${prefix}enableScWindow', enableScWindow);
+    await prefs.setBool('${prefix}allowAiEmojis', allowAiEmojis);
     await prefs.setBool('${prefix}useCustomUrl', useCustomUrl);
     await prefs.setString(
         '${prefix}customDanmakuUrl', customDanmakuUrlController.text.trim());
@@ -126,15 +132,11 @@ class BilibiliLivePlugin extends BasePlugin {
   }
 
   Future<void> syncConfigToBackend(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    final enableBackend = prefs.getBool('settings.backend.enabled') ?? false;
-    if (!enableBackend) {
-      return;
-    }
-    final backendUrl =
-        prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
-
     final controller = SettingsScope.of(context);
+    final settings = controller.settings;
+    final backendUrl = settings.pythonBackendUrl.isNotEmpty
+        ? settings.pythonBackendUrl
+        : 'http://localhost:8000';
     final providers = controller.providers;
 
     dynamic selectedProvider;
@@ -171,6 +173,7 @@ class BilibiliLivePlugin extends BasePlugin {
       'sc_delay_seconds': scDelaySeconds,
       'enable_danmaku_window': enableDanmakuWindow,
       'enable_sc_window': enableScWindow,
+      'allow_ai_emojis': allowAiEmojis,
       'sess_data': sessDataController.text.trim(),
       'bili_jct': biliJctController.text.trim(),
       'buvid3': buvid3Controller.text.trim(),
@@ -220,12 +223,8 @@ class BilibiliLivePlugin extends BasePlugin {
     await _closeConfigWindow();
   }
 
-  Future<String?> _loadBackendUrl() async {
+  Future<String> _loadBackendUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    final enabled = prefs.getBool('settings.backend.enabled') ?? false;
-    if (!enabled) {
-      return null;
-    }
     return prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
   }
 
@@ -239,14 +238,6 @@ class BilibiliLivePlugin extends BasePlugin {
       return false;
     }
     final backendUrl = await _loadBackendUrl();
-    if (backendUrl == null) {
-      if (context != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('需要先在“后端”里启用 Python 服务')),
-        );
-      }
-      return false;
-    }
     try {
       if (_danmakuWebview != null) {
         _danmakuWebview!.close();
@@ -299,14 +290,6 @@ class BilibiliLivePlugin extends BasePlugin {
       return false;
     }
     final backendUrl = await _loadBackendUrl();
-    if (backendUrl == null) {
-      if (context != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('需要先在“后端”里启用 Python 服务')),
-        );
-      }
-      return false;
-    }
     try {
       if (_scWebview != null) {
         _scWebview!.close();
@@ -536,6 +519,21 @@ class BilibiliLivePlugin extends BasePlugin {
                   hintText: '例如: deepseek-ai/DeepSeek-V3',
                   border: OutlineInputBorder(),
                 ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: SwitchListTile(
+                title: const Text('允许 AI 使用表情'),
+                subtitle: const Text('允许弹幕汇总 Agent 回复时使用 emoji'),
+                value: allowAiEmojis,
+                onChanged: (v) async {
+                  setState(() {
+                    allowAiEmojis = v;
+                  });
+                  await _saveLocalConfig();
+                  await syncConfigToBackend(context);
+                },
               ),
             ),
             Padding(

@@ -18,6 +18,7 @@ class SettingsController extends ChangeNotifier {
   static const _kAiEnableThinking = 'settings.ai.enableThinking';
   static const _kAiInitiativeMode = 'settings.ai.initiativeMode';
   static const _kAiDanmakuBatchInterval = 'settings.ai.danmakuBatchInterval';
+  static const _kAiAllowEmojis = 'settings.ai.allowEmojis';
   static const _kAiProviders = 'settings.ai.providers';
   static const _kAiActiveId = 'settings.ai.activeId';
   static const _kAiActiveVisionId = 'settings.ai.activeVisionId';
@@ -62,6 +63,7 @@ class SettingsController extends ChangeNotifier {
   static const _kLogMaxErrors = 'settings.logs.maxErrors';
   static const _kUserBubbleColor = 'settings.ui.userBubbleColor';
   static const _kAiBubbleColor = 'settings.ui.aiBubbleColor';
+  static const _kDeepResearch = 'settings.deepResearch';
   // Legacy font mode key (for migration only)
   static const _kFontMode = 'settings.ui.fontMode';
   // New font settings keys
@@ -105,6 +107,7 @@ class SettingsController extends ChangeNotifier {
     final aiEnableThinking = _prefs.getBool(_kAiEnableThinking) ?? false;
     final aiInitiativeMode = _prefs.getBool(_kAiInitiativeMode) ?? false;
     final aiDanmakuBatchInterval = _prefs.getInt(_kAiDanmakuBatchInterval) ?? 20;
+    final aiAllowEmojis = _prefs.getBool(_kAiAllowEmojis) ?? false;
     final visionPrompt =
         _prefs.getString(_kVisionPrompt) ??
         '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
@@ -338,6 +341,12 @@ class SettingsController extends ChangeNotifier {
       }
     }
 
+    // Load Deep Research
+    final deepResearchJson = _prefs.getString(_kDeepResearch);
+    final deepResearch = deepResearchJson != null
+        ? DeepResearchSettings.fromJson(jsonDecode(deepResearchJson))
+        : const DeepResearchSettings();
+
     // Derive font settings with migration from legacy FontModeOption if needed
     BaseFontModeOption baseFontMode =
         BaseFontModeOption.values[safeIndex(
@@ -462,6 +471,7 @@ class SettingsController extends ChangeNotifier {
         enableThinking: aiEnableThinking,
         initiativeMode: aiInitiativeMode,
         danmakuBatchInterval: aiDanmakuBatchInterval,
+        allowEmojis: aiAllowEmojis,
       ),
       providers: providers,
       activeProviderId: activeId ?? providers.first.id,
@@ -481,6 +491,7 @@ class SettingsController extends ChangeNotifier {
       showAgentThoughts: showAgentThoughts,
       mcpServers: mcpServers,
       agents: agents,
+      deepResearch: deepResearch,
       enablePythonBackend: enablePythonBackend,
       pythonBackendUrl: pythonBackendUrl,
       enableDeepResearch: enableDeepResearch,
@@ -920,6 +931,18 @@ class SettingsController extends ChangeNotifier {
     await _prefs.setString(_kAgents, jsonStr);
   }
 
+  Future<void> updateDeepResearchSettings(DeepResearchSettings value) async {
+    _settings = _settings.copyWith(deepResearch: value);
+    notifyListeners();
+    await _prefs.setString(_kDeepResearch, jsonEncode(value.toJson()));
+  }
+
+  Future<void> updateAgents(List<AgentConfig> value) async {
+    _settings = _settings.copyWith(agents: value);
+    await _saveAgents();
+    notifyListeners();
+  }
+
   // Agent management
   Future<void> addOrUpdateAgent(AgentConfig cfg) async {
     final list = List<AgentConfig>.from(_settings.agents);
@@ -1064,12 +1087,14 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> updateAiSettings(AiSettings newSettings) async {
     // Save enableThinking to prefs
-    await _prefs.setBool('settings.ai.enableThinking', newSettings.enableThinking);
+    await _prefs.setBool(_kAiEnableThinking, newSettings.enableThinking);
     // Save initiativeMode to prefs
     await _prefs.setBool(_kAiInitiativeMode, newSettings.initiativeMode);
+    await _prefs.setBool(_kAiAllowEmojis, newSettings.allowEmojis);
     
     debugPrint('[Settings] Thinking Mode: ${newSettings.enableThinking}');
     debugPrint('[Settings] Initiative Mode: ${newSettings.initiativeMode}');
+    debugPrint('[Settings] Allow Emojis: ${newSettings.allowEmojis}');
     
     // Update local state if necessary. 
     // Since AiSettings in AppSettings might be derived or separate, we update the one in _settings.
