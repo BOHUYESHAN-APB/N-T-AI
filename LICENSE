@@ -663,3 +663,8 @@ directly.
 3. **Dispute Resolution**: Any dispute arising from or related to this License or the use of the Program shall be resolved by the user at their own expense. The Copyright Holder shall have no obligation to participate in or resolve such disputes.
 
 This additional term is enforceable under Section 7 of the GNU AGPLv3.
+## Third-Party Components Notice
+
+This project uses Live2D Cubism runtime components for rendering. These components are governed by Live2D's own licenses (Proprietary/Open EULA and SDK Release/Publication License). For commercial use involving Live2D features, please contact the repository owner (BOHUYESHAN-APB); the maintainer will coordinate with Live2D on licensing as needed.
+
+See THIRD_PARTY_NOTICES.md for details.

@@ -62,3 +62,13 @@ This agreement shall be governed by the laws of the **People's Republic of China
 For pricing and to obtain a Commercial License, please contact:
 - **Email**: [Your Contact Email]
 - **Website**: [Your Website URL]
+## 10. Third-Party Components & Live2D
+
+- This project integrates or references third-party runtime components for rendering (notably Live2D Cubism runtimes) which are governed by their own licenses (Live2D EULAs and SDK Release/Publication License). The N-T-AI Commercial License does NOT replace or override third-party component licenses.
+
+- If your commercial use of N-T-AI involves providing Live2D rendering to end users (even if models are supplied by end users), you may still need to obtain a separate license from Live2D Inc. depending on your usage. The project author/maintainer (BOHUYESHAN-APB) will assist with Live2D licensing discussions upon request.
+
+- For matters specifically involving Live2D licensing or if you expect to commercially distribute/run Live2D-based features, please contact the project maintainer (repository owner: BOHUYESHAN-APB). The maintainer will coordinate with Live2D on licensing terms and any required Publication/SDK Release License.
+
+Contact for Live2D-related commercial inquiries: repository owner BOHUYESHAN-APB (please open an issue or PR, or contact the maintainer directly via the repository contact information).
+
