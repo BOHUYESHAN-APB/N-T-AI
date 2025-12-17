@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import '../settings/settings.dart';
 import 'floating_window_service.dart';
-import 'windows/floating_window_windows.dart';
 import 'android/floating_window_android.dart';
+import 'windows/floating_window_windows.dart';
 
 /// 浮窗服务工厂
 class FloatingWindowServiceFactory {

@@ -22,6 +22,12 @@ class ExcelGenerator:
             if not filename.endswith(".xlsx"):
                 filename += ".xlsx"
                 
+            if not data or not isinstance(data, list):
+                raise ValueError("Empty excel data")
+            has_row = any(isinstance(row, dict) and len(row) > 0 for row in data)
+            if not has_row:
+                raise ValueError("Empty excel rows")
+
             output_path = os.path.join(self.output_dir, filename)
             
             df = pd.DataFrame(data)

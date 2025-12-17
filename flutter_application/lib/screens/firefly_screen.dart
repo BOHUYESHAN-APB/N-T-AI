@@ -23,7 +23,6 @@ import '../core/services/llm_service.dart';
 import '../core/services/chat_history_service.dart' hide ChatMessage;
 import 'memory_manager_screen.dart'; // Import MemoryManagerScreen
 import 'settings/settings_screen.dart'; // Import SettingsScreen
-import 'deep_research/deep_research_screen.dart'; // Import DeepResearchScreen
 import 'first_run_dialog.dart'; // Import FirstRunDialog
 import '../services/floating_window_factory.dart'; // Import FloatingWindowService
 import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
@@ -421,7 +420,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   }
 
   Future<void> _loadSessions() async {
-    final sessions = await _chatHistory.getSessions();
+    final sessions = await _chatHistory.getSessions(type: 'chat');
     if (mounted) {
       setState(() {
         _sessions = sessions;
@@ -439,6 +438,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     final l10n = AppLocalizations.of(context)!;
     final session = await _chatHistory.createSession(
       '${l10n.quickActionNewChat} ${DateTime.now().month}/${DateTime.now().day}',
+      type: 'chat',
     );
     await _loadSessions();
     await _selectSession(session.id);
@@ -942,6 +942,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     });
   }
 
+  // ignore: unused_element
   void _editMessage(int index) async {
     if (_currentSessionId == null) return;
     final msg = _messages[index];
@@ -966,7 +967,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Widget build(BuildContext context) {
     final settingsController = SettingsScope.of(context);
     final settings = settingsController.settings;
-    final quickActions = settings.quickActions;
+    // final quickActions = settings.quickActions;
     final l10n = AppLocalizations.of(context)!;
     final screenWidth = MediaQuery.of(context).size.width;
     final historyPanelWidth = screenWidth > 360 ? 320.0 : screenWidth * 0.85;
@@ -1137,7 +1138,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(24),
                 onTap: () {
-                  final newValue = !(settings.ai.enableThinking ?? false);
+                  final newValue = !(settings.ai.enableThinking);
                   settingsController.updateAiSettings(settings.ai.copyWith(enableThinking: newValue));
                   
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1155,7 +1156,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       Icon(
                         Icons.psychology, 
                         size: 20, 
-                        color: (settings.ai.enableThinking ?? false) ? Colors.orange : Colors.grey
+                        color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey
                       ),
                       const SizedBox(width: 4),
                       Text(
@@ -1163,7 +1164,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: (settings.ai.enableThinking ?? false) ? Colors.orange : Colors.grey,
+                          color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey,
                         ),
                       ),
                     ],
@@ -2063,6 +2064,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 }
 
 // 简单行动 Chip
+// ignore: unused_element
 class _ActionChip extends StatelessWidget {
   final IconData icon;
   final String label;

@@ -14,7 +14,7 @@ class DeepResearchConfigDialog extends StatelessWidget {
     return AlertDialog(
       backgroundColor: const Color(0xFF1E1E2E),
       title: const Text(
-        "Deep Research Configuration",
+        "深度研究配置",
         style: TextStyle(color: Colors.white),
       ),
       content: SizedBox(
@@ -25,7 +25,7 @@ class DeepResearchConfigDialog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "Configure models for specific research roles. Reuses providers from main Settings.",
+                "为特定研究角色配置模型。将复用主设置中的提供商配置。",
                 style: TextStyle(color: Colors.white54, fontSize: 13),
               ),
               const SizedBox(height: 20),
@@ -33,8 +33,8 @@ class DeepResearchConfigDialog extends StatelessWidget {
               // Planner
               _buildModelSelector(
                 context,
-                "Planner Agent",
-                "Responsible for task decomposition and strategy.",
+                "Planner Agent (规划者)",
+                "负责任务拆解与策略规划。",
                 settings.deepResearch.plannerProviderId,
                 providers,
                 (val) {
@@ -48,8 +48,8 @@ class DeepResearchConfigDialog extends StatelessWidget {
               // Researcher
               _buildModelSelector(
                 context,
-                "Researcher Agent",
-                "Performs search, analysis, and data extraction.",
+                "Researcher Agent (研究员)",
+                "负责执行搜索、分析与数据提取。",
                 settings.deepResearch.researcherProviderId,
                 providers,
                 (val) {
@@ -63,8 +63,8 @@ class DeepResearchConfigDialog extends StatelessWidget {
               // Writer
               _buildModelSelector(
                 context,
-                "Writer Agent",
-                "Generates final reports and documents.",
+                "Writer Agent (作家)",
+                "负责生成最终报告与文档。",
                 settings.deepResearch.writerProviderId,
                 providers,
                 (val) {
@@ -80,7 +80,7 @@ class DeepResearchConfigDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text("Close"),
+          child: const Text("关闭"),
         ),
       ],
     );
@@ -98,15 +98,11 @@ class DeepResearchConfigDialog extends StatelessWidget {
     final List<DropdownMenuItem<String>> items = [
       const DropdownMenuItem(
         value: null,
-        child: Text("Use Default (Main Model)", style: TextStyle(color: Colors.white70)),
+        child: Text("使用默认 (跟随主脑)", style: TextStyle(color: Colors.white70)),
       ),
     ];
 
     for (var provider in providers) {
-      // Assuming provider has models list or we just use provider ID for now.
-      // Ideally we should select specific models, but for now let's select Providers.
-      // If we want model granularity, we need to know models per provider.
-      // Let's assume we select a "Provider Config" which usually maps to a model config in this app.
       items.add(DropdownMenuItem(
         value: provider.id,
         child: Text(

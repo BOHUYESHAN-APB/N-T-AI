@@ -59,6 +59,9 @@ class _AgentsTabState extends State<AgentsTab> {
                             ? '关联 provider: ${provider.name}'
                             : '未关联 provider'),
                   ),
+                  onTap: () {
+                    // TODO: Open agent details/config
+                  },
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -468,16 +471,16 @@ class _AgentsTabState extends State<AgentsTab> {
         return StatefulBuilder(
           builder: (ctx2, setLocalState) {
             void updateProvider(String? v) {
-              selectedProvider = v;
-              // 若用户未填写建议模型，则自动填充 provider 的默认模型
-              if (v != null && modelCtl.text.trim().isEmpty) {
-                final p = ctrl.getProviderById(v);
-                if (p != null && (p.model?.isNotEmpty ?? false)) {
-                  modelCtl.text = p.model!;
+                selectedProvider = v;
+                // 若用户未填写建议模型，则自动填充 provider 的默认模型
+                if (v != null && modelCtl.text.trim().isEmpty) {
+                  final p = ctrl.getProviderById(v);
+                  if (p != null && (p.model?.isNotEmpty ?? false)) {
+                    modelCtl.text = p.model!;
+                  }
                 }
+                setLocalState(() {});
               }
-              setLocalState(() {});
-            }
 
             return AlertDialog(
               title: Text(existing == null ? '新建 Agent' : '编辑 Agent'),
@@ -573,12 +576,9 @@ class _AgentsTabState extends State<AgentsTab> {
                                       TextButton(
                                         onPressed: () {
                                           // 允许用户手动将 provider 默认模型复制到建议模型
-                                          final p2 = ctrl.getProviderById(
-                                            selectedProvider!,
-                                          );
-                                          if (p2 != null &&
-                                              (p2.model?.isNotEmpty ?? false)) {
-                                            modelCtl.text = p2.model!;
+                                          if (p != null &&
+                                              (p.model?.isNotEmpty ?? false)) {
+                                            modelCtl.text = p.model!;
                                             setLocalState(() {});
                                           }
                                         },

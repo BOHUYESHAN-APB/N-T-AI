@@ -1,4 +1,27 @@
-User Request: "{{user_input}}"
+Topic & Constraints (do not copy this text verbatim): "{{user_input}}"
 
 Research Findings:
 {{research_findings}}
+
+IMPORTANT: If there are image URLs or Visual Analysis in the findings, please include the most relevant images in the report using HTML <img> tags (e.g., <img src='url'>).
+IMPORTANT: For DOCX/PDF HTML, you can fine-tune typography using `<b>/<i>/<u>` and `<span style="font-size:14pt;font-family:Microsoft YaHei;color:#123456;">...</span>` when needed.
+
+IMPORTANT: If PPT is requested, the PPT 'content' must be HTML with multiple <div class="ppt-slide"> blocks. 
+- You MUST control the visual style by adding classes to the div:
+  - `theme-tech`: Default Blue Geometric (Business/Tech)
+  - `theme-nature`: Green/Fresh (Environment/Health)
+  - `theme-dark`: Dark Mode (Modern/Creative)
+  - `theme-minimal`: Black on White (Academic/Simple)
+- Use <h1> for slide titles.
+- Use <ul>/<li> for bullet points.
+- If you see '[CHART_DATA_CSV]' in the findings, you MUST create a chart slide. Convert the CSV data into an HTML table with `class="chart"`. The table should have `<thead>` and `<tbody>`.
+- Example Chart:
+  <div class="ppt-slide theme-tech">
+    <h1>Sales Data</h1>
+    <table class="chart">
+      <thead><tr><th>Month</th><th>Sales</th></tr></thead>
+      <tbody><tr><td>Jan</td><td>100</td></tr><tr><td>Feb</td><td>150</td></tr></tbody>
+    </table>
+  </div>
+
+IMPORTANT: Return a JSON object with 'files': [{'format': 'docx', 'content': '...'}, {'format': 'ppt', 'content': '...'}] if multiple formats are requested.

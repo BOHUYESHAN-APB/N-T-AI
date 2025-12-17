@@ -38,6 +38,11 @@ Future<void> main(List<String> args) async {
   await controller.load();
   await LoggerService().init(maxErrors: controller.settings.logMaxErrors, backendUrl: controller.settings.pythonBackendUrl);
   
+  // Print Dashboard URL for user visibility
+  debugPrint("==================================================");
+  debugPrint("后台管理面板地址: ${controller.settings.pythonBackendUrl}/dashboard");
+  debugPrint("==================================================");
+  
   // Run Diagnostics (Fire and forget to avoid blocking startup)
   DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
 

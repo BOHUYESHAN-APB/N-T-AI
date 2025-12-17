@@ -7,7 +7,8 @@ Supports headings, paragraphs, and lists.
 import datetime
 from pathlib import Path
 from typing import List, Dict
-from bs4 import BeautifulSoup
+import re
+from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -42,32 +43,177 @@ class WordGenerator:
         
         document = Document()
         soup = self._parse_html(html_content)
-        
-        # Iterate over all tags in order
-        for element in soup.find_all(["h1", "h2", "h3", "h4", "p", "li", "ul", "ol"]):
-            tag_name = element.name
-            text = element.get_text(strip=True)
-            
-            if not text:
+
+        def parse_css(style_text: str) -> Dict[str, str]:
+            res: Dict[str, str] = {}
+            if not style_text:
+                return res
+            for part in style_text.split(";"):
+                if ":" not in part:
+                    continue
+                k, v = part.split(":", 1)
+                k = k.strip().lower()
+                v = v.strip()
+                if not k or not v:
+                    continue
+                res[k] = v
+            return res
+
+        def parse_color(raw: str):
+            t = (raw or "").strip()
+            if not t:
+                return None
+            if t.startswith("#") and len(t) in (4, 7):
+                if len(t) == 4:
+                    r = int(t[1] * 2, 16)
+                    g = int(t[2] * 2, 16)
+                    b = int(t[3] * 2, 16)
+                else:
+                    r = int(t[1:3], 16)
+                    g = int(t[3:5], 16)
+                    b = int(t[5:7], 16)
+                return RGBColor(r, g, b)
+            m = re.match(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", t, flags=re.IGNORECASE)
+            if m:
+                r = max(0, min(255, int(m.group(1))))
+                g = max(0, min(255, int(m.group(2))))
+                b = max(0, min(255, int(m.group(3))))
+                return RGBColor(r, g, b)
+            return None
+
+        def parse_font_size(raw: str):
+            t = (raw or "").strip().lower()
+            if not t:
+                return None
+            m = re.match(r"(\d+(\.\d+)?)\s*(px|pt)?", t)
+            if not m:
+                return None
+            val = float(m.group(1))
+            unit = m.group(3) or "px"
+            if unit == "px":
+                return Pt(val * 0.75)
+            return Pt(val)
+
+        def merge_style(base: Dict[str, object], extra: Dict[str, object]) -> Dict[str, object]:
+            merged = dict(base)
+            for k, v in extra.items():
+                if v is None:
+                    continue
+                merged[k] = v
+            return merged
+
+        def style_from_tag(tag: Tag) -> Dict[str, object]:
+            s: Dict[str, object] = {}
+            name = tag.name.lower()
+            if name in ("b", "strong"):
+                s["bold"] = True
+            if name in ("i", "em"):
+                s["italic"] = True
+            if name == "u":
+                s["underline"] = True
+
+            css = parse_css(tag.get("style", ""))
+            if "font-weight" in css:
+                fw = css["font-weight"].strip().lower()
+                if fw in ("bold", "bolder") or (fw.isdigit() and int(fw) >= 600):
+                    s["bold"] = True
+                elif fw.isdigit() and int(fw) <= 400:
+                    s["bold"] = False
+            if "font-style" in css:
+                fs = css["font-style"].strip().lower()
+                if fs == "italic":
+                    s["italic"] = True
+                elif fs == "normal":
+                    s["italic"] = False
+            if "text-decoration" in css:
+                td = css["text-decoration"].strip().lower()
+                if "underline" in td:
+                    s["underline"] = True
+            if "font-size" in css:
+                s["font_size"] = parse_font_size(css.get("font-size"))
+            if "font-family" in css:
+                ff = css["font-family"].split(",")[0].strip().strip("\"' ")
+                if ff:
+                    s["font_name"] = ff
+            if "color" in css:
+                s["color"] = parse_color(css.get("color"))
+            return s
+
+        def apply_paragraph_style(paragraph, tag: Tag):
+            css = parse_css(tag.get("style", ""))
+            ta = (css.get("text-align") or "").strip().lower()
+            if ta == "center":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif ta == "right":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif ta == "justify":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            elif ta == "left":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+        def add_runs(paragraph, node, cur_style: Dict[str, object]):
+            if isinstance(node, NavigableString):
+                t = str(node)
+                if not t:
+                    return
+                run = paragraph.add_run(t)
+                if "bold" in cur_style:
+                    run.bold = bool(cur_style.get("bold"))
+                if "italic" in cur_style:
+                    run.italic = bool(cur_style.get("italic"))
+                if "underline" in cur_style:
+                    run.underline = bool(cur_style.get("underline"))
+                if cur_style.get("font_name"):
+                    run.font.name = str(cur_style["font_name"])
+                if cur_style.get("font_size"):
+                    run.font.size = cur_style["font_size"]
+                if cur_style.get("color"):
+                    run.font.color.rgb = cur_style["color"]
+                return
+
+            if not isinstance(node, Tag):
+                return
+
+            if node.name and node.name.lower() == "br":
+                paragraph.add_run("\n")
+                return
+
+            next_style = merge_style(cur_style, style_from_tag(node))
+            for child in node.children:
+                add_runs(paragraph, child, next_style)
+
+        blocks = soup.find_all(["h1", "h2", "h3", "h4", "p", "ul", "ol"])
+        for element in blocks:
+            name = element.name.lower()
+
+            if name in ("ul", "ol"):
+                for li in element.find_all("li", recursive=False):
+                    style_name = "List Bullet" if name == "ul" else "List Number"
+                    para = document.add_paragraph(style=style_name)
+                    apply_paragraph_style(para, li)
+                    for child in li.children:
+                        add_runs(para, child, {})
                 continue
 
-            if tag_name.startswith("h"):
-                # Headings
-                level = int(tag_name[1])
-                # Mapping HTML h1-h4 to Word Heading 1-4
-                # Note: 'Title' style is often used for h1, but let's stick to Headings for structure
-                heading = document.add_heading(text, level=level)
-                
-            elif tag_name == "p":
-                # Paragraphs
-                p = document.add_paragraph(text)
-                
-            elif tag_name == "li":
-                # List items
-                # Check parent to decide bullet vs number
-                parent = element.parent.name if element.parent else "ul"
-                style = 'List Bullet' if parent == 'ul' else 'List Number'
-                document.add_paragraph(text, style=style)
+            if name.startswith("h"):
+                text = element.get_text(" ", strip=True)
+                if not text:
+                    continue
+                level = int(name[1])
+                para = document.add_heading("", level=level)
+                for child in element.children:
+                    add_runs(para, child, {"bold": True})
+                continue
+
+            if name == "p":
+                text = element.get_text(" ", strip=True)
+                if not text:
+                    continue
+                para = document.add_paragraph()
+                apply_paragraph_style(para, element)
+                for child in element.children:
+                    add_runs(para, child, {})
+                continue
                 
         document.save(str(output_path))
         return str(output_path.absolute())

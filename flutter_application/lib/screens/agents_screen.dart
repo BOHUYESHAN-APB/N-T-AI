@@ -35,7 +35,15 @@ class _AgentsScreenState extends State<AgentsScreen> {
                   return Card(
                     child: ListTile(
                       title: Text(a.name),
-                      subtitle: Text(a.description.isNotEmpty ? a.description : (provider != null ? '关联 provider: ${provider.name}' : '未关联 provider')),
+                      subtitle: Text(
+                        a.description.isNotEmpty ? a.description : (provider != null ? '关联 provider: ${provider.name}' : '未关联 provider'),
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () {
+                        // TODO: Open agent details/config
+                      },
                       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                         IconButton(icon: const Icon(Icons.edit), onPressed: () => _showEditDialog(ctrl, providers, a)),
                         IconButton(icon: const Icon(Icons.delete_outline), onPressed: () async {
@@ -194,9 +202,8 @@ class _AgentsScreenState extends State<AgentsScreen> {
                             const SizedBox(height: 6),
                             TextButton(onPressed: () {
                               // 允许用户手动将 provider 默认模型复制到建议模型
-                              final p2 = ctrl.getProviderById(selectedProvider!);
-                              if (p2 != null && (p2.model?.isNotEmpty ?? false)) {
-                                modelCtl.text = p2.model!;
+                              if (p.model?.isNotEmpty ?? false) {
+                                modelCtl.text = p.model!;
                                 setLocalState(() {});
                               }
                             }, child: const Text('自动填充为 Provider 默认模型')),

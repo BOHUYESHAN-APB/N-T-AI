@@ -8,6 +8,7 @@ from app.services.memory_system_service import MemorySystemService
 from app.services.expression_service import ExpressionService
 from app.services.search_service import SearchService
 from app.services.audio_service import AudioService
+from app.services.meme_service import MemeService
 from app.api.routes.live2d_routes import manager as live2d_manager
 from app.core.prompts import FIREFLY_PERSONA, FIREFLY_PERSONA_BASIC, FIREFLY_PERSONA_ADVANCED, FIREFLY_PERSONA_FULL, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
 from app.core.logger import logger
@@ -18,9 +19,13 @@ import base64
 from typing import Union, List, Dict, Any, Optional
 import re
 import ast
+import os
+from pathlib import Path
 from datetime import datetime
 
 from app.core.config import settings
+from app.tools.academic_search import academic_search
+import httpx
 
 class ChatService:
     def __init__(self):
@@ -31,6 +36,7 @@ class ChatService:
         self.expression_service = ExpressionService()
         self.search_service = SearchService()
         self.audio_service = AudioService() # Initialize Audio Service
+        self.meme_service = MemeService()
 
     def _sanitize_text_for_tts(self, text: str) -> str:
         s = text or ""
@@ -51,6 +57,63 @@ class ChatService:
             lines.append(line)
         s = "\n".join(lines)
         return s.strip()
+
+    def _parse_tool_kwargs(self, args_str: str) -> Dict[str, Any]:
+        raw = (args_str or "").strip()
+        if not raw:
+            return {}
+        try:
+            tree = ast.parse(f"f({raw})", mode="eval")
+            call = tree.body
+            if not isinstance(call, ast.Call):
+                return {}
+            kwargs: Dict[str, Any] = {}
+            for kw in call.keywords:
+                if not kw.arg:
+                    continue
+                try:
+                    kwargs[kw.arg] = ast.literal_eval(kw.value)
+                except Exception:
+                    kwargs[kw.arg] = None
+            return kwargs
+        except Exception:
+            kwargs: Dict[str, Any] = {}
+            matches = re.findall(r'(\w+)=["\'](.*?)["\']', raw)
+            for key, value in matches:
+                kwargs[key] = value
+            return kwargs
+
+    async def _skywork_generate_file_url(self, file_type: str, query: str) -> Optional[str]:
+        api_key = os.getenv("SKYWORK_API_KEY")
+        if not api_key:
+            return None
+        gen_url = "https://api-cn.tiangong.cn/infra/tool/generate_file"
+        params = {"api_key": api_key, "query": query, "file_type": file_type}
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(gen_url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            if payload.get("code") != 200:
+                return None
+            data = payload.get("data") or {}
+            url = (data.get("url") or "").strip()
+            return url or None
+
+    async def _download_to_reports(self, url: str, filename: str) -> str:
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "_", (filename or "").strip())
+        safe_name = safe_name.strip("._")
+        if not safe_name:
+            safe_name = f"file_{int(datetime.now().timestamp())}"
+
+        reports_dir = Path("app/static/reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        target_path = reports_dir / safe_name
+
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.get(url, follow_redirects=True)
+            resp.raise_for_status()
+            target_path.write_bytes(resp.content)
+        return str(target_path)
 
     def _split_into_chunks(self, text: str) -> List[str]:
         units = []
@@ -485,6 +548,35 @@ class ChatService:
             session.add(ai_msg)
             session.commit()
 
+        # 6.5 Meme Injection (Proactive)
+        # Only in normal chat mode (not Deep Research), try to find a relevant meme
+        if not deep_research:
+            try:
+                # Use the response text to find a meme
+                memes = await self.meme_service.search_memes(final_response_text, limit=1, threshold=0.65, api_key=target_api_key, base_url=target_base_url)
+                if memes:
+                    meme = memes[0]
+                    # Append meme to response. Frontend should handle [IMAGE: path] or similar tag
+                    # Or we can send a separate event? For simplicity, we append to text.
+                    # Assuming frontend handles standard Markdown image syntax or custom tag.
+                    # Let's use a markdown image format.
+                    # Note: path is relative or absolute. If absolute local path, frontend might not read it directly if web.
+                    # Ideally backend serves it via static URL.
+                    
+                    # Assuming meme.path is stored relative to static/ or full path.
+                    # If it's a full path in backend, we need to map it to a URL.
+                    # For now, let's assume the path is serviceable or the frontend can handle it if it's local app.
+                    # But the user said "backend responsible".
+                    
+                    # Construct a URL if possible, or just send the tag.
+                    # Let's send a custom tag [MEME: <path>]
+                    meme_tag = f"\n\n![Meme]({meme.path})"
+                    final_response_text += meme_tag
+                    self.meme_service.increment_usage(meme.id)
+                    print(f"[ChatService] Injected meme: {meme.path}")
+            except Exception as e:
+                print(f"[ChatService] Meme injection failed: {e}")
+
         # 7. Post-Processing (Learning & Mood Update & Audio Generation)
         if background_tasks:
             background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
@@ -515,32 +607,118 @@ class ChatService:
 
     async def _execute_tool(self, tool_name: str, args_str: str, region: str = "zh-CN") -> str:
         try:
-            # Simple argument parsing
-            # We wrap it in a function call syntax to use ast.parse if needed, 
-            # or just regex extract. 
-            # Let's try to parse the args_str as keyword arguments.
-            
-            kwargs = {}
-            # Regex to find key="value" or key='value'
-            # This is a simple parser, might need to be more robust for complex args
-            matches = re.findall(r'(\w+)=["\'](.*?)["\']', args_str)
-            for key, value in matches:
-                kwargs[key] = value
-            
-            if tool_name == "web_search":
+            kwargs = self._parse_tool_kwargs(args_str)
+
+            async def web_search_tool() -> str:
                 query = kwargs.get("query")
-                if not query: return "Error: Missing 'query' argument."
+                if not query:
+                    return "Error: Missing 'query' argument."
                 print(f"[AGENT] Executing web_search: {query}")
                 return await self.search_service.search(query, region=region)
-            
-            elif tool_name == "visit_page":
+
+            async def visit_page_tool() -> str:
                 url = kwargs.get("url")
-                if not url: return "Error: Missing 'url' argument."
+                if not url:
+                    return "Error: Missing 'url' argument."
                 print(f"[AGENT] Executing visit_page: {url}")
                 return await self.search_service.visit_page(url)
-            
-            else:
+
+            async def academic_search_tool() -> str:
+                query = kwargs.get("query")
+                if not query:
+                    return "Error: Missing 'query' argument."
+                max_results_raw = kwargs.get("max_results")
+                max_results = 5
+                if max_results_raw:
+                    try:
+                        max_results = int(max_results_raw)
+                    except Exception:
+                        max_results = 5
+                results = academic_search.search(query, max_results=max_results)
+                return json.dumps(results, ensure_ascii=False)
+
+            async def generate_ppt_tool() -> str:
+                query = kwargs.get("query")
+                filename = kwargs.get("filename")
+                if not query:
+                    return "Error: Missing 'query' argument."
+                url = await self._skywork_generate_file_url("ppt", str(query))
+                if not url:
+                    return "Error: Skywork file generation unavailable."
+                if not filename:
+                    filename = f"slides_{int(datetime.now().timestamp())}.pptx"
+                if not str(filename).lower().endswith(".pptx"):
+                    filename = f"{filename}.pptx"
+                path = await self._download_to_reports(url, str(filename))
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "type": "PPTX",
+                        "path": path,
+                        "static_url": f"/static/reports/{Path(path).name}",
+                    },
+                    ensure_ascii=False,
+                )
+
+            async def generate_doc_tool() -> str:
+                query = kwargs.get("query")
+                filename = kwargs.get("filename")
+                if not query:
+                    return "Error: Missing 'query' argument."
+                url = await self._skywork_generate_file_url("doc", str(query))
+                if not url:
+                    return "Error: Skywork file generation unavailable."
+                if not filename:
+                    filename = f"document_{int(datetime.now().timestamp())}.docx"
+                if not str(filename).lower().endswith(".docx"):
+                    filename = f"{filename}.docx"
+                path = await self._download_to_reports(url, str(filename))
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "type": "DOCX",
+                        "path": path,
+                        "static_url": f"/static/reports/{Path(path).name}",
+                    },
+                    ensure_ascii=False,
+                )
+
+            async def generate_sheet_tool() -> str:
+                query = kwargs.get("query")
+                filename = kwargs.get("filename")
+                if not query:
+                    return "Error: Missing 'query' argument."
+                url = await self._skywork_generate_file_url("sheet", str(query))
+                if not url:
+                    return "Error: Skywork file generation unavailable."
+                if not filename:
+                    filename = f"sheet_{int(datetime.now().timestamp())}.xlsx"
+                if not str(filename).lower().endswith(".xlsx"):
+                    filename = f"{filename}.xlsx"
+                path = await self._download_to_reports(url, str(filename))
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "type": "XLSX",
+                        "path": path,
+                        "static_url": f"/static/reports/{Path(path).name}",
+                    },
+                    ensure_ascii=False,
+                )
+
+            tool_map = {
+                "web_search": web_search_tool,
+                "visit_page": visit_page_tool,
+                "academic_search": academic_search_tool,
+                "generate_ppt": generate_ppt_tool,
+                "generate_doc": generate_doc_tool,
+                "generate_sheet": generate_sheet_tool,
+            }
+
+            tool = tool_map.get(tool_name)
+            if not tool:
                 return f"Error: Unknown tool '{tool_name}'"
+            return await tool()
                 
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")

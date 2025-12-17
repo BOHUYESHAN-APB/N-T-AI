@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
+import '../../services/diagnostics_service.dart';
 import '../base_plugin.dart';
 import '../../settings/settings_scope.dart';
 
@@ -66,11 +67,25 @@ class BilibiliLivePlugin extends BasePlugin {
   @override
   bool get isDanmakuPlugin => true;
 
+  String _normalizeBackendUrl(String raw) {
+    final trimmed = raw.trim();
+    final base = trimmed.isEmpty ? 'http://localhost:8000' : trimmed;
+    return base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+  }
+
+  String _normalizeRoomId(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return '';
+    final match = RegExp(r'(\d+)').firstMatch(s);
+    return match?.group(1) ?? '';
+  }
+
   @override
   Future<void> onInit() async {
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'plugin.$id.';
-    roomIdController.text = prefs.getString('${prefix}roomId') ?? '';
+    roomIdController.text =
+        _normalizeRoomId(prefs.getString('${prefix}roomId') ?? '');
     appIdController.text = prefs.getString('${prefix}appId') ?? '';
     accessKeyIdController.text = prefs.getString('${prefix}accessKeyId') ?? '';
     accessKeySecretController.text =
@@ -99,7 +114,14 @@ class BilibiliLivePlugin extends BasePlugin {
   Future<void> _saveLocalConfig() async {
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'plugin.$id.';
-    await prefs.setString('${prefix}roomId', roomIdController.text.trim());
+    final normalizedRoomId = _normalizeRoomId(roomIdController.text);
+    if (normalizedRoomId.isNotEmpty) {
+      roomIdController.text = normalizedRoomId;
+    }
+    await prefs.setString(
+      '${prefix}roomId',
+      normalizedRoomId.isNotEmpty ? normalizedRoomId : roomIdController.text.trim(),
+    );
     await prefs.setString('${prefix}appId', appIdController.text.trim());
     await prefs.setString(
         '${prefix}accessKeyId', accessKeyIdController.text.trim());
@@ -131,12 +153,10 @@ class BilibiliLivePlugin extends BasePlugin {
     }
   }
 
-  Future<void> syncConfigToBackend(BuildContext context) async {
+  Future<bool> syncConfigToBackend(BuildContext context) async {
     final controller = SettingsScope.of(context);
     final settings = controller.settings;
-    final backendUrl = settings.pythonBackendUrl.isNotEmpty
-        ? settings.pythonBackendUrl
-        : 'http://localhost:8000';
+    final backendUrl = _normalizeBackendUrl(settings.pythonBackendUrl);
     final providers = controller.providers;
 
     dynamic selectedProvider;
@@ -163,8 +183,22 @@ class BilibiliLivePlugin extends BasePlugin {
       }
     }
 
+    final normalizedRoomId = _normalizeRoomId(roomIdController.text);
+    if (normalizedRoomId.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先填写有效房间号 (Room ID)')),
+        );
+      }
+      return false;
+    }
+
+    if (roomIdController.text.trim() != normalizedRoomId) {
+      roomIdController.text = normalizedRoomId;
+    }
+
     final config = <String, dynamic>{
-      'room_id': roomIdController.text.trim(),
+      'room_id': normalizedRoomId,
       'app_id': appIdController.text.trim(),
       'access_key_id': accessKeyIdController.text.trim(),
       'access_key_secret': accessKeySecretController.text.trim(),
@@ -192,11 +226,31 @@ class BilibiliLivePlugin extends BasePlugin {
       'config': config,
     });
 
-    await http.post(
-      uri,
-      headers: const {'Content-Type': 'application/json'},
-      body: body,
-    );
+    try {
+      final resp = await http
+          .post(
+            uri,
+            headers: const {'Content-Type': 'application/json'},
+            body: body,
+          )
+          .timeout(const Duration(seconds: 3));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return true;
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('同步到后端失败 (HTTP ${resp.statusCode})')),
+        );
+      }
+      return false;
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('同步到后端失败: $e')),
+        );
+      }
+      return false;
+    }
   }
 
   @override
@@ -225,7 +279,9 @@ class BilibiliLivePlugin extends BasePlugin {
 
   Future<String> _loadBackendUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+    return _normalizeBackendUrl(
+      prefs.getString('settings.backend.url') ?? 'http://localhost:8000',
+    );
   }
 
   Future<bool> _openDanmakuWindow(BuildContext? context) async {
@@ -237,6 +293,16 @@ class BilibiliLivePlugin extends BasePlugin {
       }
       return false;
     }
+
+    if (!DiagnosticsService().isWebViewAvailable) {
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Webview 环境不可用，无法打开独立窗口')),
+        );
+      }
+      return false;
+    }
+
     final backendUrl = await _loadBackendUrl();
     try {
       if (_danmakuWebview != null) {
@@ -289,6 +355,16 @@ class BilibiliLivePlugin extends BasePlugin {
       }
       return false;
     }
+
+    if (!DiagnosticsService().isWebViewAvailable) {
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Webview 环境不可用，无法打开独立窗口')),
+        );
+      }
+      return false;
+    }
+
     final backendUrl = await _loadBackendUrl();
     try {
       if (_scWebview != null) {
@@ -751,8 +827,8 @@ class BilibiliLivePlugin extends BasePlugin {
                   ElevatedButton.icon(
                     onPressed: () async {
                       await _saveLocalConfig();
-                      await syncConfigToBackend(context);
-                      if (context.mounted) {
+                      final ok = await syncConfigToBackend(context);
+                      if (ok && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('已同步到后端')),
                         );

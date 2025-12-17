@@ -133,6 +133,27 @@ AGENT_INSTRUCTIONS = """
     *   **适用场景**: 当 `web_search` 的摘要不足以回答问题，或者需要深入阅读某篇文章、查找图片时。
     *   **注意**: 必须提供完整的 URL（通常来自 `web_search` 的结果）。
 
+3.  **academic_search(query: str, max_results: int = 5)**
+    *   **功能**: 在 ArXiv 等学术渠道检索相关论文条目。
+    *   **返回**: 论文条目列表（标题、链接、摘要片段、作者等，JSON 形式）。
+    *   **适用场景**: 用户明确需要论文/学术证据，或要追溯研究来源时。
+    *   **注意**: 若需要论文全文，通常需要再用 `visit_page` 打开链接阅读。
+
+4.  **generate_ppt(query: str, filename: str = "")**
+    *   **功能**: 生成 PowerPoint 文件并保存到服务器静态目录。
+    *   **返回**: 生成文件的路径与静态访问地址（JSON 字符串）。
+    *   **适用场景**: 用户明确要求生成 PPT/PPTX 演示文稿。
+
+5.  **generate_doc(query: str, filename: str = "")**
+    *   **功能**: 生成 Word 文件并保存到服务器静态目录。
+    *   **返回**: 生成文件的路径与静态访问地址（JSON 字符串）。
+    *   **适用场景**: 用户明确要求生成 DOCX 文档/报告。
+
+6.  **generate_sheet(query: str, filename: str = "")**
+    *   **功能**: 生成 Excel 文件并保存到服务器静态目录。
+    *   **返回**: 生成文件的路径与静态访问地址（JSON 字符串）。
+    *   **适用场景**: 用户明确要求生成 XLSX 表格。
+
 #### 调用协议 (Protocol)
 
 要调用工具，请**严格**遵循以下格式输出一行命令。不要在命令前后添加任何多余的解释或标点符号。
@@ -145,6 +166,8 @@ AGENT_INSTRUCTIONS = """
     `[TOOL_CALL] web_search(query="流萤崩坏星穹铁道图片")`
 *   访问网页:
     `[TOOL_CALL] visit_page(url="https://example.com/article")`
+*   生成 PPT:
+    `[TOOL_CALL] generate_ppt(query="用淡蓝色几何风格做一份 AI 行业趋势 8 页 PPT", filename="AI_trends.pptx")`
 
 #### 思考与行动循环 (Thought-Action Loop)
 

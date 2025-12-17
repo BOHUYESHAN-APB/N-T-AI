@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     SSL_CERT_PATH: str = "./certs/cert.pem"
     SSL_KEY_PATH: str = "./certs/key.pem"
 
+    # Plugins
+    BILIBILI_ROOM_ID: int = 0 # 0 means disabled/not configured
+
     class Config:
         env_file = ".env"
 

@@ -18,24 +18,27 @@ class ProcessStepWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
     Color statusColor;
     IconData statusIcon;
 
     switch (status) {
       case "running":
-        statusColor = Colors.blueAccent;
+        statusColor = colorScheme.primary;
         statusIcon = Icons.sync;
         break;
       case "completed":
-        statusColor = Colors.greenAccent;
+        statusColor = Colors.green;
         statusIcon = Icons.check_circle;
         break;
       case "failed":
-        statusColor = Colors.redAccent;
+        statusColor = colorScheme.error;
         statusIcon = Icons.error;
         break;
       default:
-        statusColor = Colors.grey;
+        statusColor = colorScheme.outline;
         statusIcon = Icons.circle_outlined;
     }
 
@@ -51,7 +54,7 @@ class ProcessStepWidget extends StatelessWidget {
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.1),
+                  color: statusColor.withAlpha(26),
                   shape: BoxShape.circle,
                   border: Border.all(color: statusColor, width: 2),
                 ),
@@ -69,7 +72,7 @@ class ProcessStepWidget extends StatelessWidget {
               Container(
                 width: 2,
                 height: logs != null && logs!.isNotEmpty ? 60 : 30, // Dynamic height
-                color: Colors.white10,
+                color: theme.dividerColor.withAlpha(51),
                 margin: const EdgeInsets.symmetric(vertical: 4),
               ),
             ],
@@ -81,7 +84,7 @@ class ProcessStepWidget extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Step $stepNumber: $title",
+                  "步骤 $stepNumber: $title",
                   style: TextStyle(
                     color: statusColor,
                     fontWeight: FontWeight.bold,
@@ -91,27 +94,35 @@ class ProcessStepWidget extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
                 ),
                 if (logs != null && logs!.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(top: 8),
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.black26,
-                      borderRadius: BorderRadius.circular(4),
+                      color: colorScheme.surfaceContainerHighest.withAlpha(128),
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    width: double.infinity,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: logs!
-                          .map((log) => Text(
+                          .map(
+                            (log) => SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Text(
                                 "> $log",
-                                style: const TextStyle(
-                                  color: Colors.white38,
+                                style: TextStyle(
+                                  color: colorScheme.onSurfaceVariant,
                                   fontFamily: 'monospace',
                                   fontSize: 11,
                                 ),
-                              ))
+                                softWrap: false,
+                                maxLines: 1,
+                              ),
+                            ),
+                          )
                           .toList(),
                     ),
                   ),

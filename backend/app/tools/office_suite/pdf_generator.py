@@ -9,13 +9,6 @@ import datetime
 from pathlib import Path
 from typing import Optional
 
-# Try to import WeasyPrint, handle if missing (though it should be installed)
-try:
-    from weasyprint import HTML, CSS
-except (ImportError, OSError):
-    # OSError can happen on Windows if GTK/libcairo is missing
-    HTML = None
-
 class PDFGenerator:
     def __init__(self, output_dir: str = "generated_docs/pdf"):
         self.output_dir = Path(output_dir)
@@ -33,7 +26,9 @@ class PDFGenerator:
         Returns:
             The absolute path to the generated PDF file.
         """
-        if HTML is None:
+        try:
+            from weasyprint import HTML
+        except (ImportError, OSError):
             return "Error: WeasyPrint library not installed."
 
         if not filename:

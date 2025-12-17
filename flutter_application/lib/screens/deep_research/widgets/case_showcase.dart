@@ -5,15 +5,18 @@ class CaseShowcase extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Container(
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "User Case Showcase",
+          Text(
+            "用户案例展示",
             style: TextStyle(
-              color: Colors.white70,
+              color: colorScheme.onSurface.withAlpha(179),
               fontSize: 14,
               fontWeight: FontWeight.bold,
             ),
@@ -25,18 +28,21 @@ class CaseShowcase extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               children: [
                 _buildCaseCard(
-                  "Market Research Report",
-                  "Analyzing global trends in AI...",
+                  context,
+                  "市场研究报告",
+                  "分析 AI 全球趋势...",
                   Colors.blue,
                 ),
                 _buildCaseCard(
-                  "Annual PPT Generation",
-                  "Generating slide deck from Q4 data...",
+                  context,
+                  "年度 PPT 生成",
+                  "根据 Q4 数据生成幻灯片...",
                   Colors.orange,
                 ),
                 _buildCaseCard(
-                  "Stock Data Analysis",
-                  "Processing CSV and creating charts...",
+                  context,
+                  "股票数据分析",
+                  "处理 CSV 并创建图表...",
                   Colors.green,
                 ),
               ],
@@ -47,13 +53,16 @@ class CaseShowcase extends StatelessWidget {
     );
   }
 
-  Widget _buildCaseCard(String title, String desc, Color color) {
+  Widget _buildCaseCard(BuildContext context, String title, String desc, Color color) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Container(
       width: 240,
       margin: const EdgeInsets.only(right: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF2A2A35),
+        color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(12),
         border: Border(left: BorderSide(color: color, width: 4)),
       ),
@@ -62,8 +71,8 @@ class CaseShowcase extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colorScheme.onSurface,
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
@@ -71,8 +80,8 @@ class CaseShowcase extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             desc,
-            style: const TextStyle(
-              color: Colors.white54,
+            style: TextStyle(
+              color: colorScheme.onSurfaceVariant,
               fontSize: 12,
             ),
             maxLines: 2,

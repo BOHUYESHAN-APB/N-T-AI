@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart';
 import '../core/services/expression_agent_service.dart';
-import '../widgets/expressive_face.dart'; // For ExpressionData
+// import '../widgets/expressive_face.dart'; // For ExpressionData
 import 'live2d_controller.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -103,11 +103,9 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
       }
     }
 
-    // Force debug false
-    const debug = false;
     final params = <String>[];
     params.add('model=${Uri.encodeComponent(path)}');
-    if (debug) params.add('debug=true');
+    if (kDebugMode) params.add('debug=true');
     if (widget.floatingUi) params.add('floating=true');
     params.add('controls=${widget.showControls}');
     final query = params.join('&');

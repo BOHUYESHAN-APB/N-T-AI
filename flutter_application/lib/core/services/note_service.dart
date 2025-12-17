@@ -9,7 +9,6 @@ import 'llm_service.dart';
 class NoteService {
   static Database? _database;
   final LLMService _llmService = LLMService();
-  final Uuid _uuid = const Uuid();
   
   // Broadcast stream to notify listeners of database changes
   static final StreamController<void> _updateController = StreamController.broadcast();

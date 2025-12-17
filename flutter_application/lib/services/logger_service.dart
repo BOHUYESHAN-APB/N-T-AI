@@ -1,4 +1,5 @@
 import 'dart:developer' as developer;
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -130,7 +131,10 @@ class LoggerService {
     try {
       final uri = Uri.parse('$_backendUrl/api/logs/frontend');
       final payload = jsonEncode({'errors': _recentErrors, 'max': _maxErrors});
-      http.post(uri, headers: {'Content-Type': 'application/json'}, body: payload);
+      unawaited(http
+          .post(uri, headers: {'Content-Type': 'application/json'}, body: payload)
+          .timeout(const Duration(seconds: 2))
+          .catchError((_) => http.Response('', 500)));
     } catch (_) {}
   }
 }

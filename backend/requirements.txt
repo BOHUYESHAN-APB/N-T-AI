@@ -21,3 +21,4 @@ openpyxl
 pdfplumber
 markdown
 PyPDF2
+playwright

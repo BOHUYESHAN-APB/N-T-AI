@@ -108,9 +108,9 @@ class SettingsController extends ChangeNotifier {
     final aiInitiativeMode = _prefs.getBool(_kAiInitiativeMode) ?? false;
     final aiDanmakuBatchInterval = _prefs.getInt(_kAiDanmakuBatchInterval) ?? 20;
     final aiAllowEmojis = _prefs.getBool(_kAiAllowEmojis) ?? false;
-    final visionPrompt =
-        _prefs.getString(_kVisionPrompt) ??
-        '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
+    // final visionPrompt =
+    //     _prefs.getString(_kVisionPrompt) ??
+    //     '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
     final visionPrefLen = _prefs.getInt(_kVisionPrefLen) ?? 120;
     final visionMaxLen = _prefs.getInt(_kVisionMaxLen) ?? 500;
     final quickActionsRaw = _prefs.getString(_kQuickActions);
@@ -125,13 +125,13 @@ class SettingsController extends ChangeNotifier {
     final activeId = _prefs.getString(_kAiActiveId);
     final activeExpressionProviderId = _prefs.getString(_kExpressionProviderId);
     final activeSearchProviderId = _prefs.getString(_kSearchProviderId);
-    final activeMotionProviderId = _prefs.getString(_kMotionProviderId);
-    final live2dModelPath = _prefs.getString(_kLive2dModelPath) ?? '';
+    // final activeMotionProviderId = _prefs.getString(_kMotionProviderId);
+    // final live2dModelPath = _prefs.getString(_kLive2dModelPath) ?? '';
     final rotationEnabled = _prefs.getBool(_kAiRotationEnabled) ?? false;
     final activeVisionId = _prefs.getString(_kAiActiveVisionId);
     final useMainVisionIfCapable =
         _prefs.getBool(_kUseMainVisionIfCapable) ?? true;
-    final visionFallbackAgent = _prefs.getBool(_kVisionFallbackAgent) ?? true;
+    // final visionFallbackAgent = _prefs.getBool(_kVisionFallbackAgent) ?? true;
     final agentEnabled = _prefs.getBool(_kAgentEnabled) ?? false;
     final enableExpressionAgent =
         _prefs.getBool(_kEnableExpressionAgent) ?? false;

@@ -6,19 +6,27 @@ import 'package:uuid/uuid.dart';
 class ChatSession {
   final String id;
   final String title;
+  final String type; // 'chat' or 'research'
   final DateTime updatedAt;
 
-  ChatSession({required this.id, required this.title, required this.updatedAt});
+  ChatSession({
+    required this.id,
+    required this.title,
+    this.type = 'chat',
+    required this.updatedAt,
+  });
 
   Map<String, dynamic> toMap() => {
     'id': id,
     'title': title,
+    'type': type,
     'updated_at': updatedAt.millisecondsSinceEpoch,
   };
 
   factory ChatSession.fromMap(Map<String, dynamic> map) => ChatSession(
     id: map['id'],
     title: map['title'],
+    type: map['type'] ?? 'chat',
     updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updated_at']),
   );
 }
@@ -73,7 +81,18 @@ class ChatHistoryService {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path, 
+      version: 2, 
+      onCreate: _createDB,
+      onUpgrade: _onUpgrade,
+    );
+  }
+
+  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE sessions ADD COLUMN type TEXT DEFAULT "chat"');
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -81,6 +100,7 @@ class ChatHistoryService {
       CREATE TABLE sessions (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
+        type TEXT DEFAULT "chat",
         updated_at INTEGER NOT NULL
       )
     ''');
@@ -96,21 +116,30 @@ class ChatHistoryService {
     ''');
   }
 
-  Future<ChatSession> createSession(String title) async {
+  Future<ChatSession> createSession(String title, {String type = 'chat', String? id}) async {
     final db = await database;
     final session = ChatSession(
-      id: _uuid.v4(),
+      id: id ?? _uuid.v4(),
       title: title,
+      type: type,
       updatedAt: DateTime.now(),
     );
-    await db.insert('sessions', session.toMap());
+    await db.insert('sessions', session.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
     _updateController.add(null);
     return session;
   }
 
-  Future<List<ChatSession>> getSessions() async {
+  Future<List<ChatSession>> getSessions({String? type}) async {
     final db = await database;
-    final maps = await db.query('sessions', orderBy: 'updated_at DESC');
+    final where = type != null ? 'type = ?' : null;
+    final args = type != null ? [type] : null;
+    
+    final maps = await db.query(
+      'sessions', 
+      where: where,
+      whereArgs: args,
+      orderBy: 'updated_at DESC'
+    );
     return maps.map((e) => ChatSession.fromMap(e)).toList();
   }
 

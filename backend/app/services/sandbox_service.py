@@ -13,12 +13,23 @@ import sys
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
 
+import os
+import shutil
+from pathlib import Path
+
 class SandboxSession:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self._globals: Dict[str, Any] = {}
         self.created_at = datetime.datetime.now()
         
+        # Create a dedicated workspace directory for this session
+        self.workspace_dir = Path("workspace") / self.session_id
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Change CWD to workspace for subprocess calls
+        self._cwd = str(self.workspace_dir.absolute())
+
     def execute(self, code: str) -> Dict[str, Any]:
         """
         Executes Python code or Shell commands (prefixed with !) in this session.
@@ -33,13 +44,13 @@ class SandboxSession:
                 # Shell command execution
                 command = stripped[1:]
                 try:
-                    # Security check: disallow dangerous commands in real environment if needed
-                    # For now, we allow standard shell usage as requested
+                    # Execute in workspace directory
                     completed = subprocess.run(
                         shlex.split(command),
                         capture_output=True,
                         text=True,
-                        shell=True # Enable shell for pipe support etc.
+                        shell=True,
+                        cwd=self._cwd
                     )
                     combined = (completed.stdout or "") + (completed.stderr or "")
                     shell_outputs.append(f"$ {command}\n{combined.strip()}")
@@ -57,8 +68,14 @@ class SandboxSession:
             try:
                 # Capture stdout
                 with contextlib.redirect_stdout(stream):
-                    # Execute in the persistent _globals dictionary
-                    exec(python_code, self._globals, self._globals)
+                    # Set CWD for Python execution
+                    original_cwd = os.getcwd()
+                    os.chdir(self._cwd)
+                    try:
+                        # Execute in the persistent _globals dictionary
+                        exec(python_code, self._globals, self._globals)
+                    finally:
+                        os.chdir(original_cwd)
             except Exception as exc:
                 error_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
@@ -71,11 +88,20 @@ class SandboxSession:
             "success": success,
             "output": output_text,
             "error": error_text,
-            "globals_keys": list(self._globals.keys())
+            "globals_keys": list(self._globals.keys()),
+            "workspace": self._cwd
         }
+    
+    def cleanup(self):
+        try:
+            if self.workspace_dir.exists():
+                shutil.rmtree(self.workspace_dir)
+        except Exception as e:
+            print(f"Error cleaning up sandbox {self.session_id}: {e}")
 
     def reset(self):
         self._globals.clear()
+        # Clean and recreate workspace? For now, keep files.
 
 import datetime
 
@@ -93,6 +119,7 @@ class SandboxService:
 
     def delete_session(self, session_id: str):
         if session_id in self._sessions:
+            self._sessions[session_id].cleanup()
             del self._sessions[session_id]
 
     def execute_code(self, session_id: str, code: str) -> Dict[str, Any]:

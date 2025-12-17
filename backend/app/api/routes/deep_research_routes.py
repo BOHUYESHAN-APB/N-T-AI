@@ -15,6 +15,7 @@ class DeepResearchRequest(BaseModel):
     query: str
     model_config_override: Optional[Dict[str, Any]] = None # API Key, Base URL etc.
     session_id: Optional[str] = None
+    context_files: Optional[List[Dict[str, Any]]] = None
 
 class DeepResearchResponse(BaseModel):
     task_id: str
@@ -46,11 +47,14 @@ async def create_research_task(request: DeepResearchRequest):
         
         async def event_generator():
             try:
-                async for event in agent.run_stream(request.query):
+                yield f"data: {json.dumps({'type': 'metadata', 'session_id': session_id})}\n\n"
+                async for event in agent.run_stream(request.query, context_files=request.context_files or []):
                     # SSE format: data: <json>\n\n
+                    if isinstance(event, dict):
+                        event = {**event, "session_id": session_id}
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
-                error_event = {"type": "error", "content": str(e)}
+                error_event = {"type": "error", "content": str(e), "session_id": session_id}
                 yield f"data: {json.dumps(error_event)}\n\n"
             finally:
                 # Close stream

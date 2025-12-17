@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
@@ -9,11 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
-import '../models/memory.dart';
 import 'llm_service.dart';
 import 'memory_service.dart';
-import 'meme_service.dart';
-import 'note_service.dart';
 import '../prompts/prompts.dart';
 import '../tools/agent_tool.dart';
 import '../tools/clock_tool.dart';
@@ -39,8 +35,6 @@ class BrainService {
   // （这样减少主脑上下文污染与 token 开销，允许后续独立选择更小的模型用于表情推理）。
   final LLMService _llmService = LLMService();
   final MemoryService _memoryService = MemoryService();
-  final MemeService _memeService = MemeService();
-  final NoteService _noteService = NoteService();
   // Separate agents to reduce main brain load
   final ExpressionAgentService _expressionAgent = ExpressionAgentService();
   final Avatar3DAgentService _avatar3DAgent = Avatar3DAgentService();
@@ -402,7 +396,6 @@ Based on these comments, do you want to proactively say something to the audienc
     final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
     // Force Backend Enabled
     final backendEnabled = true; // prefs.getBool('settings.backend.enabled') ?? false;
-    final enableSearchRetry = prefs.getBool('settings.agent.enableSearchRetry') ?? true;
     final isServerMode = true; // Force Server Mode
 
     debugPrint("[BRAIN] Process Message Start");
@@ -788,34 +781,15 @@ Based on these comments, do you want to proactively say something to the audienc
     // Let's rely on the fact that `finalResponse` contains the text content.
     // If we want to preserve reasoning, we need to capture it in the server block.
     
-    if (serverResponse != null) {
-        return AiResponse(
-            content: finalResponse,
-            emotion: serverResponse!.emotion,
-            reasoningContent: serverResponse!.reasoningContent,
-            toolCalls: serverResponse!.toolCalls
-        );
-    }
+    // We know serverResponse is not null here because if it failed, we returned in catch block.
+    return AiResponse(
+        content: finalResponse,
+        emotion: serverResponse.emotion,
+        reasoningContent: serverResponse.reasoningContent,
+        toolCalls: serverResponse.toolCalls
+    );
     
     return AiResponse(content: finalResponse);
-  }
-
-  Future<void> _fanOutSidecars(Map<String, dynamic> sidecar) async {
-    try {
-      final futures = <Future<void>>[];
-      if (sidecar.containsKey('expression')) {
-        futures.add(_expressionAgent.applyDynamic(sidecar['expression']));
-      }
-      if (sidecar.containsKey('avatar3d')) {
-        final v = sidecar['avatar3d'];
-        if (v is Map<String, dynamic>) {
-          futures.add(_avatar3DAgent.apply(v));
-        }
-      }
-      await Future.wait(futures);
-    } catch (_) {
-      // swallow errors; sidecars are best-effort
-    }
   }
 
   // Remove fenced/inlined expression payloads from a string
@@ -953,10 +927,15 @@ Output JSON format:
       if (data['type'] == 'meme') {
         final description = data['description'] ?? '';
         // 2. Save
-        await _memeService.saveMemeFromBytes(bytes, description);
-        _statusController.add("Meme learned: $description");
+        // Moved to backend: Meme learning is now handled by the Python backend via API if needed.
+        // For now, client-side meme learning is disabled/deprecated as requested.
+        // await _memeService.saveMemeFromBytes(bytes, description);
+        
+        // Alternative: Upload to backend for learning?
+        // For this refactor, we just log it.
+        _statusController.add("Meme detected (Backend migration pending)");
         if (kDebugMode) {
-          print("Meme learned: $description (Reason: ${data['reason']})");
+          print("Meme detected: $description (Reason: ${data['reason']}) - Client side save disabled.");
         }
       } else {
         _statusController.add("Image analyzed (Not a meme)");
@@ -984,6 +963,12 @@ Output JSON format:
     for (final match in matches.toList().reversed) {
       final query = match.group(1)?.trim() ?? '';
       if (query.isNotEmpty) {
+        // Moved to backend: Meme search is now handled by the Python backend.
+        // The backend should return [IMAGE:path] directly if found.
+        // If we still see [MEME:...] here, it means backend didn't process it or it's a legacy tag.
+        // We'll just strip it for now to avoid showing raw tags.
+        processed = processed.replaceRange(match.start, match.end, '');
+        /*
         final memes = await _memeService.searchMemes(query, limit: 1);
         if (memes.isNotEmpty) {
           final path = memes.first.path;
@@ -995,6 +980,7 @@ Output JSON format:
           // No meme found, remove the tag
           processed = processed.replaceRange(match.start, match.end, ''); 
         }
+        */
       }
     }
     return processed;

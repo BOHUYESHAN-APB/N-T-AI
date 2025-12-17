@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/diagnostics_service.dart';
 import 'base_plugin.dart';
 import 'bilibili_live/bilibili_live_plugin.dart';
 
@@ -12,6 +13,8 @@ class PluginManager extends ChangeNotifier {
 
   Future<void> ensureInitialized() async {
     if (_initialized) return;
+    // Wait for system diagnostics to complete to avoid race conditions with WebView initialization
+    await DiagnosticsService().ready;
     _initialized = true;
     await _registerDefaultPlugins();
   }

@@ -67,13 +67,11 @@ class ExpressionAgentService {
       // Only print in debug mode to avoid leaking runtime data in production.
       try {
         // ignore: avoid_print
-        if (expr != null) {
-          // print raw map and ExpressionData values
-          // ignore: avoid_print
-          print(
-            '[ExpressionAgent] payload: ${jsonEncode(map)} -> expr: {mouth: ${expr.mouth}, eyes: ${expr.eyes}, eyebrow: ${expr.eyebrow}, blush: ${expr.blush}, pupilX: ${expr.pupilX}, pupilY: ${expr.pupilY}, headTilt: ${expr.headTilt}}',
-          );
-        }
+        // print raw map and ExpressionData values
+        // ignore: avoid_print
+        print(
+          '[ExpressionAgent] payload: ${jsonEncode(map)} -> expr: {mouth: ${expr.mouth}, eyes: ${expr.eyes}, eyebrow: ${expr.eyebrow}, blush: ${expr.blush}, pupilX: ${expr.pupilX}, pupilY: ${expr.pupilY}, headTilt: ${expr.headTilt}}',
+        );
       } catch (_) {}
       _last = expr;
       _streamCtrl.add(expr);

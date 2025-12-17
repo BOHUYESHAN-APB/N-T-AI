@@ -1,10 +1,11 @@
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 import json
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import asyncio
 from app.core.logger import logger
+from app.services.browser_service import browser_service
 
 class SearchService:
     def __init__(self):
@@ -33,7 +34,7 @@ class SearchService:
             
         return filtered
 
-    async def search(self, query: str, max_results: int = 3, region: str = "zh-CN") -> str:
+    async def search_structured(self, query: str, max_results: int = 3, region: str = "zh-CN") -> dict:
         try:
             logger.info(f"Searching for: {query} (Region: {region})")
             loop = asyncio.get_event_loop()
@@ -97,11 +98,18 @@ class SearchService:
                 images = await self.search_images_baidu(query, max_results=5)
 
             if not results:
-                return "No search results found."
+                return {"results": [], "images": [], "formatted": "No search results found."}
             
             formatted_results = []
+            trimmed_results = []
             for r in results[:max_results]:
-                formatted_results.append(f"- [{r['title']}]({r['href']}): {r['body']}")
+                item = {
+                    "title": r.get("title", ""),
+                    "href": r.get("href", ""),
+                    "body": r.get("body", ""),
+                }
+                trimmed_results.append(item)
+                formatted_results.append(f"- [{item['title']}]({item['href']}): {item['body']}")
             
             if images:
                 formatted_results.append("\n**Related Images:**")
@@ -109,10 +117,14 @@ class SearchService:
                     formatted_results.append(f"[IMAGE: {img_url}]")
 
             final_output = "\n".join(formatted_results)
-            return final_output
+            return {"results": trimmed_results, "images": images, "formatted": final_output}
         except Exception as e:
             logger.error(f"Search failed: {e}")
-            return f"Search failed: {str(e)}"
+            return {"results": [], "images": [], "formatted": f"Search failed: {str(e)}"}
+
+    async def search(self, query: str, max_results: int = 3, region: str = "zh-CN") -> str:
+        payload = await self.search_structured(query=query, max_results=max_results, region=region)
+        return payload.get("formatted") or "No search results found."
 
     async def search_baidu(self, query: str, max_results: int = 3) -> list:
         """Fallback search using Baidu scraping."""
@@ -327,11 +339,12 @@ class SearchService:
             return output
 
         except httpx.TimeoutException:
-            logger.error(f"Timeout visiting page {url}")
-            return f"Error: Timeout visiting {url}"
+            logger.error(f"Timeout visiting page {url}, trying BrowserService...")
+            return await browser_service.fetch_page(url)
         except Exception as e:
-            logger.error(f"Error visiting page {url}: {str(e)}")
-            return f"Error visiting page {url}: {str(e)}"
+            logger.error(f"Error visiting page {url}: {str(e)}, trying BrowserService...")
+            # Fallback to BrowserService if simple request fails (e.g. 403 or JS required)
+            return await browser_service.fetch_page(url)
 
     async def _validate_images_in_output(self, text: str, referer: str = None) -> str:
         import re

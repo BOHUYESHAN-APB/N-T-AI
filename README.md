@@ -204,6 +204,12 @@ To control the "Brain" on your PC from your Android phone:
 - [ ] **Local LLM**: Support running small LLMs (e.g., Llama-3-8B-Quantized) directly on Android via MLC-LLM or MediaPipe.
 - [ ] **Result**: A fully offline-capable, privacy-focused AI companion app without external dependencies.
 
+### Phase 4: Linux Strategy & Commercial Compliance (Long-term)
+- [ ] **Distribution Selection**: 
+    - **Alpine Linux (Preferred for Bundling)**: Selected as the base for the bundled lightweight environment due to its MIT/BSD-friendly ecosystem and `musl` libc. This choice ensures that future commercial releases or secondary distributions avoid strict copyleft (GPL) implications, allowing for flexible licensing of proprietary extensions.
+    - **Ubuntu/Debian (User-Managed)**: Continued support for standard distributions for users who prefer full environment control.
+- [ ] **License Auditing**: Automated tools to track dependency licenses, ensuring clear separation between the open-core (AGPL/MIT) and potential future commercial modules.
+
 ### Future Research: Autonomous Behavior
 - [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).
 - [ ] **3D Engine**: Implementing Babylon.js renderer for 3D avatars.

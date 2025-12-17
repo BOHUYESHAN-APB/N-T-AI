@@ -2,10 +2,10 @@ from typing import Dict, Optional
 
 from .base import BasePlugin
 from .bilibili_live import BilibiliLivePlugin
-
+from app.core.config import settings
 
 _plugins: Dict[str, BasePlugin] = {
-    "bilibili_live": BilibiliLivePlugin(),
+    "bilibili_live": BilibiliLivePlugin(config={"room_id": settings.BILIBILI_ROOM_ID}),
 }
 
 

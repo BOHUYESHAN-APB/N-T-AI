@@ -17,7 +17,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _noteService = NoteService();
-  bool _isDirty = false;
+  
+  // Auto-save timer
   bool _isPreviewEnabled = false;
 
   @override
@@ -102,7 +103,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 hintStyle: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              onChanged: (_) => _isDirty = true,
+              onChanged: null,
             ),
             const Divider(),
             Expanded(
@@ -118,7 +119,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                             ),
                             maxLines: null,
                             expands: true,
-                            onChanged: (_) => _isDirty = true,
+                            onChanged: null,
                           ),
                         ),
                         const Divider(),
@@ -152,7 +153,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       ),
                       maxLines: null,
                       expands: true,
-                      onChanged: (_) => _isDirty = true,
+                      onChanged: null,
                     ),
             ),
           ],

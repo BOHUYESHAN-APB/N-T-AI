@@ -6,6 +6,7 @@ class ArtifactCardWidget extends StatelessWidget {
   final String size;
   final VoidCallback? onDownload;
   final VoidCallback? onPreview;
+  final VoidCallback? onUseAsContext;
 
   const ArtifactCardWidget({
     super.key,
@@ -14,10 +15,14 @@ class ArtifactCardWidget extends StatelessWidget {
     this.size = "2.4 MB",
     this.onDownload,
     this.onPreview,
+    this.onUseAsContext,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    
     Color typeColor;
     IconData typeIcon;
 
@@ -47,9 +52,9 @@ class ArtifactCardWidget extends StatelessWidget {
       width: 200,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF2A2A35),
+        color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: theme.dividerColor.withAlpha(26)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -59,20 +64,26 @@ class ArtifactCardWidget extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: typeColor.withOpacity(0.2),
+                  color: typeColor.withAlpha(51),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(typeIcon, color: typeColor, size: 24),
               ),
               const Spacer(),
-              const Icon(Icons.more_vert, color: Colors.white30, size: 18),
+              if (onUseAsContext != null)
+                IconButton(
+                  tooltip: "设为追问依据",
+                  onPressed: onUseAsContext,
+                  icon: Icon(Icons.link, color: colorScheme.onSurfaceVariant, size: 18),
+                ),
+              Icon(Icons.more_vert, color: colorScheme.onSurfaceVariant, size: 18),
             ],
           ),
           const SizedBox(height: 12),
           Text(
             title,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: colorScheme.onSurface,
               fontSize: 14,
               fontWeight: FontWeight.w600,
             ),
@@ -81,8 +92,8 @@ class ArtifactCardWidget extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            "$type • $size",
-            style: const TextStyle(color: Colors.white38, fontSize: 11),
+            "${type.toUpperCase()} • $size",
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11),
           ),
           const SizedBox(height: 12),
           Row(
@@ -91,11 +102,11 @@ class ArtifactCardWidget extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: onPreview,
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white70,
-                    side: const BorderSide(color: Colors.white12),
+                    foregroundColor: colorScheme.primary,
+                    side: BorderSide(color: colorScheme.outline.withAlpha(77)),
                     padding: EdgeInsets.zero,
                   ),
-                  child: const Text("Preview", style: TextStyle(fontSize: 12)),
+                  child: const Text("预览/打开", style: TextStyle(fontSize: 12)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -112,7 +123,7 @@ class ArtifactCardWidget extends StatelessWidget {
                 ),
               ),
             ],
-          )
+          ),
         ],
       ),
     );
