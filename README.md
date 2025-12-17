@@ -46,6 +46,7 @@ If you find this project helpful, please consider supporting us:
 *   **Vision Capabilities**: 
     *   **Direct Input**: Support for multimodal interactions using GPT-4o, Claude 3.5 Sonnet, Qwen-VL, etc.
     *   **Vision Fallback Agent**: Automatically delegates image understanding to a specialized Vision Agent if the primary model lacks vision support.
+*   **Meme Service**: The AI can proactively send memes based on conversation context to enhance engagement (migrated to Python backend for advanced semantic matching).
 
 ### 2. Autonomous Agent System (ReAct)
 *   **Web Search & Browsing**: The system can autonomously search the web (DuckDuckGo, Bing, Baidu) and visit webpages to answer complex questions.
@@ -177,6 +178,12 @@ To control the "Brain" on your PC from your Android phone:
     *   Ensure both devices are on the same Wi-Fi network.
 
 ---
+
+## 🍎 Apple Developer Recruitment
+
+We welcome users with Apple devices and Apple Developer Program membership to collaborate with us on developing the iOS and macOS versions of the application.
+
+If no one is available to assist, I plan to purchase an M5 Mac mini after its release to handle this personally.
 
 ## 🗺️ Roadmap
 

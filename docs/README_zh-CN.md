@@ -44,6 +44,7 @@
     *   **直接输入**：支持 GPT-4o, Claude 3.5 Sonnet, Qwen-VL 等视觉模型进行多模态交互。
     *   **视觉代理回退 (Vision Fallback)**：如果主模型（如 DeepSeek-Chat）不支持图片，系统会自动调用专用的视觉 Agent（如 Qwen-VL）对图片进行描述，并将描述反馈给主模型，确保无缝的视觉体验。
 *   **拟人化消息流**：模拟真实人类的聊天节奏，将长回复拆分为多条短消息发送。
+*   **表情包服务 (Meme Service)**：AI 可以根据对话上下文主动发送表情包，增强互动的趣味性（已迁移至后端 Python 服务以支持更复杂的语义匹配）。
 
 ### 2. 自主智能体系统 (ReAct)
 *   **网络搜索与浏览**：系统可以自主搜索网络（DuckDuckGo, Bing, Baidu）并访问网页以回答复杂问题。
@@ -283,8 +284,11 @@ flutter build apk --release
 *   **OpenManus**:
     *   感谢其在 "深度研究" (Deep Research) 规划工作流、浏览器自动化策略以及 ReAct Agent 模式方面的宝贵参考。
     *   *许可证*: MIT License.
+*   **Skywork-Super-Agents**:
+    *   感谢其在 MCP Server 实现以及 Office 文档生成工具方面的参考。
+    *   *许可证*: The Unlicense.
 
-我们尊重开源社区，并严格遵守这些上游项目的 MIT 许可条款。
+我们尊重开源社区，并严格遵守这些上游项目的许可条款。
 
 ---
 
