@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.7%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.8%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Afdian-pink)](https://afdian.com/a/N-T-AI)
@@ -211,11 +211,11 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [ ] **Local LLM**: Support running small LLMs (e.g., Llama-3-8B-Quantized) directly on Android via MLC-LLM or MediaPipe.
 - [ ] **Result**: A fully offline-capable, privacy-focused AI companion app without external dependencies.
 
-### Phase 4: Linux Strategy & Commercial Compliance (Long-term)
-- [ ] **Distribution Selection**: 
-    - **Alpine Linux (Preferred for Bundling)**: Selected as the base for the bundled lightweight environment due to its MIT/BSD-friendly ecosystem and `musl` libc. This choice ensures that future commercial releases or secondary distributions avoid strict copyleft (GPL) implications, allowing for flexible licensing of proprietary extensions.
-    - **Ubuntu/Debian (User-Managed)**: Continued support for standard distributions for users who prefer full environment control.
-- [ ] **License Auditing**: Automated tools to track dependency licenses, ensuring clear separation between the open-core (AGPL/MIT) and potential future commercial modules.
+### Phase 4: Deep Research & Advanced Capabilities
+- [x] **Deep Research**: Preliminary implementation of autonomous search loop and Markdown report generation (currently supports DuckDuckGo).
+    - [ ] **Note & Knowledge Base Linkage**: Connect Deep Research with the built-in note system to export findings; allow AI to retrieve local knowledge base content.
+- [ ] **OS Control**: Grant Agent full control over a virtual system (Linux/Windows) within a secure container to operate browsers, write documents, etc.
+- [ ] **Excalidraw Multimodal RAG**: Implement multimodal RAG for whiteboard notes to improve retrieval and understanding of mixed text-and-image content.
 
 ### Future Research: Autonomous Behavior
 - [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).

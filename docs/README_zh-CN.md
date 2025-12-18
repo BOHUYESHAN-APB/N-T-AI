@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.7%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.8%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-爱发电-pink)](https://afdian.com/a/N-T-AI)
@@ -230,11 +230,13 @@ flutter build apk --release
 - [ ] **SQL 记忆系统优化**：针对大规模长期记忆数据设计索引与分层检索策略，保证在记忆变得庞大时仍能高效利用。
 
 ### 第三阶段：通用 AI Agent 与高级能力
-- [ ] **深度研究 (Deep Research)**: 支持访问专业数据库 (如校园网环境) 进行深度科学研究。
+- [ ] **深度研究 (Deep Research)**: 初步实现自主搜索循环与 Markdown 研报生成（当前支持 DuckDuckGo），支持访问网络进行深度研究。
+    - [ ] **笔记与知识库联动**: 打通深度研究与内置笔记系统，支持将研究成果导出为笔记；支持 AI 检索本地知识库内容辅助研究。
 - [ ] **操作系统控制**: 赋予 Agent 对安全容器内虚拟系统 (Linux/Windows) 的完整操控权，使其能操作浏览器、编写文档等。
 - [ ] **高级内容创作**: 生成高质量、非套模板的 PPT 和文档。
 - [ ] **数字生命/闲置模式**: 实现 "虚拟数字人" 功能，具备自主待机行为。
 - [ ] **多模型架构**: 协调大参数量模型与多个小参数量专用模型/Agent 协同工作。
+- [ ] **Excalidraw 多模态 RAG**: 针对白板笔记引入多模态 RAG 理解，提升对图文混合内容的检索能力。
 
 ### 第四阶段：工具链与生态
 - [ ] **Open Code CLI 集成**：

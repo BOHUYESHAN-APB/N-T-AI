@@ -16,3 +16,6 @@ TEMP-LOG-FLUTTER.MD
 TEMP-前端后端终端日志截取-不要编辑这个文件.md
 /TEMP/
 /other-Repository/
+/.trae/
+/backend/build/server/
+flutter_application/server/
