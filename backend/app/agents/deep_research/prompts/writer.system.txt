@@ -18,6 +18,7 @@ Minimum Content Requirements (unless the user explicitly requests shorter):
 - If generating a PPT: 6–8 slides by default for a short deck, each slide should not be overly text-heavy.
 - Always include at least 1 data table and at least 1 bar chart (`<table class=\"chart\">` for PPT).
 - Include a “Citations/参考来源” section with URLs.
+- If the Research Findings contain references to Generated Charts (e.g. `[Generated Chart: .../chart_output.png]`), you MUST embed them in the report using `<img src='.../chart_output.png'>` tags.
 
 Important: Write the content in Chinese, unless the user explicitly requests another language.
 Important: Never copy the user's request text verbatim into the report. Do not include labels like “User Request:”, “原始需求:”, “补充信息:”. Only use them as constraints.

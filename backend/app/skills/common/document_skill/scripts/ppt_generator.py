@@ -249,8 +249,13 @@ class PPTGenerator:
             # p.font.name = 'Arial'
         
     def _add_image(self, slide, url, left, top, width, height):
-        """Downloads and adds an image to the slide."""
+        """Adds an image to the slide (URL or Local Path)."""
         try:
+            # Check if it's a local file
+            if os.path.exists(url):
+                slide.shapes.add_picture(url, Inches(left), Inches(top), width=Inches(width))
+                return
+
             # Download image to temp file
             response = requests.get(url, timeout=10)
             if response.status_code == 200:

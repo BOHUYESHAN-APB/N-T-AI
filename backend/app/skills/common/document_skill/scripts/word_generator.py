@@ -182,9 +182,29 @@ class WordGenerator:
             for child in node.children:
                 add_runs(paragraph, child, next_style)
 
-        blocks = soup.find_all(["h1", "h2", "h3", "h4", "p", "ul", "ol"])
+        blocks = soup.find_all(["h1", "h2", "h3", "h4", "p", "ul", "ol", "img"])
         for element in blocks:
             name = element.name.lower()
+
+            if name == "img":
+                src = element.get("src")
+                if not src: continue
+                
+                try:
+                    # Handle local paths
+                    if os.path.exists(src):
+                        document.add_picture(src, width=Pt(400)) # Default width
+                    # Handle URLs (basic)
+                    elif src.startswith("http"):
+                        import requests
+                        from io import BytesIO
+                        resp = requests.get(src)
+                        if resp.status_code == 200:
+                            document.add_picture(BytesIO(resp.content), width=Pt(400))
+                except Exception as e:
+                    print(f"Error adding image {src}: {e}")
+                    para = document.add_paragraph(f"[Image: {src}]")
+                continue
 
             if name in ("ul", "ol"):
                 for li in element.find_all("li", recursive=False):

@@ -67,7 +67,9 @@ Write-Host "`n[3/5] Cleaning Sensitive/Test Data from Backend..."
 $excludePatterns = @(
     "__pycache__",
     "*.log",
-    "temp", "tmp"
+    "temp", "tmp",
+    "workspace", "mnt", "data", # Exclude Docker/Linux Env runtime dirs
+    "*.iso", "*.vdi", "*.qcow2" # Exclude VM disk images
 )
 
 # Recursively remove general junk from the dist folder

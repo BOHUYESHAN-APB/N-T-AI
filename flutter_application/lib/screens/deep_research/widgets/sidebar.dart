@@ -99,6 +99,9 @@ class _DeepResearchSidebarState extends State<DeepResearchSidebar> {
               },
             ),
           ),
+          
+          // 4. Linux Connection Button (Loaded from Plugin)
+          const LinuxConnectionButton(),
         ],
       ),
     );

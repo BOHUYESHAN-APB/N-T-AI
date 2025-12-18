@@ -75,6 +75,9 @@ app.include_router(audio_routes.router, prefix="/v1/audio", tags=["audio_v1"])
 # Deep Research Routes
 app.include_router(deep_research_routes.router, prefix="/api/deep-research", tags=["deep_research"])
 
+# Virtual Linux Environment Routes
+app.include_router(linux_routes.router, prefix="/api/linux", tags=["linux"])
+
 # Mount static files for Live2D/3D renderer
 static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
 if not os.path.exists(static_dir):

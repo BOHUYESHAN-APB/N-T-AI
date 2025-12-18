@@ -19,3 +19,12 @@ TEMP-前端后端终端日志截取-不要编辑这个文件.md
 /.trae/
 /backend/build/server/
 flutter_application/server/
+
+# Docker / Linux Env Temporary Files
+**/linux_env/workspace/
+**/linux_env/mnt/
+**/linux_env/data/
+**/*.iso
+**/*.vdi
+**/*.qcow2
+
