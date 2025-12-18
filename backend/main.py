@@ -445,6 +445,10 @@ async def post_frontend_logs(payload: FrontendLogs):
 async def get_frontend_logs():
     return {"errors": _frontend_recent_errors}
 
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.PROJECT_NAME} Backend (OpenAI Compatible)"}

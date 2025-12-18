@@ -1,7 +1,7 @@
-name: flutter_application
+﻿name: flutter_application
 description: A new Flutter project.
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.3.8-beta+32
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -20,6 +20,7 @@ dependencies:
   shared_preferences: ^2.2.2
   sqflite: ^2.3.2
   sqflite_common_ffi: ^2.3.2
+  path: ^1.9.0
   path_provider: ^2.1.2
   uuid: ^4.3.3
   
@@ -48,6 +49,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.1
+  msix: ^3.0.0
 
 flutter:
   uses-material-design: true
@@ -55,3 +57,13 @@ flutter:
   assets:
     - assets/
     - assets/excalidraw/
+    - assets/images/
+
+msix_config:
+  display_name: N-T-AI
+  publisher_display_name: N-T-AI Team
+  identity_name: N-T-AI
+  msix_version: 0.3.8.0
+  assets:
+    - path: server
+      destination: server

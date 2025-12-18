@@ -78,11 +78,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
   @override
   void initState() {
     super.initState();
+    // logToFile("FireflyScreen.initState started");
     globalPluginManager.ensureInitialized();
     _faceController = ExpressionController();
     // Bind expression stream to UI controller (best-effort)
     _faceSubscription = _brain.expressionAgent.bind(_faceController);
+    // logToFile("FireflyScreen.initState: Agents bound");
+    
     _loadSessions();
+    // logToFile("FireflyScreen.initState: Sessions loaded");
+
     _historySubscription = _chatHistory.updateStream.listen((_) {
       if (mounted) _loadSessions();
     });
@@ -123,22 +128,40 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
     // Start Initiative Loop
     _brain.startInitiativeLoop();
+    // logToFile("FireflyScreen.initState: Initiative loop started");
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // logToFile("FireflyScreen.postFrameCallback: checking first run");
       _checkFirstRun();
     });
+    // logToFile("FireflyScreen.initState completed");
+  }
+
+  // Simple file logger for Release mode debugging
+  void logToFile(String message) {
+    try {
+      final file = File('startup_log.txt');
+      final timestamp = DateTime.now().toIso8601String();
+      file.writeAsStringSync('[$timestamp] $message\n', mode: FileMode.append);
+    } catch (e) {
+      // Ignore logging errors
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // logToFile("FireflyScreen.didChangeDependencies started");
     final settings = SettingsScope.of(context).settings;
     if (_lastEnableTts && !settings.enableTts) {
       _stopTtsPlayback();
     }
     _lastEnableTts = settings.enableTts;
     // Check floating window setting and update accordingly
+    // logToFile("FireflyScreen.didChangeDependencies: updating floating window");
     _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
+    
+    // logToFile("FireflyScreen.didChangeDependencies: connecting websocket");
     _wsService.connect(settings.pythonBackendUrl);
     
     // Unify Broadcast Logic: Enable if ANY Live2D mode is active
@@ -147,6 +170,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       settings.showLive2D || 
                       settings.showLive2DMiniWindow;
     _brain.expressionAgent.setBroadcastEnabled(anyLive2D);
+    // logToFile("FireflyScreen.didChangeDependencies completed");
   }
 
   Future<void> _updateFloatingWindow(bool enabled, String backendUrl) async {
@@ -965,6 +989,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    logToFile("FireflyScreen.build started");
     final settingsController = SettingsScope.of(context);
     final settings = settingsController.settings;
     // final quickActions = settings.quickActions;

@@ -1,10 +1,22 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'screens/firefly_screen.dart';
 import 'screens/notes_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/memory_manager_screen.dart';
 import 'screens/tarot_screen.dart';
 import 'screens/deep_research/deep_research_screen.dart';
+
+// Simple file logger for Release mode debugging
+void logToFile(String message) {
+  try {
+    final file = File('startup_log.txt');
+    final timestamp = DateTime.now().toIso8601String();
+    file.writeAsStringSync('[$timestamp] $message\n', mode: FileMode.append);
+  } catch (e) {
+    // Ignore logging errors
+  }
+}
 
 class HomeShell extends StatefulWidget {
   const HomeShell({Key? key}) : super(key: key);
@@ -34,6 +46,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    logToFile("HomeShell.build");
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 900;

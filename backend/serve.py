@@ -18,18 +18,21 @@ from datetime import datetime, timedelta
 
 from app.core.config import settings
 
+CRYPTO_AVAILABLE = True
 try:
     from cryptography import x509
     from cryptography.x509.oid import NameOID
-    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
-except Exception as e:
-    print("Missing cryptography package. Please install dependencies (see backend/requirements.txt).")
-    raise
+except Exception:
+    CRYPTO_AVAILABLE = False
 
 
 def ensure_certs(cert_path: str, key_path: str, hostnames=("localhost", "127.0.0.1")):
+    if not CRYPTO_AVAILABLE:
+        raise RuntimeError("cryptography not available")
+
     cert_dir = os.path.dirname(os.path.abspath(cert_path))
     if not os.path.exists(cert_dir):
         os.makedirs(cert_dir, exist_ok=True)
@@ -46,7 +49,7 @@ def ensure_certs(cert_path: str, key_path: str, hostnames=("localhost", "127.0.0
     ])
 
     alt_names = [x509.DNSName(h) for h in hostnames]
-    san = x509.SubjectAltName(alt_names)
+    san = x509.SubjectAlternativeName(alt_names)
 
     cert = (
         x509.CertificateBuilder()
@@ -78,11 +81,14 @@ def ensure_certs(cert_path: str, key_path: str, hostnames=("localhost", "127.0.0
     return cert_path, key_path
 
 
-def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30):
-    """Rotate certs if older than rotate_days. Keep previous certs with timestamp suffix."""
+def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30) -> bool:
+    """Rotate certs if older than rotate_days. Keep previous certs with timestamp suffix.
+       Returns True if certs are valid/generated, False if generation failed.
+    """
     try:
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
-            return ensure_certs(cert_path, key_path)
+            ensure_certs(cert_path, key_path)
+            return True
 
         mtime = os.path.getmtime(cert_path)
         age_days = (datetime.utcnow() - datetime.fromtimestamp(mtime)).days
@@ -95,27 +101,102 @@ def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30)
             os.rename(key_path, archived_key)
             logging.info(f"Archived cert/key to {archived_cert} / {archived_key}")
             # Generate new
-            new_cert, new_key = ensure_certs(cert_path, key_path)
-            return new_cert, new_key
+            ensure_certs(cert_path, key_path)
+            return True
+        return True # Existing certs are fine
     except Exception as e:
-        logging.error(f"Error rotating certs: {e}")
-    return cert_path, key_path
+        logging.error(f"Error rotating/generating certs: {e}")
+        return False
 
 
 if __name__ == "__main__":
     import uvicorn
+    import traceback
+    import socket
+    import urllib.request
+    import ssl
 
-    use_https = bool(os.environ.get("USE_HTTPS", str(settings.USE_HTTPS)))
-    host = os.environ.get("HOST", settings.HOST)
-    port = int(os.environ.get("PORT", settings.PORT))
-    cert_path = os.environ.get("SSL_CERT_PATH", settings.SSL_CERT_PATH)
-    key_path = os.environ.get("SSL_KEY_PATH", settings.SSL_KEY_PATH)
+    try:
+        try:
+            from main import app as asgi_app
+        except Exception:
+            print("CRITICAL ERROR: Failed to import ASGI app from main.py")
+            traceback.print_exc()
+            print("\nPress Enter to exit...")
+            input()
+            raise
 
-    if use_https:
-        # Ensure certs exist and rotate if needed
-        rotate_certs_if_needed(cert_path, key_path, rotate_days=int(os.environ.get('CERT_ROTATE_DAYS', '30')))
-        print(f"Starting server with HTTPS at https://{host}:{port}")
-        uvicorn.run("main:app", host=host, port=port, ssl_certfile=cert_path, ssl_keyfile=key_path)
-    else:
-        print(f"Starting server with HTTP at http://{host}:{port}")
-        uvicorn.run("main:app", host=host, port=port)
+        is_frozen = bool(getattr(sys, "frozen", False))
+
+        if is_frozen:
+            use_https = os.environ.get("USE_HTTPS", "false").lower() == "true"
+        else:
+            use_https = os.environ.get("USE_HTTPS", str(settings.USE_HTTPS)).lower() == "true"
+
+        host = os.environ.get("HOST", settings.HOST)
+        port = int(os.environ.get("PORT", settings.PORT))
+        cert_path = os.environ.get("SSL_CERT_PATH", settings.SSL_CERT_PATH)
+        key_path = os.environ.get("SSL_KEY_PATH", settings.SSL_KEY_PATH)
+
+        def _can_connect(check_host: str, check_port: int) -> bool:
+            try:
+                with socket.create_connection((check_host, check_port), timeout=0.3):
+                    return True
+            except Exception:
+                return False
+
+        def _health_ok(check_url: str, insecure_ssl: bool) -> bool:
+            try:
+                context = ssl._create_unverified_context() if insecure_ssl else None
+                with urllib.request.urlopen(check_url, timeout=0.6, context=context) as resp:
+                    return 200 <= int(resp.status) < 300
+            except Exception:
+                return False
+
+        probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+        if _can_connect(probe_host, port):
+            scheme = "https" if use_https else "http"
+            health_url = f"{scheme}://{probe_host}:{port}/health"
+            if _health_ok(health_url, insecure_ssl=use_https):
+                print(f"Backend already running at {scheme}://{probe_host}:{port}")
+                sys.exit(0)
+
+            print(f"CRITICAL ERROR: Port {port} is already in use.")
+            print("If you want a different port, set environment variable PORT and restart.")
+            print("\nPress Enter to exit...")
+            input()
+            sys.exit(1)
+
+        if use_https:
+            if not CRYPTO_AVAILABLE:
+                print("WARNING: cryptography unavailable. Falling back to HTTP.")
+                use_https = False
+            else:
+                certs_ok = rotate_certs_if_needed(
+                    cert_path,
+                    key_path,
+                    rotate_days=int(os.environ.get("CERT_ROTATE_DAYS", "30")),
+                )
+                if certs_ok and os.path.exists(cert_path) and os.path.exists(key_path):
+                    print(f"Starting server with HTTPS at https://{host}:{port}")
+                    uvicorn.run(
+                        asgi_app,
+                        host=host,
+                        port=port,
+                        ssl_certfile=cert_path,
+                        ssl_keyfile=key_path,
+                    )
+                else:
+                    print("WARNING: Certificate init failed. Falling back to HTTP.")
+                    use_https = False
+
+        if not use_https:
+            print(f"Starting server with HTTP at http://{host}:{port}")
+            uvicorn.run(asgi_app, host=host, port=port)
+        else:
+            pass
+    except Exception as e:
+        print("CRITICAL ERROR DURING SERVER STARTUP:")
+        traceback.print_exc()
+        print("\nPress Enter to exit...")
+        input()

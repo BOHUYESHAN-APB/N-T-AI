@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'settings.dart';
 import '../services/ai_client.dart';
+import '../core/services/backend_service.dart';
 
 class SettingsController extends ChangeNotifier {
   static const _kThemeMode = 'settings.themeMode';
@@ -1303,6 +1304,7 @@ class SettingsController extends ChangeNotifier {
   Future<void> setPythonBackendUrl(String v) async {
     _settings = _settings.copyWith(pythonBackendUrl: v);
     await _prefs.setString(_kPythonBackendUrl, v);
+    BackendService().updateUrl(v);
     notifyListeners();
   }
 

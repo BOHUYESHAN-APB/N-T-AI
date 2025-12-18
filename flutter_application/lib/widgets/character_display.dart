@@ -46,7 +46,12 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   @override
   void initState() {
     super.initState();
-    _initWebView();
+    // Delay WebView initialization to avoid blocking the main thread during startup
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _initWebView();
+      }
+    });
 
     // NOTE: We no longer listen to streams here for local injection.
     // Instead, we rely on the Unified WebSocket Broadcast (handled by ExpressionAgentService -> Backend -> WebSocket).
@@ -123,7 +128,9 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
 
   Future<void> _initWindowsWebView(String url) async {
     try {
-      await _windowsController.initialize();
+      if (!_windowsController.value.isInitialized) {
+        await _windowsController.initialize();
+      }
       await _windowsController.setBackgroundColor(Colors.transparent);
       await _windowsController.setPopupWindowPolicy(
         WebviewPopupWindowPolicy.deny,

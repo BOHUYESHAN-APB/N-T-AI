@@ -1,0 +1,19 @@
+Starting Application...
+COM Initialized
+DartProject Initialized
+FlutterWindow Created
+Calling window.Create
+Win32Window::Create start
+WindowClass retrieved
+Monitor retrieved
+DPI retrieved: 192
+CreateWindow result: success
+Theme updated
+FlutterWindow::OnCreate start
+Win32Window::OnCreate success
+FlutterViewController created
+Registering plugins...
+Plugins registered
+Child content set
+Window Created Successfully
+Entering Message Loop

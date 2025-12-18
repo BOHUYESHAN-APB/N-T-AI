@@ -7,6 +7,8 @@ import '../../../settings/settings.dart';
 import '../../../settings/settings_controller.dart';
 import '../../../plugins/plugin_manager.dart';
 import '../../../plugins/base_plugin.dart';
+import '../../../core/services/backend_service.dart';
+import 'package:flutter/foundation.dart';
 
 class CapabilitiesTab extends StatelessWidget {
   const CapabilitiesTab({Key? key}) : super(key: key);

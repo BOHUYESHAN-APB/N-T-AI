@@ -101,6 +101,11 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# Copy server directory to build output
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../server"
+        DESTINATION "${CMAKE_INSTALL_PREFIX}"
+        USE_SOURCE_PERMISSIONS)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
