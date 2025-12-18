@@ -106,9 +106,10 @@ Copy-Item -Path $backendDistDir -Destination $frontendServerDir -Recurse -Force
 # 5. Build Flutter Windows
 Write-Host "`n[5/5] Building Flutter Windows Release..."
 Push-Location $flutterAppDir
-& "C:\Users\BoHuYeShan\flutter\flutter\bin\flutter.bat" clean
-& "C:\Users\BoHuYeShan\flutter\flutter\bin\flutter.bat" pub get
-& "C:\Users\BoHuYeShan\flutter\flutter\bin\flutter.bat" build windows --release
+flutter clean
+flutter pub get
+flutter build windows --release
+
 
 # 6. Copy Backend to Release Output Directory (Fix for standalone EXE)
 $releaseOutputDir = Join-Path $flutterAppDir "build\windows\x64\runner\Release"
@@ -146,5 +147,13 @@ if (-not (Test-Path $releaseOutputDir)) {
 Write-Host "`n=========================================="
 Write-Host "Build Complete!"
 Write-Host "Output: $releaseOutputDir"
+
+# 7. Create ZIP Archive
+$zipPath = Join-Path $flutterAppDir "build\windows\x64\runner\Release\N-T-AI-Windows-Release.zip"
+Write-Host "`n[7/7] Creating ZIP Archive: $zipPath"
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Compress-Archive -Path "$releaseOutputDir\*" -DestinationPath $zipPath -Force
+Write-Host "ZIP Archive created successfully."
+
 Write-Host "=========================================="
 Pop-Location

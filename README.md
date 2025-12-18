@@ -61,10 +61,11 @@ If you find this project helpful, please consider supporting us:
     *   **Advanced**: Adds detailed personality traits, curiosity, and empathy layers.
     *   **Full (Default)**: The complete "Digital Life" experience, including self-awareness, emotional memory, and autonomous behavior simulation.
 
-### 4. Cross-Platform Display
-*   **Standard Mode**: Full-screen chat interface with Live2D character.
-*   **Mini-Window Mode**: Compact overlay showing only the Live2D character, ideal for multitasking.
-*   **Floating Window (Android)**: System-level floating window that stays on top of other apps.
+### 4. Cross-Platform Support
+*   **Windows**: MSIX installer, portable ZIP, and Docker support.
+*   **Linux**: **Docker** deployment is recommended for self-hosting.
+*   **macOS**: **Docker** deployment is strongly recommended due to signing restrictions.
+*   **Android**: APK installer available.
 
 ### 5. Notes, Whiteboard & Knowledge Base
 *   **Text Notes**: Built-in note system with basic Markdown support. Advanced Obsidian-like real-time overlay preview is currently in development (see Roadmap).
@@ -202,7 +203,8 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
 - [ ] **Advanced Note Editor**: Implement Obsidian-style real-time overlay preview and seamless edit/view mode switching.
 - [ ] **Enhanced Live2D**: Continued optimization of motion smoothing and expression accuracy.
-- [ ] **Claude Skills + MCP**: Evaluate ability boxing and layered loading to integrate specialized task skills alongside MCP tool connectivity.
+- [ ] **Claude Skills & Deep Capability Enhancement (Next Core Focus)**:
+    - **Phase 1 Goal**: Significantly enhance the quality and depth of "Deep Research" outputs and document editing capabilities.
 - [ ] **Knowledge Base & RAG**: Import structured Markdown/notes and external professional knowledge bases, and expose them as a Retrieval-Augmented Generation source for Firefly.
 - [ ] **SQL Memory Optimization**: Optimize the long-term memory SQL backend (indexes, query strategies, and data layout) for large-scale memory retrieval without degrading latency.
 

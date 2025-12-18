@@ -20,7 +20,8 @@ FROM nginx:alpine
 COPY --from=build /app/build/web /usr/share/nginx/html
 
 # Copy custom Nginx config
-COPY docker/astra-me-system/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/n-t-ai-system/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
 
 # Expose port
 EXPOSE 80

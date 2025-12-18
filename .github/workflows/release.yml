@@ -97,14 +97,25 @@ jobs:
           [IO.File]::WriteAllBytes("$pwd/flutter_application/certificate.pfx", $pfx_cert_byte)
         shell: powershell
 
-      - name: Get Dependencies
-        run: flutter pub get
-        working-directory: flutter_application
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+          playwright install chromium
+        shell: pwsh
+
+      - name: Build Windows Release (Backend + Frontend)
+        shell: pwsh
+        run: ./scripts/build_windows_release.ps1
 
       - name: Configure MSIX Signing
         # We use msix:create but we need to ensure pubspec.yaml or msix_config uses the certificate
         # Alternatively, we can pass arguments if the package supports it, or edit pubspec on the fly.
-        # Assuming msix config in pubspec reads from a file or we use the default test cert if not configured.
         # For production, we usually configure msix_config in pubspec.yaml to point to the certificate.
         # Here we assume the user will configure pubspec.yaml to point to 'certificate.pfx'
         run: |
@@ -113,7 +124,7 @@ jobs:
         working-directory: flutter_application
 
       - name: Build MSIX
-        run: dart run msix:create --certificate-path certificate.pfx --certificate-password "${{ secrets.WINDOWS_CERT_PASSWORD }}"
+        run: dart run msix:create --build-windows=false --certificate-path certificate.pfx --certificate-password "${{ secrets.WINDOWS_CERT_PASSWORD }}"
         working-directory: flutter_application
         
       - name: Upload MSIX Artifact
@@ -121,6 +132,12 @@ jobs:
         with:
           name: app-release-msix
           path: flutter_application/build/windows/x64/runner/Release/*.msix
+
+      - name: Upload ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-windows-zip
+          path: flutter_application/build/windows/x64/runner/Release/*.zip
 
   create-release:
     name: Create GitHub Release

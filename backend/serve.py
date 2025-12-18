@@ -163,8 +163,6 @@ if __name__ == "__main__":
 
             print(f"CRITICAL ERROR: Port {port} is already in use.")
             print("If you want a different port, set environment variable PORT and restart.")
-            print("\nPress Enter to exit...")
-            input()
             sys.exit(1)
 
         if use_https:
