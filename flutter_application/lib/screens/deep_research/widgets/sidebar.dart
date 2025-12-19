@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/services/chat_history_service.dart';
+// Import the plugin widget (simulated dynamic loading)
+import '../../../plugins/linux_terminal/linux_connection_button.dart';
 
 class DeepResearchSidebar extends StatefulWidget {
   final Function(String?)? onSessionSelected;

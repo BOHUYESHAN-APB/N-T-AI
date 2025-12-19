@@ -13,7 +13,7 @@ from app.models.database import create_db_and_tables
 from app.services.chat_service import ChatService
 from app.core.logger import logger
 from app.core.logger import get_recent_errors, set_recent_error_max
-from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes, deep_research_routes
+from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes, deep_research_routes, linux_routes
 from app.plugins import startup_plugins, shutdown_plugins, get_plugin
 from app.plugins.bilibili_live import BilibiliLivePlugin
 

@@ -1,6 +1,17 @@
-FROM alpine:latest
+FROM alpine:3.23
 
-# Install dependencies
+ARG USE_CHINA_MIRROR=false
+
+# 1. Setup Mirrors (must be first to speed up apk)
+RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
+        sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories; \
+    fi
+
+# 2. Create User (Security)
+# -S = system user, -G = group, -s = shell
+RUN addgroup -S ntai && adduser -S ntai -G ntai -s /bin/bash
+
+# 3. Install dependencies
 # xvfb: Virtual Display
 # fluxbox: Minimal Window Manager
 # x11vnc: VNC Server
@@ -19,28 +30,29 @@ RUN apk add --no-cache \
     git \
     socat \
     ttf-freefont \
-    procps
+    procps \
+    py3-numpy py3-pandas py3-requests
 
-# Install noVNC
+# 4. Install noVNC
 RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc \
     && git clone --depth 1 https://github.com/novnc/websockify /opt/novnc/utils/websockify \
-    && ln -s /opt/novnc/vnc.html /opt/novnc/index.html
+    && ln -s /opt/novnc/vnc.html /opt/novnc/index.html \
+    && chown -R ntai:ntai /opt/novnc
 
-# Install common Python tools for the agent (Pandas, Requests, etc.)
-# Note: Alpine compiles pandas/numpy from source which takes forever. 
-# Using --only-binary or pre-built packages if possible, or sticking to system packages.
-# For Alpine, it's often better to use 'py3-pandas' 'py3-numpy' from apk if available to avoid compilation hell.
-RUN apk add --no-cache py3-numpy py3-pandas py3-requests
-
-# Setup Workspace
+# 5. Setup Workspace
 WORKDIR /workspace
+RUN chown -R ntai:ntai /workspace
 
 # Configuration
 ENV DISPLAY=:0
 ENV RESOLUTION=1280x800
+ENV HOME=/home/ntai
 
 # Copy Supervisor config
 COPY supervisord.conf /etc/supervisord.conf
+
+# Switch to non-root user
+USER ntai
 
 # Expose ports
 EXPOSE 6080 5900

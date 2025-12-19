@@ -25,6 +25,22 @@ This is the Python backend for the Astra-Me project, implementing the "Digital L
 
 ## Running
 
+### Option 1: Using the Serve Script (Recommended)
+This method handles SSL certificate generation (if enabled) and health checks.
+
+From the `backend` directory:
+```bash
+python serve.py
+# OR
+python -m serve
+```
+
+From the project root:
+```bash
+python -m backend
+```
+
+### Option 2: Direct Uvicorn (Development)
 ```bash
 uvicorn main:app --reload
 ```

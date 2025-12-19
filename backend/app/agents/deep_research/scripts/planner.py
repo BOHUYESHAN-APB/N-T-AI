@@ -53,7 +53,7 @@ class Planner:
         except:
             return "New Project"
 
-    async def analyze_request(self, user_input: str, memory_context: str, current_date: str) -> str:
+    async def analyze_request(self, user_input: str, memory_context: str, current_date: str, depth: str = "Medium", max_steps: int = 5) -> str:
         client = self._get_client()
         model = self._get_model()
 
@@ -71,6 +71,9 @@ class Planner:
 
         sys_prompt = sys_template.replace("{{current_date}}", current_date)
         user_prompt = user_template.replace("{{user_input}}", user_input).replace("{{memory_context}}", memory_context)
+
+        # Inject user preference
+        user_prompt += f"\n\n[System Note]\nUser requested research depth: {depth}\nMax steps allowed: {max_steps}\nPlease generate a plan that respects these constraints."
 
         response = await client.chat.completions.create(
             model=model,

@@ -3,6 +3,7 @@ import subprocess
 import shutil
 import asyncio
 import os
+import locale
 from typing import Dict, Any, Optional
 from ..base import BasePlugin
 
@@ -109,10 +110,24 @@ class LinuxEnvPlugin(BasePlugin):
         
         if not image_check.stdout.strip():
             print(f"[{self.name}] Building Docker image '{self.IMAGE_NAME}' (this may take a while)...")
+            
+            # Detect Locale for Mirror Selection
+            use_china_mirror = "false"
+            try:
+                # Basic locale check (e.g. 'zh_CN', 'Chinese')
+                sys_lang = locale.getdefaultlocale()[0]
+                if sys_lang and "zh" in sys_lang.lower():
+                    use_china_mirror = "true"
+                    print(f"[{self.name}] Detected Chinese locale. Using Tsinghua Mirrors.")
+            except Exception:
+                pass
+
             try:
                 # Run build in the plugin directory where Dockerfile is located
                 subprocess.run(
-                    ["docker", "build", "-t", self.IMAGE_NAME, "."],
+                    ["docker", "build", 
+                     "--build-arg", f"USE_CHINA_MIRROR={use_china_mirror}",
+                     "-t", self.IMAGE_NAME, "."],
                     cwd=self.plugin_dir,
                     check=True
                 )
@@ -168,6 +183,7 @@ class LinuxEnvPlugin(BasePlugin):
             cmd_list = []
             if self._env_type == "docker":
                 # docker exec ntai_sandbox_core bash -c "command"
+                # Use --user ntai if needed, but container already runs as ntai
                 cmd_list = ["docker", "exec", self.CONTAINER_NAME, "bash", "-c", command]
             elif self._env_type == "wsl":
                 # wsl -e bash -c "command"

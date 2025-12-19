@@ -109,12 +109,14 @@ def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30)
         return False
 
 
-if __name__ == "__main__":
+
+def main():
     import uvicorn
     import traceback
     import socket
     import urllib.request
     import ssl
+    import json # Add json import
 
     try:
         try:
@@ -154,16 +156,46 @@ if __name__ == "__main__":
                 return False
 
         probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
-        if _can_connect(probe_host, port):
-            scheme = "https" if use_https else "http"
-            health_url = f"{scheme}://{probe_host}:{port}/health"
-            if _health_ok(health_url, insecure_ssl=use_https):
-                print(f"Backend already running at {scheme}://{probe_host}:{port}")
-                sys.exit(0)
+        
+        # Try finding an available port if the default is taken
+        start_port = port
+        max_retries = 10
+        actual_port = start_port
+        
+        for i in range(max_retries):
+            check_port = start_port + i
+            if not _can_connect(probe_host, check_port):
+                # Port is free!
+                actual_port = check_port
+                break
+            else:
+                # Port is taken, check if it's our own service
+                scheme = "https" if use_https else "http"
+                health_url = f"{scheme}://{probe_host}:{check_port}/health"
+                if _health_ok(health_url, insecure_ssl=use_https):
+                    print(f"Backend already running at {scheme}://{probe_host}:{check_port}")
+                    # Write info file even if already running, so frontend can find it
+                    _write_server_info(scheme, probe_host, check_port)
+                    sys.exit(0)
+                print(f"Port {check_port} is busy, trying next...")
 
-            print(f"CRITICAL ERROR: Port {port} is already in use.")
-            print("If you want a different port, set environment variable PORT and restart.")
-            sys.exit(1)
+        port = actual_port
+        
+        # Helper to write server info
+        def _write_server_info(scheme, host, port):
+            try:
+                info = {
+                    "url": f"{scheme}://{host}:{port}",
+                    "port": port,
+                    "host": host,
+                    "pid": os.getpid(),
+                    "scheme": scheme
+                }
+                with open("server_info.json", "w") as f:
+                    json.dump(info, f)
+                print(f"[SERVER_INFO] {json.dumps(info)}")
+            except Exception as e:
+                print(f"Error writing server_info.json: {e}")
 
         if use_https:
             if not CRYPTO_AVAILABLE:
@@ -177,6 +209,7 @@ if __name__ == "__main__":
                 )
                 if certs_ok and os.path.exists(cert_path) and os.path.exists(key_path):
                     print(f"Starting server with HTTPS at https://{host}:{port}")
+                    _write_server_info("https", probe_host, port)
                     uvicorn.run(
                         asgi_app,
                         host=host,
@@ -190,6 +223,7 @@ if __name__ == "__main__":
 
         if not use_https:
             print(f"Starting server with HTTP at http://{host}:{port}")
+            _write_server_info("http", probe_host, port)
             uvicorn.run(asgi_app, host=host, port=port)
         else:
             pass
@@ -198,3 +232,7 @@ if __name__ == "__main__":
         traceback.print_exc()
         print("\nPress Enter to exit...")
         input()
+
+
+if __name__ == "__main__":
+    main()

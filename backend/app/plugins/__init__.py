@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from ..base import BasePlugin
+from .base import BasePlugin
 from .linux_env.plugin import LinuxEnvPlugin
 
 # Registry of available plugins

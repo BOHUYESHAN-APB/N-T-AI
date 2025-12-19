@@ -269,6 +269,8 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
       request.body = jsonEncode({
         'query': query,
         'session_id': _currentSessionId,
+        'depth': settings.deepResearch.searchDepth,
+        'max_steps': settings.deepResearch.maxSteps,
         'model_config_override': modelConfigOverride,
         'context_files': (_followupArtifactPath != null && _followupArtifactTitle != null)
             ? [

@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import 'tabs/general_tab.dart';
 import 'tabs/providers_tab.dart';
-import 'tabs/agents_tab.dart';
-import 'tabs/capabilities_tab.dart';
-import 'tabs/data_tab.dart';
-import 'tabs/about_tab.dart';
-
+import 'tabs/default_capabilities_tab.dart';
 import 'tabs/deep_research_tab.dart';
+import 'tabs/plugins_tab.dart';
+import 'tabs/about_tab.dart';
 
 class SettingsScreen extends StatefulWidget {
   final int initialIndex;
@@ -23,11 +21,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   final List<Widget> _tabs = const [
     GeneralTab(),
-    ProvidersTab(),
-    AgentsTab(),
-    CapabilitiesTab(),
+    DefaultCapabilitiesTab(),
     DeepResearchTab(),
-    DataTab(),
+    PluginsTab(),
+    ProvidersTab(),
     AboutTab(),
   ];
 
@@ -56,11 +53,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               tabAlignment: TabAlignment.start,
               tabs: [
                 Tab(icon: const Icon(Icons.tune_outlined), text: l10n.tabGeneral),
+                const Tab(icon: Icon(Icons.auto_awesome_outlined), text: '默认能力 (Default)'),
+                const Tab(icon: Icon(Icons.science_outlined), text: '深度研究 (Deep Research)'),
+                const Tab(icon: Icon(Icons.extension_outlined), text: '插件 (Plugins)'),
                 Tab(icon: const Icon(Icons.cloud_outlined), text: l10n.tabProviders),
-                Tab(icon: const Icon(Icons.smart_toy_outlined), text: "${l10n.tabAgents} (经典功能)"),
-                Tab(icon: const Icon(Icons.auto_awesome_outlined), text: "${l10n.tabCapabilities} (经典功能)"),
-                const Tab(icon: Icon(Icons.science_outlined), text: '研究'),
-                Tab(icon: const Icon(Icons.storage_outlined), text: l10n.tabData),
                 Tab(icon: const Icon(Icons.info_outline), text: l10n.tabAbout),
               ],
             ),
@@ -80,19 +76,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: _tabs[_selectedIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
-        onDestinationSelected: (int index) {
+        onDestinationSelected: (index) {
           setState(() {
             _selectedIndex = index;
           });
         },
         destinations: [
-          NavigationDestination(icon: const Icon(Icons.tune_outlined), selectedIcon: const Icon(Icons.tune), label: l10n.tabGeneral),
-          NavigationDestination(icon: const Icon(Icons.cloud_outlined), selectedIcon: const Icon(Icons.cloud), label: l10n.tabProviders),
-          NavigationDestination(icon: const Icon(Icons.smart_toy_outlined), selectedIcon: const Icon(Icons.smart_toy), label: "${l10n.tabAgents} (经典功能)"),
-          NavigationDestination(icon: const Icon(Icons.auto_awesome_outlined), selectedIcon: const Icon(Icons.auto_awesome), label: "${l10n.tabCapabilities} (经典功能)"),
-          const NavigationDestination(icon: Icon(Icons.science_outlined), selectedIcon: Icon(Icons.science), label: '研究'), // New tab label
-          NavigationDestination(icon: const Icon(Icons.storage_outlined), selectedIcon: const Icon(Icons.storage), label: l10n.tabData),
-          NavigationDestination(icon: const Icon(Icons.info_outline), selectedIcon: const Icon(Icons.info), label: l10n.tabAbout),
+          NavigationDestination(
+            icon: const Icon(Icons.tune_outlined),
+            label: l10n.tabGeneral,
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.auto_awesome_outlined),
+            label: '能力',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.science_outlined),
+            label: '研究',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.extension_outlined),
+            label: '插件',
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.cloud_outlined),
+            label: l10n.tabProviders,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.info_outline),
+            label: l10n.tabAbout,
+          ),
         ],
       ),
     );

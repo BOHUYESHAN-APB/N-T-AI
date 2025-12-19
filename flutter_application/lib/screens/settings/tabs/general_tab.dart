@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';

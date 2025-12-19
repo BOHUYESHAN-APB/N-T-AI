@@ -79,33 +79,45 @@ class DeepResearchSettings {
   final String? plannerProviderId; // Model for Planning
   final String? researcherProviderId; // Model for Search & Analysis
   final String? writerProviderId; // Model for Writing Reports
+  final String searchDepth; // 'low', 'medium', 'high', 'professional'
+  final int maxSteps;
 
   const DeepResearchSettings({
     this.plannerProviderId,
     this.researcherProviderId,
     this.writerProviderId,
+    this.searchDepth = 'medium',
+    this.maxSteps = 5,
   });
 
   DeepResearchSettings copyWith({
     String? plannerProviderId,
     String? researcherProviderId,
     String? writerProviderId,
+    String? searchDepth,
+    int? maxSteps,
   }) => DeepResearchSettings(
     plannerProviderId: plannerProviderId ?? this.plannerProviderId,
     researcherProviderId: researcherProviderId ?? this.researcherProviderId,
     writerProviderId: writerProviderId ?? this.writerProviderId,
+    searchDepth: searchDepth ?? this.searchDepth,
+    maxSteps: maxSteps ?? this.maxSteps,
   );
 
   Map<String, dynamic> toJson() => {
     'plannerProviderId': plannerProviderId,
     'researcherProviderId': researcherProviderId,
     'writerProviderId': writerProviderId,
+    'searchDepth': searchDepth,
+    'maxSteps': maxSteps,
   };
 
   factory DeepResearchSettings.fromJson(Map<String, dynamic> json) => DeepResearchSettings(
     plannerProviderId: json['plannerProviderId'] as String?,
     researcherProviderId: json['researcherProviderId'] as String?,
     writerProviderId: json['writerProviderId'] as String?,
+    searchDepth: json['searchDepth'] as String? ?? 'medium',
+    maxSteps: json['maxSteps'] as int? ?? 5,
   );
 }
 
@@ -435,14 +447,14 @@ class AppSettings {
     this.showLive2DMiniWindow = false,
     this.enableFloatingWindow = false, // Default to false
     this.live2dDebug = false, // 默认关闭调试信息
-    this.enableBrowser = false,
+    this.enableBrowser = true,
     this.enableSearchRetry = true,
     this.enableNoteAccess = false,
     this.showAgentThoughts = false,
     this.mcpServers = const [],
     this.agents = const [],
     this.deepResearch = const DeepResearchSettings(),
-    this.enablePythonBackend = false,
+    this.enablePythonBackend = true,
     this.pythonBackendUrl = 'http://localhost:8000',
     this.enableDeepResearch = false,
     this.searchRegion = SearchRegionOption.auto,

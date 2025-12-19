@@ -73,6 +73,61 @@ class DeepResearchConfigDialog extends StatelessWidget {
                   );
                 },
               ),
+              
+              const SizedBox(height: 16),
+              const Divider(color: Colors.white12),
+              const SizedBox(height: 16),
+              const Text("策略配置",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+
+              // Search Depth
+              DropdownButtonFormField<String>(
+                value: settings.deepResearch.searchDepth,
+                dropdownColor: const Color(0xFF2E2E3E),
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: '研究深度',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                  enabledBorder:
+                      OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'low', child: Text('Low - 快速概览')),
+                  DropdownMenuItem(value: 'medium', child: Text('Medium - 标准报告')),
+                  DropdownMenuItem(value: 'high', child: Text('High - 深度挖掘')),
+                  DropdownMenuItem(
+                      value: 'professional', child: Text('Professional - 专家综述')),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    settingsController.updateDeepResearchSettings(
+                        settings.deepResearch.copyWith(searchDepth: v));
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // Max Steps
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("最大步数", style: TextStyle(color: Colors.white70)),
+                  Text("${settings.deepResearch.maxSteps}",
+                      style: const TextStyle(color: Colors.white)),
+                ],
+              ),
+              Slider(
+                value: settings.deepResearch.maxSteps.toDouble(),
+                min: 1,
+                max: 20,
+                divisions: 19,
+                activeColor: Theme.of(context).colorScheme.primary,
+                onChanged: (v) => settingsController.updateDeepResearchSettings(
+                  settings.deepResearch.copyWith(maxSteps: v.toInt()),
+                ),
+              ),
             ],
           ),
         ),

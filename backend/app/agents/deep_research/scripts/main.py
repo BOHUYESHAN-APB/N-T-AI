@@ -43,7 +43,7 @@ class DeepResearchAgent:
             pass
         return ""
 
-    async def run_stream(self, user_input: str, context_files: List[Dict] = []):
+    async def run_stream(self, user_input: str, context_files: List[Dict] = [], depth: str = "Medium", max_steps: int = 5):
         """
         Main orchestration loop. Yields events.
         """
@@ -58,7 +58,7 @@ class DeepResearchAgent:
             "title": project_title
         }
         
-        self._append_research_log(f"# Research Log: {project_title}\n\n**Date**: {current_date}\n**Request**: {user_input}\n\n---\n")
+        self._append_research_log(f"# Research Log: {project_title}\n\n**Date**: {current_date}\n**Request**: {user_input}\n**Depth**: {depth}\n\n---\n")
 
         # Context handling
         memory_context = ""
@@ -78,7 +78,7 @@ class DeepResearchAgent:
         # 1. Planner Phase
         yield {"type": "step_start", "step": "Planning", "status": "Analyzing request..."}
         
-        plan_response_json = await self.planner.analyze_request(user_input, memory_context, current_date)
+        plan_response_json = await self.planner.analyze_request(user_input, memory_context, current_date, depth=depth, max_steps=max_steps)
         
         try:
             plan_data = json.loads(plan_response_json)

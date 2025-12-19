@@ -9,7 +9,7 @@ from pathlib import Path
 import io
 
 # Import our new office tools
-from app.tools.office_suite.office_processor import OfficeProcessor
+from app.tools.office_suite import OfficeProcessor
 from docx import Document
 import pdfplumber
 from pptx import Presentation

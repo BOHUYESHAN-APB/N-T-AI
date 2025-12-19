@@ -322,41 +322,41 @@ class Live2DManager {
 
         // [DEBUG] Dump all available parameters to help identify the correct mouth parameter
         const dumpAllParameters = () => {
-             const msg = '[Live2D DEBUG] Dumping all available parameters:';
-             console.log(msg);
-             if (window.logToScreen) window.logToScreen(msg);
+             // const msg = '[Live2D DEBUG] Dumping all available parameters:';
+             // console.log(msg);
+             // if (window.logToScreen) window.logToScreen(msg);
 
-             const paramCount = coreModel.getParameterCount ? coreModel.getParameterCount() : 
-                                (coreModel._parameterCount || (coreModel._parameterIds ? coreModel._parameterIds.length : 0));
+             // const paramCount = coreModel.getParameterCount ? coreModel.getParameterCount() : 
+             //                    (coreModel._parameterCount || (coreModel._parameterIds ? coreModel._parameterIds.length : 0));
              
-             if (coreModel._parameterIds) {
-                 console.log('[Live2D DEBUG] _parameterIds:', coreModel._parameterIds);
-             }
+             // if (coreModel._parameterIds) {
+             //     console.log('[Live2D DEBUG] _parameterIds:', coreModel._parameterIds);
+             // }
 
-             let mouthParamsFound = [];
-             for (let i = 0; i < paramCount; i++) {
-                 let id = null;
-                 if (coreModel.getParameterId) {
-                     id = coreModel.getParameterId(i);
-                 } else if (coreModel._parameterIds) {
-                     id = coreModel._parameterIds[i];
-                 }
+             // let mouthParamsFound = [];
+             // for (let i = 0; i < paramCount; i++) {
+             //     let id = null;
+             //     if (coreModel.getParameterId) {
+             //         id = coreModel.getParameterId(i);
+             //     } else if (coreModel._parameterIds) {
+             //         id = coreModel._parameterIds[i];
+             //     }
                  
-                 // If we found an ID, check if it looks like a mouth param
-                 if (id) {
-                     if (id.toLowerCase().includes('mouth') || id.toLowerCase().includes('open')) {
-                         const info = `[Live2D DEBUG] Potential Mouth Param [${i}]: ${id}`;
-                         console.log(info);
-                         if (window.logToScreen) window.logToScreen(info);
-                         mouthParamsFound.push(id);
-                     }
-                 }
-             }
-             if (mouthParamsFound.length === 0) {
-                 if (window.logToScreen) window.logToScreen('[Live2D DEBUG] NO MOUTH PARAMS FOUND!', 'error');
-             }
+             //     // If we found an ID, check if it looks like a mouth param
+             //     if (id) {
+             //         if (id.toLowerCase().includes('mouth') || id.toLowerCase().includes('open')) {
+             //             const info = `[Live2D DEBUG] Potential Mouth Param [${i}]: ${id}`;
+             //             console.log(info);
+             //             if (window.logToScreen) window.logToScreen(info);
+             //             mouthParamsFound.push(id);
+             //         }
+             //     }
+             // }
+             // if (mouthParamsFound.length === 0) {
+             //     if (window.logToScreen) window.logToScreen('[Live2D DEBUG] NO MOUTH PARAMS FOUND!', 'error');
+             // }
         };
-        try { dumpAllParameters(); } catch (e) { console.error('[Live2D DEBUG] Failed to dump params:', e); }
+        // try { dumpAllParameters(); } catch (e) { console.error('[Live2D DEBUG] Failed to dump params:', e); }
 
         // Cache indices
         const mouthIds = [
@@ -3204,9 +3204,9 @@ class Live2DManager {
         if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
         
         if (!silent) {
-            console.log('[Motion Agent] Applying parameters:', params);
+            // console.log('[Motion Agent] Applying parameters:', params);
             if (typeof logToScreen === 'function') {
-                logToScreen(`[Motion] Applying ${Object.keys(params).length} params: ${JSON.stringify(params)}`);
+                // logToScreen(`[Motion] Applying ${Object.keys(params).length} params: ${JSON.stringify(params)}`);
             }
         }
 

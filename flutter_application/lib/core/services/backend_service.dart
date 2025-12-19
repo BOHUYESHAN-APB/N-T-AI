@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Service responsible for managing the Python backend process and connection.
 class BackendService {
@@ -43,34 +44,86 @@ class BackendService {
     checkConnection();
   }
 
+  /// Checks if a local port is in use.
+  Future<bool> _isPortInUse(int port) async {
+    try {
+      final socket = await Socket.connect('localhost', port, timeout: const Duration(milliseconds: 200));
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Attempts to start the bundled Python backend on Windows.
   Future<void> _startLocalBackend() async {
+    // Force enable backend, ignoring potentially stale settings
+    const enabled = true; 
+    
+    if (!enabled) {
+      debugPrint('[BackendService] Backend disabled in settings.');
+      return;
+    }
+
+    // Dynamic Port Logic:
+    // We do NOT strictly check port 8000 anymore, because the backend is now smart enough to auto-select a port (8000-8010).
+    // Instead, we will:
+    // 1. Try to read 'server_info.json' first to see if a valid backend is already alive.
+    // 2. If alive, use that URL.
+    // 3. If not, start the process.
+    // 4. Watch for 'server_info.json' update or stdout to get the actual port.
+
     try {
-      // 1. Locate the server executable
-      // In development: flutter_application/server/server.exe
-      // In MSIX/Release: <AppDir>/server/server.exe
-      
-      // Use Platform.resolvedExecutable to get the directory of the running EXE
-      // This is safer than Directory.current which depends on how the app is launched
       final appDir = p.dirname(Platform.resolvedExecutable);
+      
+      // Locate 'server_info.json' - usually in the same dir as the executable or current dir
+      // Since we don't know exactly where the backend writes it (relative to CWD), we assume CWD of the backend.
+      // But we haven't started it yet.
+      // Let's first try to locate the executable to know the CWD.
+      
       String exePath = p.join(appDir, 'server', 'server.exe');
-      
-      // Handle MSIX install location if needed (usually Directory.current is correct for simple bundling)
-      // Check if file exists
       if (!await File(exePath).exists()) {
-        // Fallback for dev environment where we might be running from source
-        // and Platform.resolvedExecutable points to the dart runner
-        exePath = p.join(Directory.current.path, 'server', 'server.exe');
+        // Fallbacks...
+        final curDir = Directory.current.path;
+        exePath = p.join(curDir, 'server', 'server.exe');
       }
-      
       if (!await File(exePath).exists()) {
-        // Fallback for dev environment (one level up)
-        exePath = p.join(Directory.current.path, '..', 'server', 'server.exe');
+         exePath = p.join(Directory.current.path, 'flutter_application', 'server', 'server.exe');
+         if (!await File(exePath).exists()) {
+             exePath = r'd:\-Users-\Documents\GitHub\N-T-AI\flutter_application\server\server.exe';
+         }
       }
 
       if (!await File(exePath).exists()) {
         debugPrint('[BackendService] Server executable not found at $exePath. Assuming remote/manual backend.');
         return;
+      }
+      
+      final backendWorkDir = p.dirname(exePath);
+      final serverInfoFile = File(p.join(backendWorkDir, 'server_info.json'));
+
+      // Check if already running by reading server_info.json
+      if (await serverInfoFile.exists()) {
+        try {
+           final content = await serverInfoFile.readAsString();
+           final info = jsonDecode(content);
+           final url = info['url'] as String;
+           // Verify health
+           final uri = Uri.parse('$url/health');
+           try {
+             final resp = await http.get(uri).timeout(const Duration(milliseconds: 500));
+             if (resp.statusCode == 200) {
+               debugPrint('[BackendService] Found existing active backend at $url');
+               _updateUrlAndNotify(url);
+               _updateStatus(BackendStatus.connected);
+               return; // Already running and healthy
+             }
+           } catch (_) {
+             debugPrint('[BackendService] Stale server_info.json found. Restarting...');
+           }
+        } catch (e) {
+          debugPrint('[BackendService] Error reading server_info.json: $e');
+        }
       }
 
       debugPrint('[BackendService] Starting local backend: $exePath');
@@ -80,21 +133,72 @@ class BackendService {
         exePath,
         [],
         mode: ProcessStartMode.normal, // Use normal mode to capture stdout/stderr
-        workingDirectory: p.dirname(exePath),
+        workingDirectory: backendWorkDir,
       );
       
       debugPrint('[BackendService] Backend process started with PID: ${_backendProcess?.pid}');
       
-      // Monitor stdout/stderr
-      _backendProcess?.stdout.listen((data) {
-        debugPrint('[Backend Server] ${String.fromCharCodes(data)}');
+      // Monitor stdout/stderr to capture [SERVER_INFO] or just wait for file
+      _backendProcess?.stdout.transform(utf8.decoder).listen((data) {
+        debugPrint('[Backend Server] $data');
+        if (data.contains('[SERVER_INFO]')) {
+           try {
+             final jsonStr = data.split('[SERVER_INFO]')[1].trim();
+             final info = jsonDecode(jsonStr);
+             final url = info['url'];
+             debugPrint('[BackendService] Detected backend URL from stdout: $url');
+             _updateUrlAndNotify(url);
+           } catch (e) {
+             debugPrint('[BackendService] Failed to parse SERVER_INFO: $e');
+           }
+        }
       });
+      
       _backendProcess?.stderr.listen((data) {
         debugPrint('[Backend Server Error] ${String.fromCharCodes(data)}');
+      });
+      
+      // Polling for server_info.json as a backup if stdout parsing fails or is delayed
+      int attempts = 0;
+      Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+        attempts++;
+        if (attempts > 20 || _isConnected) { // Stop after 10 seconds or if connected
+          timer.cancel();
+          return;
+        }
+        
+        if (await serverInfoFile.exists()) {
+          try {
+             final content = await serverInfoFile.readAsString();
+             final info = jsonDecode(content);
+             final url = info['url'];
+             if (url != _backendUrl) {
+                debugPrint('[BackendService] Detected backend URL from file: $url');
+                _updateUrlAndNotify(url);
+                timer.cancel();
+             }
+          } catch (_) {}
+        }
       });
 
     } catch (e) {
       debugPrint('[BackendService] Failed to start local backend: $e');
+    }
+  }
+
+  void _updateUrlAndNotify(String url) {
+    if (_backendUrl != url) {
+      _backendUrl = url;
+      // Also update shared prefs so other services pick it up
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('settings.backend.url', url);
+        // Also update SettingsController via global scope if possible, but simpler to just set pref
+        // because SettingsController listens to prefs or reloads.
+        // Actually, SettingsController might need a reload. 
+        // For now, we rely on services using BackendService singleton or reading prefs.
+      });
+      // Notify internal listeners
+      checkConnection();
     }
   }
 

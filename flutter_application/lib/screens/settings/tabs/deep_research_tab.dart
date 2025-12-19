@@ -94,6 +94,100 @@ class DeepResearchTab extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        Card(
+          elevation: 0,
+          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: Theme.of(context).dividerColor.withOpacity(0.1),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.manage_search,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '研究策略配置',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const Text(
+                            '控制研究的深度与广度',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                // Depth Selector
+                DropdownButtonFormField<String>(
+                  value: deep.searchDepth,
+                  decoration: const InputDecoration(
+                    labelText: '研究深度 (Search Depth)',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'low', child: Text('Low - 快速概览 (1-3步)')),
+                    DropdownMenuItem(value: 'medium', child: Text('Medium - 标准报告 (3-5步)')),
+                    DropdownMenuItem(value: 'high', child: Text('High - 深度挖掘 (5-8步)')),
+                    DropdownMenuItem(value: 'professional', child: Text('Professional - 专家综述 (迭代循环)')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      controller.updateDeepResearchSettings(
+                          deep.copyWith(searchDepth: v));
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                // Max Steps Slider
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('最大步数限制: ${deep.maxSteps}'),
+                        const Tooltip(
+                          message: "最大允许的思考步骤数，防止任务无限循环",
+                          child: Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                        )
+                      ],
+                    ),
+                    Slider(
+                      value: deep.maxSteps.toDouble(),
+                      min: 1,
+                      max: 20,
+                      divisions: 19,
+                      label: deep.maxSteps.toString(),
+                      onChanged: (v) => controller.updateDeepResearchSettings(
+                        deep.copyWith(maxSteps: v.toInt()),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
