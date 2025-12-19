@@ -455,7 +455,7 @@ class AppSettings {
     this.agents = const [],
     this.deepResearch = const DeepResearchSettings(),
     this.enablePythonBackend = true,
-    this.pythonBackendUrl = 'http://localhost:8000',
+    this.pythonBackendUrl = 'http://localhost:23456',
     this.enableDeepResearch = false,
     this.searchRegion = SearchRegionOption.auto,
     this.userNickname = '',

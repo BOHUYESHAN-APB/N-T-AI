@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # Server / HTTPS
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 23456
     USE_HTTPS: bool = False
     SSL_CERT_PATH: str = "./certs/cert.pem"
     SSL_KEY_PATH: str = "./certs/key.pem"

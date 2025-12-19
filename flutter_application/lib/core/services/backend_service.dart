@@ -13,7 +13,7 @@ class BackendService {
 
   Process? _backendProcess;
   bool _isConnected = false;
-  String _backendUrl = 'http://localhost:8000';
+  String _backendUrl = 'http://localhost:23456';
   
   // Stream to notify UI about connection status changes
   final _statusController = StreamController<BackendStatus>.broadcast();
