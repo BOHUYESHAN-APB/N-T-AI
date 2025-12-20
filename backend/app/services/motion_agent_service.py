@@ -95,7 +95,7 @@ ACTION_TRIGGERS = {
     },
     # 寻找/观察
     'search': {
-        'keywords': ['看看', '找找', 'look around', 'search', 'where', 'finding', '观察'],
+        'keywords': ['四处看看', '到处看看', '找找看', '找一下', 'look around', 'search around', '观察一下', '到处找'],
         'motion': 'Search',
         'expression': None,
         'parameters': {}
@@ -114,11 +114,33 @@ ACTION_TRIGGERS = {
         'expression': None,
         'parameters': {}
     },
+    'praise': {
+        'keywords': ['好可爱', '太可爱', '好萌', '萌', 'awsl', '可愛い', '喜欢你', '好喜欢'],
+        'motion': 'ShyBlush',
+        'expression': 'Shy',
+        'parameters': {'ParamCheek': 0.6, 'ParamMouthForm': 0.5}
+    },
+    'cheer': {
+        'keywords': ['666', '牛逼', 'nb', '太强了', '绝了', 'yyds', 'awwww'],
+        'motion': 'Giggle',
+        'expression': 'Excited',
+        'parameters': {'ParamMouthForm': 0.8}
+    },
 }
 
 class MotionAgentService:
     def __init__(self, llm_service: LLMService):
         self.llm_service = llm_service
+        self._last_decision_ts: float = 0.0
+        self._last_decision_key: str = ""
+        self._last_decision: dict | None = None
+        self._last_idle_ts: float = 0.0
+        self._last_idle_params: dict | None = None
+        self._procedural_motions = {
+            "Wink", "CuteWink", "ShyBlush", "HeadTilt", "Giggle", "Curious", "Nod", "HeadShake",
+            "ThinkingPose", "Surprised", "HappyBounce", "Pout", "Sleepy", "Search", "Sway", "PuffCheeks",
+            "MicroBodySway", "SlightSmile", "BreathSigh", "EyeTwitch"
+        }
     
     def _infer_emotion_from_text(self, text: str) -> str:
         """从文本内容推断情感"""
@@ -133,10 +155,99 @@ class MotionAgentService:
         # 返回得分最高的情感
         max_emotion = max(emotion_scores, key=emotion_scores.get)
         return max_emotion if emotion_scores[max_emotion] > 0 else 'neutral'
+
+    def _infer_emotion_from_context(self, user_text: str, ai_text: str, history: list | None) -> str:
+        combined = f"{user_text}\n{ai_text}".strip()
+        if history:
+            tail = []
+            for msg in history[-6:]:
+                c = str(msg.get("content", "") or "").strip()
+                if c:
+                    tail.append(c[:80])
+            if tail:
+                combined = f"{combined}\n" + "\n".join(tail)
+        return self._infer_emotion_from_text(combined)
+
+    def _clamp(self, v: float, lo: float, hi: float) -> float:
+        if v < lo:
+            return lo
+        if v > hi:
+            return hi
+        return v
+
+    def _sanitize_parameters(self, params: dict | None) -> dict:
+        if not params or not isinstance(params, dict):
+            return {}
+        out: dict = {}
+        for k, v in params.items():
+            if v is None:
+                out[k] = None
+                continue
+            try:
+                n = float(v)
+            except Exception:
+                continue
+
+            if k in ("ParamAngleX", "ParamAngleY", "ParamAngleZ"):
+                out[k] = self._clamp(n, -30.0, 30.0)
+            elif k in ("ParamBodyAngleX", "ParamBodyAngleY", "ParamBodyAngleZ"):
+                out[k] = self._clamp(n, -10.0, 10.0)
+            elif k in ("ParamEyeBallX", "ParamEyeBallY", "ParamEyeBallX_L", "ParamEyeBallX_R", "ParamEyeBallY_L", "ParamEyeBallY_R"):
+                out[k] = self._clamp(n, -1.0, 1.0)
+            elif k in ("ParamEyeLOpen", "ParamEyeROpen", "ParamMouthOpenY", "ParamCheek"):
+                out[k] = self._clamp(n, 0.0, 1.0)
+            elif k in ("ParamMouthForm",):
+                out[k] = self._clamp(n, -1.0, 1.0)
+            elif k.startswith("ParamBrow"):
+                out[k] = self._clamp(n, -1.0, 1.0)
+            else:
+                out[k] = n
+        return out
+
+    def _smooth_params(self, prev: dict | None, target: dict, alpha: float) -> dict:
+        if not prev or not isinstance(prev, dict):
+            return target
+        out = dict(target)
+        for k, v in target.items():
+            if v is None:
+                continue
+            pv = prev.get(k)
+            if pv is None:
+                continue
+            try:
+                pvf = float(pv)
+                vf = float(v)
+            except Exception:
+                continue
+            out[k] = pvf + (vf - pvf) * alpha
+        return out
+
+    def _pick_expression(self, inferred_emotion: str, expressions: list) -> str | None:
+        if not inferred_emotion or inferred_emotion == "neutral":
+            return None
+        aliases = {
+            "happy": ["Happy", "Smile", "Excited"],
+            "sad": ["Sad", "Worried"],
+            "excited": ["Excited", "Happy"],
+            "thinking": ["Thinking"],
+            "shy": ["Shy"],
+            "surprised": ["Surprise", "Surprised"],
+            "confused": ["Worried", "Thinking"],
+        }
+        candidates = aliases.get(inferred_emotion, [inferred_emotion.capitalize()])
+        for c in candidates:
+            if c in expressions:
+                return c
+        for c in candidates:
+            cl = c.lower()
+            for e in expressions:
+                if cl in str(e).lower():
+                    return e
+        return None
     
     def _check_action_triggers(self, ai_text: str) -> dict:
         """检查 AI 回复中是否有触发动作的关键词"""
-        ai_text_lower = ai_text.lower()
+        ai_text_lower = (ai_text or "").lower()
         
         for action_name, action_config in ACTION_TRIGGERS.items():
             for keyword in action_config['keywords']:
@@ -155,10 +266,10 @@ class MotionAgentService:
         """根据情感生成自然的微小动作参数"""
         # 基础微动，让角色更生动
         params = {
-            'ParamAngleX': random.uniform(-5, 5),
+            'ParamAngleX': random.uniform(-4, 4),
             'ParamAngleY': random.uniform(-3, 3),
-            'ParamAngleZ': random.uniform(-3, 3),
-            'ParamBodyAngleX': random.uniform(-2, 2),
+            'ParamAngleZ': random.uniform(-2.5, 2.5),
+            'ParamBodyAngleX': random.uniform(-1.5, 1.5),
         }
         
         # 根据情感调整
@@ -214,6 +325,18 @@ class MotionAgentService:
         
         motions = capabilities.get('motions', [])
         expressions = capabilities.get('expressions', [])
+
+        try:
+            now = float(__import__("time").time())
+            history_tail = ""
+            if history and isinstance(history, list):
+                last = history[-1] if history else {}
+                history_tail = str(last.get("content", "") or "")[:120]
+            key = f"{str(user_text or '')[:160]}|{str(ai_text or '')[:160]}|{emotion}|{history_tail}"
+            if self._last_decision and self._last_decision_key == key and (now - float(self._last_decision_ts or 0.0)) < 0.8:
+                return dict(self._last_decision)
+        except Exception:
+            key = ""
         
         # [Optimization] Check for direct commands FIRST to avoid LLM latency
         user_text_lower = user_text.lower()
@@ -290,51 +413,90 @@ class MotionAgentService:
         # 如果有直接动作命令
         if direct_motion:
             print(f"[MotionAgent] Direct motion command: {direct_motion}")
-            return {
+            result = {
                 "motion": direct_motion,
                 "expression": None,
                 "look_at": None,
                 "parameters": None
             }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
             
         if direct_parameters or direct_look_at:
             print(f"[MotionAgent] Direct command detected. Skipping LLM. Params: {direct_parameters}")
-            return {
+            result = {
                 "motion": None,
                 "expression": None,
                 "look_at": direct_look_at,
-                "parameters": direct_parameters
+                "parameters": self._sanitize_parameters(direct_parameters)
             }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
         
-        # [Optimization] 检查 AI 回复中的动作触发词，跳过 LLM 调用
+        combined_text = f"{user_text}\n{ai_text}".strip()
+
+        # [Optimization] 检查文本中的动作触发词，跳过 LLM 调用
         action_trigger = self._check_action_triggers(ai_text)
+        if not action_trigger.get('triggered'):
+            action_trigger = self._check_action_triggers(user_text)
         if action_trigger.get('triggered'):
-            # 从文本推断情感，生成自然参数
-            inferred_emotion = self._infer_emotion_from_text(ai_text)
+            inferred_emotion = self._infer_emotion_from_context(user_text, ai_text, history)
             natural_params = self._generate_natural_parameters(inferred_emotion)
             
             # 合并触发动作的参数
             merged_params = {**natural_params, **action_trigger.get('parameters', {})}
+            merged_params = self._sanitize_parameters(merged_params)
             
             print(f"[MotionAgent] Action trigger detected: {action_trigger['action']}. Skipping LLM.")
-            return {
+            result = {
                 "motion": action_trigger.get('motion'),
-                "expression": action_trigger.get('expression'),
+                "expression": action_trigger.get('expression') if action_trigger.get('expression') in expressions else self._pick_expression(inferred_emotion, expressions),
                 "look_at": None,
                 "parameters": merged_params
             }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
         
         # [Optimization] 如果没有特定触发，但能推断出明确情感，也可以跳过 LLM
-        inferred_emotion = self._infer_emotion_from_text(ai_text)
+        inferred_emotion = self._infer_emotion_from_context(user_text, ai_text, history)
         if inferred_emotion != 'neutral':
-            natural_params = self._generate_natural_parameters(inferred_emotion)
+            natural_params = self._sanitize_parameters(self._generate_natural_parameters(inferred_emotion))
             print(f"[MotionAgent] Emotion inferred: {inferred_emotion}. Using fast path.")
-            return {
+            result = {
                 "motion": None,
-                "expression": inferred_emotion.capitalize() if inferred_emotion in ['happy', 'sad', 'excited', 'shy', 'surprised', 'thinking'] else None,
+                "expression": self._pick_expression(inferred_emotion, expressions),
                 "look_at": None,
                 "parameters": natural_params
             }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
+
+        if not str(ai_text or "").strip():
+            natural_params = self._sanitize_parameters(self._generate_natural_parameters('neutral'))
+            print(f"[MotionAgent] No ai_text provided. Using fast path.")
+            result = {
+                "motion": None,
+                "expression": None,
+                "look_at": None,
+                "parameters": natural_params
+            }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
         
         # If no capabilities are provided, we can't really choose specific files.
         # But we can still return look_at or generic instructions.
@@ -438,14 +600,18 @@ Return a JSON object ONLY, no markdown:
             result = json.loads(cleaned_text)
             
             # Validate against capabilities (Double check)
-            if result.get('motion') and result['motion'] not in motions:
-                # If LLM hallucinated a motion, try to find a partial match or discard
-                # For now, we discard to avoid errors
+            if result.get('motion') and (result['motion'] not in motions) and (result['motion'] not in self._procedural_motions):
                 result['motion'] = None
                 
             if result.get('expression') and result['expression'] not in expressions:
                 result['expression'] = None
-                
+            
+            if result.get("parameters"):
+                result["parameters"] = self._sanitize_parameters(result["parameters"])
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
             return result
 
         except Exception as e:
@@ -453,8 +619,8 @@ Return a JSON object ONLY, no markdown:
             
             # Fallback: 使用智能回退逻辑
             # 1. 尝试从 AI 回复推断情感并生成参数
-            inferred_emotion = self._infer_emotion_from_text(ai_text)
-            natural_params = self._generate_natural_parameters(inferred_emotion)
+            inferred_emotion = self._infer_emotion_from_context(user_text, ai_text, history)
+            natural_params = self._sanitize_parameters(self._generate_natural_parameters(inferred_emotion))
             
             # 2. 检查直接命令
             user_text_lower = user_text.lower()
@@ -472,20 +638,21 @@ Return a JSON object ONLY, no markdown:
                 natural_params["ParamEyeBallX"] = 1.0
             
             # 3. 尝试匹配表情
-            fallback_expression = None
-            if inferred_emotion != 'neutral':
-                expr_name = inferred_emotion.capitalize()
-                if expr_name in expressions or any(expr_name.lower() in e.lower() for e in expressions):
-                    fallback_expression = expr_name
+            fallback_expression = self._pick_expression(inferred_emotion, expressions)
             
             print(f"[MotionAgent] Using smart fallback. Emotion: {inferred_emotion}, Params: {natural_params}")
             
-            return {
+            result = {
                 "motion": None,
                 "expression": fallback_expression,
                 "look_at": None,
                 "parameters": natural_params
             }
+            if key:
+                self._last_decision_key = key
+                self._last_decision_ts = float(__import__("time").time())
+                self._last_decision = dict(result)
+            return result
 
     async def decide_idle_motion(self, emotion: str, capabilities: dict, 
                                api_key: str = None, base_url: str = None, model: str = None) -> dict:
@@ -498,15 +665,15 @@ Return a JSON object ONLY, no markdown:
         
         idle_params = {
             # 微小的头部动作
-            'ParamAngleX': random.uniform(-8, 8),
-            'ParamAngleY': random.uniform(-5, 5),
-            'ParamAngleZ': random.uniform(-3, 3),
+            'ParamAngleX': random.uniform(-6, 6),
+            'ParamAngleY': random.uniform(-4, 4),
+            'ParamAngleZ': random.uniform(-2.5, 2.5),
             # 身体微动
-            'ParamBodyAngleX': random.uniform(-3, 3),
-            'ParamBodyAngleY': random.uniform(-2, 2),
+            'ParamBodyAngleX': random.uniform(-2.0, 2.0),
+            'ParamBodyAngleY': random.uniform(-1.5, 1.5),
             # 眼球轻微移动（好奇地看周围）
-            'ParamEyeBallX': random.uniform(-0.4, 0.4),
-            'ParamEyeBallY': random.uniform(-0.2, 0.3),
+            'ParamEyeBallX': random.uniform(-0.35, 0.35),
+            'ParamEyeBallY': random.uniform(-0.2, 0.25),
         }
         
         # 根据情感调整待机行为
@@ -539,7 +706,16 @@ Return a JSON object ONLY, no markdown:
             idle_params['ParamMouthForm'] = random.uniform(0.4, 0.7)
         
         print(f"[MotionAgent] Idle motion generated. Emotion: {emotion}")
-        
+
+        idle_params = self._sanitize_parameters(idle_params)
+        try:
+            now = float(__import__("time").time())
+            idle_params = self._smooth_params(self._last_idle_params, idle_params, 0.35)
+            self._last_idle_params = dict(idle_params)
+            self._last_idle_ts = now
+        except Exception:
+            pass
+
         return {
             "motion": None,
             "expression": None,

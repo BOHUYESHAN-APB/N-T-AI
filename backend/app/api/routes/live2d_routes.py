@@ -47,6 +47,8 @@ class Live2DConnectionManager:
             self.active_connections.discard(conn)
 
 manager = Live2DConnectionManager()
+_last_motion_broadcast_ts: float = 0.0
+_last_motion_broadcast_key: str = ""
 
 class MotionRequest(BaseModel):
     user_text: str
@@ -237,6 +239,25 @@ async def broadcast_motion(
         "aiText": request.aiText,
         "history": request.history or [],
     }
+    
+    global _last_motion_broadcast_ts, _last_motion_broadcast_key
+    try:
+        now = time.time()
+        key = json.dumps(
+            {
+                "userText": data.get("userText", ""),
+                "aiText": data.get("aiText", ""),
+                "historyLen": len(data.get("history") or []),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if key == _last_motion_broadcast_key and (now - float(_last_motion_broadcast_ts or 0.0)) < 0.5:
+            return {"status": "ok", "clients": len(manager.active_connections), "deduped": True}
+        _last_motion_broadcast_key = key
+        _last_motion_broadcast_ts = now
+    except Exception:
+        pass
     
     # 将配置信息透传给前端
     if api_key:

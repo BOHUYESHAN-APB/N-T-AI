@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 import time
 import aiohttp
+import random
 
 from ..base import BasePlugin
 from app.services.llm_service import LLMService
@@ -78,6 +79,48 @@ class BilibiliLivePlugin(BasePlugin):
         self._emoticon_cache_ts: float = 0.0
         self._emoticon_cache_ttl: float = 600.0
         self._emoticon_lock = asyncio.Lock()
+        self._last_live2d_motion_ts: float = 0.0
+
+    async def _broadcast_live2d_motion_request(self, text: str, force: bool = False) -> None:
+        if not self.is_active:
+            return
+        if not bool(self.config.get("live2d_motion_request_enabled", True)):
+            return
+
+        s = str(text or "").strip()
+        if not s:
+            return
+
+        now = time.time()
+        cooldown = float(self.config.get("live2d_motion_request_cooldown", 2.5) or 2.5)
+        if not force and (now - float(self._last_live2d_motion_ts or 0.0)) < cooldown:
+            return
+
+        chance = float(self.config.get("live2d_motion_request_chance", 0.15) or 0.15)
+        if not force:
+            is_question = ("?" in s) or ("？" in s)
+            has_emoticon = ("[" in s and "]" in s)
+            if not is_question and not has_emoticon and random.random() > chance:
+                return
+
+        events = self._select_recent_events()[-8:]
+        history = []
+        for e in events:
+            user = str(e.get("user") or "").strip()
+            content = str(e.get("content") or "").strip()
+            if not content:
+                continue
+            history.append({"role": "user", "content": f"{user}: {content}" if user else content})
+
+        await live2d_manager.broadcast({
+            "type": "motion_request",
+            "data": {
+                "userText": s,
+                "aiText": "",
+                "history": history
+            }
+        })
+        self._last_live2d_motion_ts = now
 
     @property
     def name(self) -> str:
@@ -387,6 +430,7 @@ class BilibiliLivePlugin(BasePlugin):
             "sender": "chat_normal",
             "senderName": user_name
         })
+        await self._broadcast_live2d_motion_request(f"{user_name}: {display_message}")
 
     async def process_super_chat(self, message: str, user_name: str, price: float) -> None:
         # Ad Filtering
@@ -419,6 +463,7 @@ class BilibiliLivePlugin(BasePlugin):
             "sender": "chat_sc",
             "senderName": user_name
         })
+        await self._broadcast_live2d_motion_request(f"【SC ¥{price}】{user_name}: {message}", force=True)
 
     async def process_gift(self, message: web_models.GiftMessage) -> None:
         # 过滤掉低价值礼物以减少噪音（可选，这里先不过滤）

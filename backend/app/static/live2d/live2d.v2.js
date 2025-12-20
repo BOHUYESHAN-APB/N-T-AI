@@ -76,6 +76,25 @@ class Live2DManager {
         this.eyeTimer = null; // Timer for random eye movements
         this.neuroBehaviorTimer = null; // Timer for neuro behavior loop
         this.isSwayEnabled = true;
+        this.microIdleOverrides = {};
+        this._microIdleSeed = Math.random() * 1000;
+        this.autonomyConfig = {
+            microIdleEnabled: true,
+            microIdleIntensity: 0.28,
+            idleSchedulerEnabled: true,
+            idleFromBackendEnabled: true,
+            randomEyesEnabled: true,
+            neuroBehaviorEnabled: true,
+        };
+        try {
+            const raw = localStorage.getItem('live2dAutonomyConfig');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    this.autonomyConfig = { ...this.autonomyConfig, ...parsed };
+                }
+            }
+        } catch (_) {}
 
         // Listen for lock toggle from Flutter
         window.addEventListener('live2d-lock-click', () => {
@@ -84,12 +103,30 @@ class Live2DManager {
         });
     }
 
+    setAutonomyConfig(partial) {
+        if (!partial || typeof partial !== 'object') return;
+        this.autonomyConfig = { ...this.autonomyConfig, ...partial };
+        try {
+            localStorage.setItem('live2dAutonomyConfig', JSON.stringify(this.autonomyConfig));
+        } catch (_) {}
+
+        if (this.autonomyConfig.randomEyesEnabled) this.startRandomEyes();
+        else this.stopRandomEyes();
+
+        if (this.autonomyConfig.neuroBehaviorEnabled) this.startNeuroBehavior();
+        else this.stopNeuroBehavior();
+
+        if (this.autonomyConfig.idleSchedulerEnabled && !this.isSpeaking) this.startIdleMotionScheduler();
+        else this.stopIdleMotionScheduler();
+    }
+
     setSwayParams(params) {
         this.audioSwayParams = params;
     }
 
     // [Eye Movement System]
     startRandomEyes() {
+        if (this.autonomyConfig && this.autonomyConfig.randomEyesEnabled === false) return;
         if (this.eyeTimer) return;
         console.log('[Live2D] Starting Random Eye Movements (Neuro-style)');
         
@@ -101,11 +138,11 @@ class Live2DManager {
 
             // Neuro-style: Random quick glances (saccades)
             // Range: -1 to 1
-            const targetX = (Math.random() - 0.5) * 1.5; // Slight bias to center
-            const targetY = (Math.random() - 0.5) * 0.5; // Less vertical movement
+            const targetX = (Math.random() - 0.5) * 1.0; // More subtle
+            const targetY = (Math.random() - 0.5) * 0.35; // More subtle
             
             // Duration of the glance
-            const duration = 200 + Math.random() * 300; 
+            const duration = 180 + Math.random() * 240; 
             
             // Perform the movement using a simple tween simulation
             const startX = this.eyeParams['ParamEyeBallX'] || 0;
@@ -118,8 +155,14 @@ class Live2DManager {
                 // EaseOutQuad
                 const ease = 1 - (1 - progress) * (1 - progress);
                 
-                this.eyeParams['ParamEyeBallX'] = startX + (targetX - startX) * ease;
-                this.eyeParams['ParamEyeBallY'] = startY + (targetY - startY) * ease;
+                const x = startX + (targetX - startX) * ease;
+                const y = startY + (targetY - startY) * ease;
+                this.eyeParams['ParamEyeBallX'] = x;
+                this.eyeParams['ParamEyeBallY'] = y;
+                this.eyeParams['ParamEyeBallX_L'] = x;
+                this.eyeParams['ParamEyeBallX_R'] = x;
+                this.eyeParams['ParamEyeBallY_L'] = y;
+                this.eyeParams['ParamEyeBallY_R'] = y;
                 
                 if (progress < 1) {
                     requestAnimationFrame(animate);
@@ -127,8 +170,8 @@ class Live2DManager {
             };
             animate();
 
-            // Next movement in random time (0.5s to 4s)
-            const nextDelay = 500 + Math.random() * 3500;
+            // Next movement in random time (1.5s to 6s)
+            const nextDelay = 1500 + Math.random() * 4500;
             this.eyeTimer = setTimeout(moveEyes, nextDelay);
         };
         
@@ -145,12 +188,18 @@ class Live2DManager {
 
     // [Neuro Behavior System]
     startNeuroBehavior() {
+        if (this.autonomyConfig && this.autonomyConfig.neuroBehaviorEnabled === false) return;
         if (this.neuroBehaviorTimer) return;
         console.log('[Live2D] Starting Neuro Behavior System');
 
         const behaviorLoop = () => {
             if (!this.currentModel) {
                 this.neuroBehaviorTimer = setTimeout(behaviorLoop, 2000);
+                return;
+            }
+
+            if (this.isSpeaking) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 6000);
                 return;
             }
 
@@ -161,13 +210,25 @@ class Live2DManager {
                  this.neuroBehaviorTimer = setTimeout(behaviorLoop, 2000);
                  return;
             }
+            if (this.motionTimer) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 4000);
+                return;
+            }
+            if (this.isIdleMotionPlaying) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 4000);
+                return;
+            }
+            if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 8000);
+                return;
+            }
 
-            // Random interval: 5s to 15s
-            const nextDelay = 5000 + Math.random() * 10000;
+            // Random interval: 12s to 30s
+            const nextDelay = 12000 + Math.random() * 18000;
             
             // Random chance to do something
-            if (Math.random() < 0.4) {
-                const actions = ['Wink', 'CuteWink', 'HeadTilt', 'Search', 'EyeTwitch', 'MicroBodySway', 'Giggle'];
+            if (Math.random() < 0.18) {
+                const actions = ['EyeTwitch', 'MicroBodySway', 'HeadTilt', 'SlightSmile', 'BreathSigh'];
                 // If speaking, prefer subtle ones
                 let candidates = actions;
                 if (this.isSpeaking) {
@@ -251,8 +312,8 @@ class Live2DManager {
             console.log('[Live2D] PIXI Initialized. Ticker started:', this.pixi_app.ticker.started);
 
             // Auto-start autonomous behaviors
-            this.startRandomEyes();
-            this.startNeuroBehavior();
+            if (this.autonomyConfig.randomEyesEnabled) this.startRandomEyes();
+            if (this.autonomyConfig.neuroBehaviorEnabled) this.startNeuroBehavior();
 
             this.isInitialized = true;
             return this.pixi_app;
@@ -396,6 +457,24 @@ class Live2DManager {
                 try {
                     if (!this.currentModel || !this.currentModel.internalModel) return;
 
+                    if (this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
+                        const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+                        let intensity = Number(this.autonomyConfig.microIdleIntensity);
+                        if (!Number.isFinite(intensity)) intensity = 0.28;
+                        if (this.isSpeaking) intensity *= 0.55;
+                        if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') intensity *= 0.7;
+                        if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) intensity *= 0.35;
+
+                        const s = this._microIdleSeed || 0;
+                        this.microIdleOverrides.ParamAngleX = Math.sin(t * 0.55 + s) * 2.2 * intensity;
+                        this.microIdleOverrides.ParamAngleY = Math.sin(t * 0.45 + s * 1.3) * 1.4 * intensity;
+                        this.microIdleOverrides.ParamAngleZ = Math.sin(t * 0.60 + s * 1.7) * 1.0 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleX = Math.sin(t * 0.25 + s * 2.1) * 0.8 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleY = Math.sin(t * 0.20 + s * 2.6) * 0.5 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleZ = Math.sin(t * 0.30 + s * 3.1) * 0.6 * intensity;
+                        this.microIdleOverrides.ParamBreath = Math.sin(t * 0.18 + s * 0.7) * 0.15 * intensity;
+                    }
+
                     // A. Capture pre-update parameters
                     const preUpdateParams = {};
                     // Capture audio sway params
@@ -404,6 +483,17 @@ class Live2DManager {
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
+                            } catch (_) {}
+                        }
+                    }
+                    if (this.microIdleOverrides && this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
+                        for (const key in this.microIdleOverrides) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = getParamIndex(key);
+                                if (idx >= 0 && preUpdateParams[key] === undefined) {
+                                    preUpdateParams[key] = getParamValue(idx);
+                                }
                             } catch (_) {}
                         }
                     }
@@ -478,7 +568,7 @@ class Live2DManager {
                                     const currentVal = getParamValue(idx);
                                     // Limit sway amplitude to avoid twitching (clamp additive offset)
                                     // Smoothly blend if needed, but here we just clamp max offset
-                                    const clampedValue = Math.max(-10, Math.min(10, value)); // Arbitrary safety clamp
+                                    const clampedValue = Math.max(-5, Math.min(5, value));
                                     setParamValue(idx, currentVal + clampedValue);
                                 }
                             } catch (_) {}
@@ -486,25 +576,48 @@ class Live2DManager {
                     }
 
                     // 2. Apply Random Eye Movements (Additive/Override with smoothing)
-                    if (this.eyeParams) {
+                    if (this.eyeParams && !this.mouseTrackingEnabled) {
                          for (const [key, value] of Object.entries(this.eyeParams)) {
                              try {
                                  const idx = getParamIndex(key);
                                  if (idx >= 0) {
-                                     // Use simple lerp for smoothing eye movement to avoid snap
+                                     if (!this._eyeSmoothed) this._eyeSmoothed = {};
                                      const currentVal = getParamValue(idx);
-                                     // Lerp factor
-                                     const lerp = (a, b, t) => a + (b - a) * t;
+                                     const prevVal = (this._eyeSmoothed[key] !== undefined) ? this._eyeSmoothed[key] : currentVal;
                                      const targetVal = value;
-                                     // If diff is large, snap? No, always lerp for Neuro-sama style smoothness
-                                     // But update loop is fast, so we need state. 
-                                     // For now, just setting it is "okay" if the source (behavior loop) is updating infrequently.
-                                     // To fix "twitching", we ensure we don't conflict with idle motion too aggressively.
-                                     // Force override for eyes is usually better than additive for "looking at something".
-                                     setParamValue(idx, targetVal);
+                                     const t = (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) ? 0.18 : 0.35;
+                                     const nextVal = prevVal + (targetVal - prevVal) * t;
+                                     this._eyeSmoothed[key] = nextVal;
+                                     setParamValue(idx, nextVal);
                                  }
                              } catch (_) {}
                          }
+                    }
+
+                    if (this.microIdleOverrides && this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
+                        for (const [key, value] of Object.entries(this.microIdleOverrides)) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = getParamIndex(key);
+                                if (idx >= 0) {
+                                    let defaultVal = 0;
+                                    try {
+                                        if (typeof coreModel.getParameterDefaultValueByIndex === 'function') {
+                                            defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
+                                        }
+                                    } catch (_) {}
+                                    const desiredVal = defaultVal + value;
+                                    const currentVal = getParamValue(idx);
+                                    const preVal = preUpdateParams[key] !== undefined ? preUpdateParams[key] : currentVal;
+                                    const offset = desiredVal - defaultVal;
+                                    if (Math.abs(currentVal - preVal) > 0.001) {
+                                        setParamValue(idx, currentVal + offset);
+                                    } else {
+                                        setParamValue(idx, desiredVal);
+                                    }
+                                }
+                            } catch (_) {}
+                        }
                     }
 
                     // 3. Apply Parameter Overrides Stacking (Smart Overlay)
@@ -625,7 +738,13 @@ class Live2DManager {
 
     setSpeaking(flag) {
         this.isSpeaking = !!flag;
-        if (this.isSpeaking) this.stopIdleMotionScheduler(); else this.startIdleMotionScheduler();
+        if (this.isSpeaking) {
+            this.stopIdleMotionScheduler();
+        } else {
+            if (!this.autonomyConfig || this.autonomyConfig.idleSchedulerEnabled !== false) {
+                this.startIdleMotionScheduler();
+            }
+        }
     }
 
     // Set Audio Sway Parameters (for stacking)
@@ -817,7 +936,11 @@ class Live2DManager {
                 setParam('ParamCheek', 0.8);
                 setParam('ParamMouthForm', 0.3);
                 setParam('ParamEyeBallX', -0.3);
+                setParam('ParamEyeBallX_L', -0.3);
+                setParam('ParamEyeBallX_R', -0.3);
                 setParam('ParamEyeBallY', -0.2);
+                setParam('ParamEyeBallY_L', -0.2);
+                setParam('ParamEyeBallY_R', -0.2);
                 break;
             case 'thinking':
             case 'thinkingpose':
@@ -930,6 +1053,9 @@ class Live2DManager {
         if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
         
         const core = this.currentModel.internalModel.coreModel;
+        const trySet = (id, value) => {
+            try { core.setParameterValueById(id, value); } catch (_) {}
+        };
         
         // Mapping Flutter ExpressionData to Live2D Parameters (Standard Cubism)
         // params: { mouth, eyes, eyebrow, blush, pupilX, pupilY, headTilt }
@@ -942,38 +1068,50 @@ class Live2DManager {
             // core.setParameterValueById('ParamMouthOpenY', openY); // Let lip-sync handle this if active
             
             // Mouth Form: -1 (sad) .. 1 (smile)
-            core.setParameterValueById('ParamMouthForm', params.mouth); 
+            trySet('ParamMouthForm', params.mouth); 
         }
         
         if (params.eyes !== undefined) {
             // Eyes Open: 0..1
-            core.setParameterValueById('ParamEyeLOpen', params.eyes);
-            core.setParameterValueById('ParamEyeROpen', params.eyes);
+            trySet('ParamEyeLOpen', params.eyes);
+            trySet('ParamEyeROpen', params.eyes);
         }
         
         if (params.eyebrow !== undefined) {
             // Eyebrow Y: -1..1
-            core.setParameterValueById('ParamBrowLY', params.eyebrow);
-            core.setParameterValueById('ParamBrowRY', params.eyebrow);
+            trySet('ParamBrowLY', params.eyebrow);
+            trySet('ParamBrowRY', params.eyebrow);
         }
         
         if (params.pupilX !== undefined) {
-            core.setParameterValueById('ParamEyeBallX', params.pupilX);
+            trySet('ParamEyeBallX', params.pupilX);
+            trySet('ParamEyeBallX_L', params.pupilX);
+            trySet('ParamEyeBallX_R', params.pupilX);
         }
         
         if (params.pupilY !== undefined) {
-            core.setParameterValueById('ParamEyeBallY', params.pupilY);
+            trySet('ParamEyeBallY', params.pupilY);
+            trySet('ParamEyeBallY_L', params.pupilY);
+            trySet('ParamEyeBallY_R', params.pupilY);
         }
         
         if (params.blush !== undefined) {
-            core.setParameterValueById('ParamCheek', params.blush);
+            trySet('ParamCheek', params.blush);
         }
         
         if (params.headTilt !== undefined) {
-            // Head Z: -30..30 degrees usually. Flutter sends radians small value?
-            // Flutter headTilt is -0.5 .. 0.5. 
-            // Let's map -0.5 -> -30, 0.5 -> 30
-            core.setParameterValueById('ParamAngleZ', params.headTilt * 60);
+            const ht = Number(params.headTilt);
+            if (!Number.isNaN(ht)) {
+                let z = 0;
+                if (Math.abs(ht) <= 1) {
+                    z = ht * 60;
+                } else {
+                    z = ht;
+                }
+                if (z > 30) z = 30;
+                if (z < -30) z = -30;
+                trySet('ParamAngleZ', z);
+            }
         }
     }
 
@@ -1092,12 +1230,12 @@ class Live2DManager {
             }
 
             if (emotion === 'EyeTwitch') {
-                await this.tweenParameters({'ParamEyeLOpen': 0.0}, 50, easeOutCubic);
-                await this.tweenParameters({'ParamEyeLOpen': 1.0}, 50, easeInCubic);
+                await this.tweenParameters({'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 0.0}, 50, easeOutCubic);
+                await this.tweenParameters({'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0}, 50, easeInCubic);
                 await new Promise(r => setTimeout(r, 50));
-                await this.tweenParameters({'ParamEyeLOpen': 0.0}, 50, easeOutCubic);
-                await this.tweenParameters({'ParamEyeLOpen': 1.0}, 50, easeInCubic);
-                await this.releaseParametersSmoothly(['ParamEyeLOpen'], 200);
+                await this.tweenParameters({'ParamEyeLOpen': 0.0, 'ParamEyeROpen': 0.0}, 50, easeOutCubic);
+                await this.tweenParameters({'ParamEyeLOpen': 1.0, 'ParamEyeROpen': 1.0}, 50, easeInCubic);
+                await this.releaseParametersSmoothly(['ParamEyeLOpen', 'ParamEyeROpen'], 200);
                 return;
             }
 
@@ -1721,31 +1859,6 @@ class Live2DManager {
         }
     }
 
-    // 调试：打印模型所有参数
-    logModelParameters(model) {
-        try {
-            if (!model || !model.internalModel || !model.internalModel.coreModel) return;
-            const coreModel = model.internalModel.coreModel;
-            // Cubism 4 API
-            if (coreModel.getParameterCount && coreModel.getParameterIds) {
-                const count = coreModel.getParameterCount();
-                const ids = coreModel.getParameterIds();
-                console.log('[Live2D Debug] Available Parameters:', ids);
-                if (typeof logToScreen === 'function') {
-                    logToScreen(`[Debug] Model has ${count} parameters.`);
-                    logToScreen(`[Debug] Sample: ${ids.slice(0, 5).join(', ')}...`);
-                }
-            } 
-            // Cubism 2 API (fallback)
-            else if (coreModel.getParamCount && coreModel.getParamId) {
-                 // ... implementation for Cubism 2 if needed, but we are likely on Cubism 4
-            }
-        } catch (e) {
-            console.error('Failed to log parameters:', e);
-        }
-    }
-
-    // [DEBUG] Log all available parameters
     logModelParameters(model) {
         if (!model || !model.internalModel || !model.internalModel.coreModel) return;
         
@@ -1754,6 +1867,21 @@ class Live2DManager {
             // Cubism 4
             if (core._parameterIds) {
                 console.log('[Model Parameters] IDs:', core._parameterIds);
+                if (typeof logToScreen === 'function') {
+                    const count = core._parameterIds.length;
+                    logToScreen(`[Debug] Model has ${count} parameters.`);
+                    logToScreen(`[Debug] Sample: ${core._parameterIds.slice(0, 5).join(', ')}...`);
+                }
+                return;
+            }
+            if (core.getParameterCount && core.getParameterIds) {
+                const ids = core.getParameterIds();
+                console.log('[Model Parameters] IDs:', ids);
+                if (typeof logToScreen === 'function') {
+                    const count = core.getParameterCount();
+                    logToScreen(`[Debug] Model has ${count} parameters.`);
+                    logToScreen(`[Debug] Sample: ${ids.slice(0, 5).join(', ')}...`);
+                }
                 return;
             }
             // Cubism 2 or other
@@ -1851,10 +1979,12 @@ class Live2DManager {
     startIdleMotionScheduler() {
         this.stopIdleMotionScheduler();
         
+        if (this.autonomyConfig && this.autonomyConfig.idleSchedulerEnabled === false) return;
+
         console.log('[Idle] Starting idle motion scheduler (Low Frequency)');
         this.isIdleMotionPlaying = false;
         
-        // 每 12 秒检查一次 (降低频率，避免多动)
+        // 每 20 秒检查一次 (进一步降低频率)
         this.idleMotionTimer = setInterval(async () => {
             // 检查模型是否加载并初始化
             if (!this.currentModel || !this.isInitialized) return;
@@ -1866,21 +1996,22 @@ class Live2DManager {
             if (this.motionTimer) return; // 有动作正在播放
             if (this.isIdleMotionPlaying) return; // 正在播放待机动作
             
-            // 60% 概率播放随机动作 (恢复活跃度)
-            if (Math.random() < 0.6) {
+            // 25% 概率触发一次待机事件
+            if (Math.random() < 0.25) {
                 this.isIdleMotionPlaying = true;
 
                 // 定义自然的待机动作 (移除强情绪和夸张动作)
                 const idleMotions = [
-                    'Sway',           // 摇摆 (已优化，幅度小)
-                    'MicroBodySway',  // 微小晃动 (New)
-                    'Search',         // 看看周围
-                    'HeadTilt',       // 歪头
-                    'Nod',            // 偶尔点头
-                    'SlightSmile',    // 微笑 (New)
-                    'BreathSigh',     // 叹气/深呼吸 (New)
-                    'EyeTwitch',      // 眨眼 (New)
-                    'Blink_Special'   // 特殊眨眼 (如果映射有)
+                    'EyeTwitch',
+                    'EyeTwitch',
+                    'MicroBodySway',
+                    'MicroBodySway',
+                    'SlightSmile',
+                    'BreathSigh',
+                    'HeadTilt',
+                    'Nod',
+                    'Search',
+                    'Blink_Special'
                 ];
                 
                 // 过滤可用动作
@@ -1892,27 +2023,22 @@ class Live2DManager {
                 });
                 
                 if (availableMotions.length > 0) {
-                    // 极低概率 (5%) 播放组合动作，或者完全移除以保持平滑
-                    // 用户反馈动作过多，这里我们暂时移除 Combo，只播放单个动作
                     const randomMotion = this.getRandomElement(availableMotions);
-                    console.log(`[Idle] Triggering natural idle motion: ${randomMotion}`);
+                    const fromBackend = !!(this.autonomyConfig && this.autonomyConfig.idleFromBackendEnabled) && Math.random() < 0.7;
+                    console.log(`[Idle] Triggering natural idle event: ${fromBackend ? 'backend_idle' : randomMotion}`);
                     
-                    // User verification helper
-                    const logMsg = `⚡ [Idle] Triggered: ${randomMotion}`;
+                    const logMsg = `⚡ [Idle] Triggered: ${fromBackend ? 'backend_idle' : randomMotion}`;
                     console.log(`%c ${logMsg}`, 'color: #00ff00; font-weight: bold; font-size: 12px;');
                     if (typeof logToScreen === 'function') {
                         logToScreen(logMsg);
                     }
                     
                     try {
-                        await this.playMotion(randomMotion);
-                        // 动作结束后，强制做一次极短的平滑归位，确保不卡在奇怪姿势
-                        // 这里的 tweenParameters 会自动读取当前值到目标值(0)
-                        // 使用较长的时间(1s)来做一个极其平滑的收尾
-                        // await this.tweenParameters({
-                        //    'ParamAngleX': 0, 'ParamAngleY': 0, 'ParamAngleZ': 0,
-                        //    'ParamBodyAngleX': 0, 'ParamBodyAngleY': 0, 'ParamBodyAngleZ': 0
-                        // }, 1000, t => t * (2 - t)); // easeOutQuad
+                        if (fromBackend) {
+                            await this.askIdleAgent();
+                        } else {
+                            await this.playMotion(randomMotion);
+                        }
                     } catch (e) {
                         console.warn('[Idle] Motion failed:', e);
                     }
@@ -1920,7 +2046,135 @@ class Live2DManager {
                 
                 this.isIdleMotionPlaying = false;
             }
-        }, 12000); // 12000ms = 12s
+        }, 20000);
+    }
+
+    async askIdleAgent(config = {}) {
+        if (!this.currentModel) return;
+        if (this.autonomyConfig && this.autonomyConfig.idleFromBackendEnabled === false) return;
+
+        const capabilities = this.getModelCapabilities();
+        const currentEmotion = this.currentEmotion || 'neutral';
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        if (config.apiKey) headers['X-Motion-Api-Key'] = config.apiKey;
+        if (config.baseUrl) headers['X-Motion-Base-Url'] = config.baseUrl;
+        if (config.model) headers['X-Motion-Model'] = config.model;
+
+        try {
+            const response = await fetch('/api/live2d/agent/idle', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    emotion: currentEmotion,
+                    capabilities: capabilities
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Idle Agent API error: ${response.status}`);
+            }
+
+            const decision = await response.json();
+
+            if (decision && decision.parameters) {
+                if (!this._agentTweenAbortId) this._agentTweenAbortId = 0;
+                this._agentTweenAbortId++;
+                const abortId = this._agentTweenAbortId;
+                const sanitize = (p) => {
+                    const out = {};
+                    if (!p || typeof p !== 'object') return out;
+                    for (const [k, v] of Object.entries(p)) {
+                        if (v === null) {
+                            out[k] = null;
+                            continue;
+                        }
+                        const n = Number(v);
+                        if (Number.isNaN(n)) continue;
+                        let vv = n;
+                        if (k === 'ParamAngleX' || k === 'ParamAngleY' || k === 'ParamAngleZ') {
+                            if (vv > 30) vv = 30;
+                            if (vv < -30) vv = -30;
+                        } else if (k === 'ParamBodyAngleX' || k === 'ParamBodyAngleY' || k === 'ParamBodyAngleZ') {
+                            if (vv > 10) vv = 10;
+                            if (vv < -10) vv = -10;
+                        } else if (k === 'ParamEyeBallX' || k === 'ParamEyeBallY' || k === 'ParamEyeBallX_L' || k === 'ParamEyeBallX_R' || k === 'ParamEyeBallY_L' || k === 'ParamEyeBallY_R') {
+                            if (vv > 1) vv = 1;
+                            if (vv < -1) vv = -1;
+                        } else if (k === 'ParamEyeLOpen' || k === 'ParamEyeROpen' || k === 'ParamMouthOpenY' || k === 'ParamCheek') {
+                            if (vv > 1) vv = 1;
+                            if (vv < 0) vv = 0;
+                        } else if (k === 'ParamMouthForm') {
+                            if (vv > 1) vv = 1;
+                            if (vv < -1) vv = -1;
+                        }
+                        out[k] = vv;
+                    }
+                    return out;
+                };
+                const params = sanitize(decision.parameters);
+                const keys = Object.keys(params).filter(k => params[k] !== undefined);
+                const tweenAgent = (targetParams, duration, easingFunc = (t) => t) => {
+                    return new Promise((resolve, reject) => {
+                        const startParams = {};
+                        const ks = Object.keys(targetParams);
+                        ks.forEach(key => {
+                            if (this.parameterOverrides && this.parameterOverrides[key] !== undefined) {
+                                startParams[key] = this.parameterOverrides[key];
+                            } else {
+                                try {
+                                    startParams[key] = this.currentModel.internalModel.coreModel.getParameterValueById(key);
+                                } catch (e) {
+                                    startParams[key] = 0;
+                                }
+                            }
+                        });
+                        const startTime = performance.now();
+                        let frameId = null;
+                        const animate = (currentTime) => {
+                            if (this._agentTweenAbortId !== abortId) {
+                                if (frameId) cancelAnimationFrame(frameId);
+                                reject('Cancelled');
+                                return;
+                            }
+                            const elapsed = currentTime - startTime;
+                            const progress = Math.min(elapsed / duration, 1);
+                            const easedProgress = easingFunc(progress);
+                            const currentFrameParams = {};
+                            ks.forEach(key => {
+                                const start = startParams[key];
+                                const end = targetParams[key];
+                                if (typeof start === 'number' && typeof end === 'number') {
+                                    currentFrameParams[key] = start + (end - start) * easedProgress;
+                                } else if (end === null) {
+                                    currentFrameParams[key] = null;
+                                }
+                            });
+                            this.applyParameters(currentFrameParams, true);
+                            if (progress < 1) {
+                                frameId = requestAnimationFrame(animate);
+                            } else {
+                                this.applyParameters(targetParams, true);
+                                resolve();
+                            }
+                        };
+                        frameId = requestAnimationFrame(animate);
+                    });
+                };
+                const easeInOut = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                await tweenAgent(params, 900, easeInOut).catch((e) => {
+                    if (e !== 'Cancelled') throw e;
+                });
+                await this.releaseParametersSmoothly(keys, 1200);
+            }
+
+            return decision;
+        } catch (error) {
+            console.error('[Idle Agent] Failed:', error);
+        }
     }
 
     // 加载模型
@@ -2912,6 +3166,11 @@ class Live2DManager {
                     } else if (toggle.id === 'mouse-tracking') {
                         this.mouseTrackingEnabled = isChecked;
                         console.log(`眼神跟随已${isChecked ? '开启' : '关闭'}`);
+                        if (isChecked) {
+                            this.stopRandomEyes();
+                        } else if (this.autonomyConfig && this.autonomyConfig.randomEyesEnabled) {
+                            this.startRandomEyes();
+                        }
                         // 如果关闭，重置视线到中心
                         if (!isChecked && this.currentModel) {
                             this.currentModel.focus(0, 0);
@@ -3215,10 +3474,37 @@ class Live2DManager {
         if (!this.overriddenIndices) this.overriddenIndices = {}; // Cache for indices
 
         const core = this.currentModel.internalModel.coreModel;
+        if (!this._paramSupportCache) this._paramSupportCache = {};
+        const isSupported = (id) => {
+            if (this._paramSupportCache[id] !== undefined) return this._paramSupportCache[id];
+            let ok = false;
+            try {
+                if (typeof core.getParameterIndex === 'function') {
+                    ok = core.getParameterIndex(id) !== -1;
+                }
+                if (!ok && core._parameterIds && Array.isArray(core._parameterIds)) {
+                    ok = core._parameterIds.indexOf(id) !== -1;
+                }
+            } catch (_) {
+                ok = false;
+            }
+            this._paramSupportCache[id] = ok;
+            return ok;
+        };
+
+        const expandedParams = { ...(params || {}) };
+        if (expandedParams.ParamEyeBallX !== undefined) {
+            if (expandedParams.ParamEyeBallX_L === undefined) expandedParams.ParamEyeBallX_L = expandedParams.ParamEyeBallX;
+            if (expandedParams.ParamEyeBallX_R === undefined) expandedParams.ParamEyeBallX_R = expandedParams.ParamEyeBallX;
+        }
+        if (expandedParams.ParamEyeBallY !== undefined) {
+            if (expandedParams.ParamEyeBallY_L === undefined) expandedParams.ParamEyeBallY_L = expandedParams.ParamEyeBallY;
+            if (expandedParams.ParamEyeBallY_R === undefined) expandedParams.ParamEyeBallY_R = expandedParams.ParamEyeBallY;
+        }
 
         // Update overrides
-        Object.keys(params).forEach(key => {
-            const value = params[key];
+        Object.keys(expandedParams).forEach(key => {
+            const value = expandedParams[key];
             // If value is null, remove from overrides (release control)
             if (value === null) {
                 delete this.parameterOverrides[key];
@@ -3231,6 +3517,7 @@ class Live2DManager {
 
                 if (typeof logToScreen === 'function') logToScreen(`[Motion] Released param: ${key}`);
             } else {
+                if (!isSupported(key)) return;
                 this.parameterOverrides[key] = value;
                 
                 // Cache index
@@ -3242,9 +3529,7 @@ class Live2DManager {
                 // Also set immediately for responsiveness
                 try {
                     core.setParameterValueById(key, value);
-                } catch (e) {
-                    console.warn(`[Motion] Failed to set param ${key} immediately:`, e);
-                }
+                } catch (_) {}
             }
         });
     }
@@ -3254,6 +3539,9 @@ class Live2DManager {
         if (!keys || keys.length === 0) return;
         
         return new Promise(resolve => {
+            const core = (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel)
+                ? this.currentModel.internalModel.coreModel
+                : null;
             const startValues = {};
             keys.forEach(key => {
                 // If override exists, use it as start. Else use internal or 0.
@@ -3285,9 +3573,13 @@ class Live2DManager {
                 activeKeys.forEach(key => {
                     const start = startValues[key];
                     // Target is dynamic!
-                    const target = (this.internalParameterValues && this.internalParameterValues[key]) !== undefined 
-                        ? this.internalParameterValues[key] 
-                        : 0;
+                    let target = (this.internalParameterValues && this.internalParameterValues[key]) !== undefined
+                        ? this.internalParameterValues[key]
+                        : undefined;
+                    if (target === undefined && core && typeof core.getParameterValueById === 'function') {
+                        try { target = core.getParameterValueById(key); } catch (_) {}
+                    }
+                    if (target === undefined) target = 0;
                     
                     if (progress < 1) {
                         const val = start + (target - start) * eased;
@@ -3313,6 +3605,16 @@ class Live2DManager {
     // 请求后端 Motion Agent 决策动作
     async askMotionAgent(userText, aiText, config = {}) {
         if (!this.currentModel) return;
+
+        const now = Date.now();
+        if (!this._motionAgentLastTs) this._motionAgentLastTs = 0;
+        if (!this._motionAgentLastKey) this._motionAgentLastKey = '';
+        const historyLen = Array.isArray(config.history) ? config.history.length : 0;
+        const reqKey = `${String(userText || '').slice(0, 120)}|${String(aiText || '').slice(0, 120)}|${historyLen}`;
+        if (reqKey === this._motionAgentLastKey && (now - this._motionAgentLastTs) < 2000) return;
+        if ((now - this._motionAgentLastTs) < 500) return;
+        this._motionAgentLastKey = reqKey;
+        this._motionAgentLastTs = now;
         
         const capabilities = this.getModelCapabilities();
         const currentEmotion = this.currentEmotion || 'neutral';
@@ -3368,9 +3670,94 @@ class Live2DManager {
 
             // 执行参数控制
             if (decision.parameters) {
+                if (!this._agentTweenAbortId) this._agentTweenAbortId = 0;
+                this._agentTweenAbortId++;
+                const abortId = this._agentTweenAbortId;
+                const sanitize = (p) => {
+                    const out = {};
+                    if (!p || typeof p !== 'object') return out;
+                    for (const [k, v] of Object.entries(p)) {
+                        if (v === null) {
+                            out[k] = null;
+                            continue;
+                        }
+                        const n = Number(v);
+                        if (Number.isNaN(n)) continue;
+                        let vv = n;
+                        if (k === 'ParamAngleX' || k === 'ParamAngleY' || k === 'ParamAngleZ') {
+                            if (vv > 30) vv = 30;
+                            if (vv < -30) vv = -30;
+                        } else if (k === 'ParamBodyAngleX' || k === 'ParamBodyAngleY' || k === 'ParamBodyAngleZ') {
+                            if (vv > 10) vv = 10;
+                            if (vv < -10) vv = -10;
+                        } else if (k === 'ParamEyeBallX' || k === 'ParamEyeBallY' || k === 'ParamEyeBallX_L' || k === 'ParamEyeBallX_R' || k === 'ParamEyeBallY_L' || k === 'ParamEyeBallY_R') {
+                            if (vv > 1) vv = 1;
+                            if (vv < -1) vv = -1;
+                        } else if (k === 'ParamEyeLOpen' || k === 'ParamEyeROpen' || k === 'ParamMouthOpenY' || k === 'ParamCheek') {
+                            if (vv > 1) vv = 1;
+                            if (vv < 0) vv = 0;
+                        } else if (k === 'ParamMouthForm') {
+                            if (vv > 1) vv = 1;
+                            if (vv < -1) vv = -1;
+                        }
+                        out[k] = vv;
+                    }
+                    return out;
+                };
+                const params = sanitize(decision.parameters);
+                const keys = Object.keys(params).filter(k => params[k] !== undefined);
+                const tweenAgent = (targetParams, duration, easingFunc = (t) => t) => {
+                    return new Promise((resolve, reject) => {
+                        const startParams = {};
+                        const ks = Object.keys(targetParams);
+                        ks.forEach(key => {
+                            if (this.parameterOverrides && this.parameterOverrides[key] !== undefined) {
+                                startParams[key] = this.parameterOverrides[key];
+                            } else {
+                                try {
+                                    startParams[key] = this.currentModel.internalModel.coreModel.getParameterValueById(key);
+                                } catch (e) {
+                                    startParams[key] = 0;
+                                }
+                            }
+                        });
+                        const startTime = performance.now();
+                        let frameId = null;
+                        const animate = (currentTime) => {
+                            if (this._agentTweenAbortId !== abortId) {
+                                if (frameId) cancelAnimationFrame(frameId);
+                                reject('Cancelled');
+                                return;
+                            }
+                            const elapsed = currentTime - startTime;
+                            const progress = Math.min(elapsed / duration, 1);
+                            const easedProgress = easingFunc(progress);
+                            const currentFrameParams = {};
+                            ks.forEach(key => {
+                                const start = startParams[key];
+                                const end = targetParams[key];
+                                if (typeof start === 'number' && typeof end === 'number') {
+                                    currentFrameParams[key] = start + (end - start) * easedProgress;
+                                } else if (end === null) {
+                                    currentFrameParams[key] = null;
+                                }
+                            });
+                            this.applyParameters(currentFrameParams, true);
+                            if (progress < 1) {
+                                frameId = requestAnimationFrame(animate);
+                            } else {
+                                this.applyParameters(targetParams, true);
+                                resolve();
+                            }
+                        };
+                        frameId = requestAnimationFrame(animate);
+                    });
+                };
                 console.log('[Motion Agent] Applying parameters (Smooth):', decision.parameters);
-                // Use smooth interpolation for all parameter changes
-                this.tweenParameters(decision.parameters, 500, t => 1 - Math.pow(1 - t, 3));
+                await tweenAgent(params, 500, t => 1 - Math.pow(1 - t, 3)).catch((e) => {
+                    if (e !== 'Cancelled') throw e;
+                });
+                await this.releaseParametersSmoothly(keys, 900);
             }
             
             return decision;
