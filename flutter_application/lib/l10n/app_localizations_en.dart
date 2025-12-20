@@ -103,6 +103,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get generalBasicSettings => 'Basic Settings';
 
   @override
+  String get generalAutoConnectBackend => 'Auto-connect Backend';
+
+  @override
+  String get generalAutoConnectBackendSubtitle =>
+      'Automatically check and connect to the configured Python backend';
+
+  @override
+  String get generalAutoStartBackend => 'Auto-start Backend';
+
+  @override
+  String get generalAutoStartBackendSubtitle =>
+      'Automatically start local backend process (Windows release & localhost)';
+
+  @override
+  String get generalBackendStatus => 'Backend Status';
+
+  @override
+  String get backendStatusConnected => 'Connected';
+
+  @override
+  String get backendStatusInitializing => 'Connecting';
+
+  @override
+  String get backendStatusIncompatible => 'Incompatible';
+
+  @override
+  String get backendStatusDisconnected => 'Disconnected';
+
+  @override
+  String get backendStatusAutoConnectOff => 'Auto-connect off';
+
+  @override
+  String get backendStatusBackendDisabled => 'Disabled';
+
+  @override
   String get generalUserNickname => 'User Nickname';
 
   @override

@@ -102,6 +102,40 @@ class AppLocalizationsZh extends AppLocalizations {
   String get generalBasicSettings => '基本设置';
 
   @override
+  String get generalAutoConnectBackend => '自动连接后端';
+
+  @override
+  String get generalAutoConnectBackendSubtitle => '开启后自动检测并连接配置的 Python 后端';
+
+  @override
+  String get generalAutoStartBackend => '自动启动后端';
+
+  @override
+  String get generalAutoStartBackendSubtitle =>
+      '开启后在本机自动启动后端进程（Windows Release 且 localhost）';
+
+  @override
+  String get generalBackendStatus => '后端连接状态';
+
+  @override
+  String get backendStatusConnected => '已连接';
+
+  @override
+  String get backendStatusInitializing => '连接中';
+
+  @override
+  String get backendStatusIncompatible => '不兼容';
+
+  @override
+  String get backendStatusDisconnected => '未连接';
+
+  @override
+  String get backendStatusAutoConnectOff => '未自动连接';
+
+  @override
+  String get backendStatusBackendDisabled => '未启用';
+
+  @override
   String get generalUserNickname => '用户昵称';
 
   @override

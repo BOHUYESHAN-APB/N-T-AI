@@ -252,6 +252,7 @@ class BrainService {
   List<String> _danmakuBuffer = [];
   Timer? _initiativeTimer;
   bool _isProcessing = false;
+  bool _initiativeLoopRequested = false;
 
   void feedDanmaku(String content) {
     _danmakuBuffer.add(content);
@@ -261,14 +262,17 @@ class BrainService {
   }
 
   void startInitiativeLoop() {
+    _initiativeLoopRequested = true;
     _initiativeTimer?.cancel();
     debugPrint("[BrainService] Starting Initiative Loop...");
     
     SharedPreferences.getInstance().then((prefs) {
+      if (!_initiativeLoopRequested) return;
       final interval = prefs.getInt('settings.ai.danmakuBatchInterval') ?? 20;
       final safeInterval = interval < 5 ? 5 : interval;
       
       _initiativeTimer = Timer.periodic(Duration(seconds: safeInterval), (timer) async {
+        if (!_initiativeLoopRequested) return;
         final prefs = await SharedPreferences.getInstance();
         final enabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
         
@@ -284,6 +288,7 @@ class BrainService {
   }
 
   void stopInitiativeLoop() {
+    _initiativeLoopRequested = false;
     _initiativeTimer?.cancel();
     debugPrint("[BrainService] Stopping Initiative Loop...");
   }
@@ -394,9 +399,8 @@ Based on these comments, do you want to proactively say something to the audienc
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
     final prefs = await SharedPreferences.getInstance();
     final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
-    // Force Backend Enabled
-    final backendEnabled = true; // prefs.getBool('settings.backend.enabled') ?? false;
-    final isServerMode = true; // Force Server Mode
+    final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
+    final isServerMode = backendEnabled;
 
     debugPrint("[BRAIN] Process Message Start");
     debugPrint("[BRAIN] Backend Enabled: $backendEnabled");
@@ -431,92 +435,62 @@ Based on these comments, do you want to proactively say something to the audienc
       _context = _context.sublist(_context.length - 20);
     }
 
-    // === SERVER ORCHESTRATION MODE (FORCED) ===
-    // User requested to disable lightweight client-side logic and rely on backend.
-    // We proceed unconditionally.
-      _statusController.add("Connecting to Neural Backend...");
-      debugPrint("[BRAIN] Entering Server Mode");
-      debugPrint("[BRAIN] enableBrowser: $enableBrowser");
-      debugPrint("[BRAIN] User message: ${userMessage.length > 50 ? userMessage.substring(0, 50) + '...' : userMessage}");
-      try {
-        // In Server Mode, we send the raw context or just the last message depending on backend design.
-        // Our Python backend currently takes a list of messages and handles its own memory/tools.
-        // However, to let the backend handle the "Persona" and "Memory", we should ideally 
-        // NOT send the client-side system prompt.
-        
-        // We'll send the conversation history, but let the backend inject its own system prompt.
-        // The backend (main.py) expects OpenAIRequest.
-        
-        List<Map<String, String>> messages = List.from(_context);
-        if (!allowEmojis) {
-          messages = [
-            {'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'},
-            ...messages,
-          ];
-        }
-        
-        debugPrint("[BRAIN] Sending ${messages.length} messages to backend");
-        // Call LLM (which points to Python Backend)
-        final aiResponse = await _llmService.chat(
-          messages,
-          usageType: 'main',
-          temperature: dynamicTemperature,
-          sessionId: sessionId,
-        );
-        String response = aiResponse.content;
-        if (!allowEmojis) {
-          response = _stripEmojis(response);
-        }
-        
-        // Handle Reasoning Content & Tool Calls (DeepSeek Thinking Mode)
-        if (aiResponse.reasoningContent != null) {
-          debugPrint("[BRAIN] Received Reasoning Content: ${aiResponse.reasoningContent!.length} chars");
-        }
-        
-        debugPrint("[BRAIN] Received response length: ${response.length}");
-        debugPrint("[BRAIN] Response contains [IMAGE: tags: ${response.contains('[IMAGE')}");
-        if (response.contains('[IMAGE')) {
-          final imageCount = '[IMAGE'.allMatches(response).length;
-          debugPrint("[BRAIN] Found $imageCount image tags in response");
-        }
-
-        // Handle Emotion directly from Backend
-        if (aiResponse.emotion != null && enableExpressionAgent) {
-           // Backend returns direct emotion string or JSON, we trust it.
-           // Try to parse if it's a map, otherwise treat as style string
-           final emotionMap = ExpressionService.tryExtractExpressionPayload(aiResponse.emotion!) 
-                              ?? ExpressionService.tryExtractExpressionPayload("expression: ${aiResponse.emotion}");
-           
-           if (emotionMap != null) {
-              unawaited(_expressionAgent.applyDynamic(emotionMap));
-           } else {
-              // If it's just a string like "happy", we might need a mapper or just ignore if no mapper exists.
-              // For now, we assume the backend returns compatible format or we rely on inference fallback below.
-           }
-        }
-
-        // Update Context
-        _context.add({'role': 'assistant', 'content': response});
-        
-        finalResponse = response; // Assign for later use (memes, etc.)
-        serverResponse = aiResponse; // Capture full response
-
-        // In Server Mode, we skip local learning and compression, assuming backend handles it.
-        _statusController.add(""); 
-        // We continue instead of returning immediately to allow post-processing (memes, expression inference)
-        // return aiResponse; 
-      } catch (e) {
-        _statusController.add("Backend Error: $e");
-        return AiResponse(content: "Error connecting to backend: $e");
+    _statusController.add(isServerMode ? "Connecting to Neural Backend..." : "Connecting to AI Provider...");
+    debugPrint("[BRAIN] Entering ${isServerMode ? 'Server' : 'Client'} Mode");
+    debugPrint("[BRAIN] enableBrowser: $enableBrowser");
+    debugPrint("[BRAIN] User message: ${userMessage.length > 50 ? userMessage.substring(0, 50) + '...' : userMessage}");
+    try {
+      List<Map<String, String>> messages = List.from(_context);
+      if (!allowEmojis) {
+        messages = [
+          {'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'},
+          ...messages,
+        ];
       }
-    /* 
-    // CLIENT SIDE LIGHTWEIGHT MODE - DISABLED
-    } else {
-      // ReAct Loop (Client Side)
-      // ... (Code commented out as requested)
-      return AiResponse(content: "Client-side lightweight mode is disabled. Please enable Backend in System Settings.");
+
+      debugPrint("[BRAIN] Sending ${messages.length} messages");
+      final aiResponse = await _llmService.chat(
+        messages,
+        usageType: 'main',
+        temperature: dynamicTemperature,
+        providerOverride: providerOverride,
+        sessionId: sessionId,
+      );
+      String response = aiResponse.content;
+      if (!allowEmojis) {
+        response = _stripEmojis(response);
+      }
+
+      if (aiResponse.reasoningContent != null) {
+        debugPrint("[BRAIN] Received Reasoning Content: ${aiResponse.reasoningContent!.length} chars");
+      }
+
+      debugPrint("[BRAIN] Received response length: ${response.length}");
+      debugPrint("[BRAIN] Response contains [IMAGE: tags: ${response.contains('[IMAGE')}");
+      if (response.contains('[IMAGE')) {
+        final imageCount = '[IMAGE'.allMatches(response).length;
+        debugPrint("[BRAIN] Found $imageCount image tags in response");
+      }
+
+      if (aiResponse.emotion != null && enableExpressionAgent) {
+        final emotionMap = ExpressionService.tryExtractExpressionPayload(aiResponse.emotion!) ??
+            ExpressionService.tryExtractExpressionPayload("expression: ${aiResponse.emotion}");
+
+        if (emotionMap != null) {
+          unawaited(_expressionAgent.applyDynamic(emotionMap));
+        }
+      }
+
+      _context.add({'role': 'assistant', 'content': response});
+
+      finalResponse = response;
+      serverResponse = aiResponse;
+
+      _statusController.add("");
+    } catch (e) {
+      _statusController.add("Request Error: $e");
+      return AiResponse(content: "请求失败：$e");
     }
-    */
     
     /*
     // === CLIENT ORCHESTRATION MODE (Legacy/Standalone) ===

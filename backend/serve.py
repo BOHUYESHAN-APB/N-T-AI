@@ -160,9 +160,14 @@ def main():
         # Try finding an available port if the default is taken
         start_port = port
         max_retries = 10
+        
+        # Check if port scanning is disabled via env var or if we are using a custom port
+        if os.environ.get("DISABLE_PORT_SCAN", "false").lower() == "true":
+            max_retries = 0
+            
         actual_port = start_port
         
-        for i in range(max_retries):
+        for i in range(max_retries + 1):
             check_port = start_port + i
             if not _can_connect(probe_host, check_port):
                 # Port is free!
@@ -230,6 +235,8 @@ def main():
     except Exception as e:
         print("CRITICAL ERROR DURING SERVER STARTUP:")
         traceback.print_exc()
+        if os.environ.get("DISABLE_PORT_SCAN", "false").lower() == "true":
+            sys.exit(1)
         print("\nPress Enter to exit...")
         input()
 

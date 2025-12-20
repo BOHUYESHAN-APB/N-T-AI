@@ -22,7 +22,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
     }
 
     private var pendingAction: String? = null
-    private var backendUrl: String = "http://localhost:8000"
+    private var backendUrl: String = "http://localhost:23456"
 
     fun setupChannel(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)

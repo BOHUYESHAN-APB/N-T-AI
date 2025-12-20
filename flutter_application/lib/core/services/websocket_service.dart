@@ -11,13 +11,28 @@ class WebSocketService {
   bool _isConnected = false;
   Timer? _reconnectTimer;
   String? _lastUrl;
+  bool _disposed = false;
+
+  Future<void> disconnect() async {
+    if (_disposed) return;
+    _lastUrl = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    try {
+      await _webSocket?.close();
+    } catch (_) {}
+    _webSocket = null;
+    _isConnected = false;
+  }
 
   void connect(String url) async {
+    if (_disposed) return;
     // Avoid duplicate connection to same URL
     if (_isConnected && _lastUrl == url) return;
     if (_isConnected) {
       await _webSocket?.close();
     }
+    if (_disposed) return;
     
     _lastUrl = url;
     
@@ -34,6 +49,13 @@ class WebSocketService {
       
       debugPrint('[WebSocket] Connecting to $wsUrl');
       _webSocket = await WebSocket.connect(wsUrl);
+      if (_disposed) {
+        try {
+          await _webSocket?.close();
+        } catch (_) {}
+        _webSocket = null;
+        return;
+      }
       _isConnected = true;
       debugPrint('[WebSocket] Connected');
       
@@ -66,14 +88,17 @@ class WebSocketService {
   }
 
   void _scheduleReconnect() {
+    if (_disposed) return;
     if (_reconnectTimer?.isActive ?? false) return;
     
     _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (_disposed) return;
       if (_lastUrl != null) connect(_lastUrl!);
     });
   }
   
   void dispose() {
+    _disposed = true;
     _reconnectTimer?.cancel();
     _webSocket?.close();
     _messageController.close();

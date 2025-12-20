@@ -65,7 +65,7 @@ class FloatingWindowService : Service() {
         Log.d(TAG, "FloatingWindowService started")
 
         val modelPath = intent?.getStringExtra("modelPath") ?: ""
-        val backendUrl = intent?.getStringExtra("backendUrl") ?: "http://localhost:8000"
+        val backendUrl = intent?.getStringExtra("backendUrl") ?: "http://localhost:23456"
 
         // 创建浮窗
         createFloatingWindow(modelPath, backendUrl)

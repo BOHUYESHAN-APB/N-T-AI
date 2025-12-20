@@ -42,15 +42,15 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
 
   // StreamSubscription? _expressionSub; // Removed
   // StreamSubscription? _motionSub;     // Removed
+  Timer? _initDelayTimer;
 
   @override
   void initState() {
     super.initState();
     // Delay WebView initialization to avoid blocking the main thread during startup
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        _initWebView();
-      }
+    _initDelayTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      _initWebView();
     });
 
     // NOTE: We no longer listen to streams here for local injection.
@@ -68,13 +68,17 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
 
   @override
   void dispose() {
+    _initDelayTimer?.cancel();
+    _initDelayTimer = null;
     // _expressionSub and _motionSub are removed
     if (widget.controller != null) {
       widget.controller!.detach();
     }
     if (Platform.isWindows) {
       try {
-        _windowsController.dispose();
+        if (_windowsController.value.isInitialized) {
+          _windowsController.dispose();
+        }
       } catch (_) {}
     }
     super.dispose();
@@ -110,7 +114,9 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
 
     final params = <String>[];
     params.add('model=${Uri.encodeComponent(path)}');
-    if (kDebugMode) params.add('debug=true');
+    // Use setting for debug mode
+    final debug = prefs.getBool('settings.live2dDebug') ?? false;
+    params.add('debug=$debug'); 
     if (widget.floatingUi) params.add('floating=true');
     params.add('controls=${widget.showControls}');
     final query = params.join('&');

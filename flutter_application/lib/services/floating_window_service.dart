@@ -5,6 +5,9 @@ abstract class FloatingWindowService {
   /// 初始化浮窗服务
   Future<void> initialize();
 
+  /// 更新后端 URL
+  void updateBackendUrl(String url);
+
   /// 设置窗口关闭回调
   void setOnCloseCallback(VoidCallback callback);
 

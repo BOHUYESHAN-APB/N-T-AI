@@ -64,7 +64,12 @@ Future<void> main(List<String> args) async {
       // Initialize Backend Service (Starts local backend on Windows, checks connection)
       try {
         logToFile("Initializing BackendService...");
-        await BackendService().init(controller.settings.pythonBackendUrl);
+        await BackendService().init(
+          controller.settings.pythonBackendUrl,
+          enabled: controller.settings.enablePythonBackend &&
+              controller.settings.autoConnectBackend,
+          autoStartLocal: controller.settings.autoStartBackend,
+        );
         logToFile("BackendService initialized");
       } catch (e, stack) {
         logToFile("Failed to initialize BackendService: $e\n$stack");
@@ -77,7 +82,9 @@ Future<void> main(List<String> args) async {
       debugPrint("==================================================");
       
       // Run Diagnostics (Fire and forget to avoid blocking startup)
-      DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
+      if (controller.settings.autoConnectBackend) {
+        DiagnosticsService().runDiagnostics(controller.settings.pythonBackendUrl);
+      }
 
       // Propagate configured backend URL to services that need it
       try {

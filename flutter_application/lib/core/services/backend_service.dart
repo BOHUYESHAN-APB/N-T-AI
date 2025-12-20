@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -13,24 +14,102 @@ class BackendService {
 
   Process? _backendProcess;
   bool _isConnected = false;
-  String _backendUrl = 'http://localhost:23456';
+  String _backendUrl = 'http://localhost:8000';
+  String get backendUrl => _backendUrl;
+  bool _enabled = false;
+  Timer? _healthCheckTimer;
+  Timer? _serverInfoPollTimer;
   
   // Stream to notify UI about connection status changes
   final _statusController = StreamController<BackendStatus>.broadcast();
   Stream<BackendStatus> get statusStream => _statusController.stream;
 
+  final _urlController = StreamController<String>.broadcast();
+  Stream<String> get urlStream => _urlController.stream;
+
   BackendStatus _currentStatus = BackendStatus.disconnected;
   BackendStatus get currentStatus => _currentStatus;
+
+  String _normalizeBaseUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return 'http://localhost:23456';
+    return trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+  }
+
+  Future<bool> _isCompatibleBackend(String baseUrl) async {
+    try {
+      final uri = Uri.parse('$baseUrl/health');
+      debugPrint('[BackendService] Checking compatibility: $uri');
+      final resp = await http.get(uri).timeout(const Duration(seconds: 3));
+      if (resp.statusCode != 200) {
+        debugPrint('[BackendService] Health check failed: Status ${resp.statusCode}');
+        return false;
+      }
+      final body = jsonDecode(utf8.decode(resp.bodyBytes));
+      final isCompatible = body is Map && body['service']?.toString() == 'nt-ai-backend';
+      if (!isCompatible) {
+         debugPrint('[BackendService] Health check failed: Incompatible response $body');
+      }
+      return isCompatible;
+    } catch (e) {
+      debugPrint('[BackendService] Health check failed: $e');
+      return false;
+    }
+  }
 
   /// Initialize the backend service.
   /// On Windows, this will attempt to start the local backend server.
   /// On Android, it will check connection to the configured URL.
-  Future<void> init(String configuredUrl) async {
-    _backendUrl = configuredUrl;
+  Future<void> init(
+    String configuredUrl, {
+    required bool enabled,
+    bool autoStartLocal = false,
+  }) async {
+    _backendUrl = _normalizeBaseUrl(configuredUrl);
+    if (!enabled) {
+      _enabled = false;
+      _isConnected = false;
+      _stopHealthCheck();
+      _updateStatus(BackendStatus.disconnected);
+      return;
+    }
+
+    _enabled = true;
     _updateStatus(BackendStatus.initializing);
 
-    if (Platform.isWindows) {
-      await _startLocalBackend();
+    // 1. First, try to connect to the configured URL directly.
+    // If the user has manually started a backend (e.g. on port 23456) and configured it,
+    // we should prioritize that over starting a new instance or reading stale server_info.json.
+    if (await _isCompatibleBackend(_backendUrl)) {
+      debugPrint('[BackendService] Successfully connected to configured backend at $_backendUrl');
+      _updateStatus(BackendStatus.connected);
+      _isConnected = true;
+      // Start health check to maintain status
+      _startHealthCheck();
+      return;
+    } else {
+      debugPrint('[BackendService] Initial connection to $_backendUrl failed.');
+    }
+
+    // 2. If connection failed and auto-start is enabled, try to start local backend.
+    // We allow this in Debug mode too if the user explicitly enabled the switch.
+    if (autoStartLocal && Platform.isWindows) {
+      final uri = Uri.tryParse(configuredUrl);
+      final port = uri?.port ?? 8000;
+      
+      // Heuristic: If port is custom (e.g. 23456), do not auto-start bundled backend (which uses 8000+).
+      // This prevents the bundled backend from overriding a manually configured backend that might just be slow to start.
+      if (port != 23456 && port != 8000 && (port < 8000 || port > 8020)) {
+         debugPrint('[BackendService] Configured port $port suggests custom backend. Skipping auto-start of bundled backend.');
+         _startHealthCheck();
+         return;
+      }
+
+      final host = uri?.host.toLowerCase() ?? '';
+      final isLocalhost = host.isEmpty || host == 'localhost' || host == '127.0.0.1';
+      if (isLocalhost) {
+        await _startLocalBackend();
+      }
     }
     
     // Start periodic health check
@@ -39,9 +118,28 @@ class BackendService {
 
   /// Updates the configured backend URL (e.g. from Settings).
   void updateUrl(String newUrl) {
-    _backendUrl = newUrl;
+    final normalized = _normalizeBaseUrl(newUrl);
+    if (_backendUrl != normalized) {
+      _backendUrl = normalized;
+      _urlController.add(_backendUrl);
+    }
     // Trigger immediate check
-    checkConnection();
+    if (_enabled) {
+      checkConnection();
+    }
+  }
+
+  void setEnabled(bool enabled) {
+    if (_enabled == enabled) return;
+    _enabled = enabled;
+    if (!enabled) {
+      _isConnected = false;
+      _stopHealthCheck();
+      _updateStatus(BackendStatus.disconnected);
+      return;
+    }
+    _updateStatus(BackendStatus.initializing);
+    _startHealthCheck();
   }
 
   /// Checks if a local port is in use.
@@ -57,12 +155,10 @@ class BackendService {
 
   /// Attempts to start the bundled Python backend on Windows.
   Future<void> _startLocalBackend() async {
-    // Force enable backend, ignoring potentially stale settings
-    const enabled = true; 
-    
-    if (!enabled) {
-      debugPrint('[BackendService] Backend disabled in settings.');
-      return;
+    // Debug 模式下，严禁启动同级 server.exe，防止混淆 (用户反馈构建脚本可能导致 server 文件夹残留)
+    if (kDebugMode) {
+       debugPrint('[BackendService] Debug mode: Skipping local backend startup to avoid conflict with development backend.');
+       return; 
     }
 
     // Dynamic Port Logic:
@@ -108,18 +204,13 @@ class BackendService {
            final content = await serverInfoFile.readAsString();
            final info = jsonDecode(content);
            final url = info['url'] as String;
-           // Verify health
-           final uri = Uri.parse('$url/health');
-           try {
-             final resp = await http.get(uri).timeout(const Duration(milliseconds: 500));
-             if (resp.statusCode == 200) {
-               debugPrint('[BackendService] Found existing active backend at $url');
-               _updateUrlAndNotify(url);
-               _updateStatus(BackendStatus.connected);
-               return; // Already running and healthy
-             }
-           } catch (_) {
-             debugPrint('[BackendService] Stale server_info.json found. Restarting...');
+           if (await _isCompatibleBackend(url)) {
+             debugPrint('[BackendService] Found existing active backend at $url');
+             _updateUrlAndNotify(url);
+             _updateStatus(BackendStatus.connected);
+             return;
+           } else {
+             debugPrint('[BackendService] Stale or incompatible server_info.json found. Restarting...');
            }
         } catch (e) {
           debugPrint('[BackendService] Error reading server_info.json: $e');
@@ -134,6 +225,7 @@ class BackendService {
         [],
         mode: ProcessStartMode.normal, // Use normal mode to capture stdout/stderr
         workingDirectory: backendWorkDir,
+        environment: {'DISABLE_PORT_SCAN': 'true'},
       );
       
       debugPrint('[BackendService] Backend process started with PID: ${_backendProcess?.pid}');
@@ -160,7 +252,8 @@ class BackendService {
       
       // Polling for server_info.json as a backup if stdout parsing fails or is delayed
       int attempts = 0;
-      Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+      _serverInfoPollTimer?.cancel();
+      _serverInfoPollTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
         attempts++;
         if (attempts > 20 || _isConnected) { // Stop after 10 seconds or if connected
           timer.cancel();
@@ -187,16 +280,21 @@ class BackendService {
   }
 
   void _updateUrlAndNotify(String url) {
-    if (_backendUrl != url) {
-      _backendUrl = url;
+    final normalized = _normalizeBaseUrl(url);
+    if (_backendUrl != normalized) {
+      _backendUrl = normalized;
+      debugPrint('[BackendService] Backend URL updated to: $url');
       // Also update shared prefs so other services pick it up
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('settings.backend.url', url);
-        // Also update SettingsController via global scope if possible, but simpler to just set pref
-        // because SettingsController listens to prefs or reloads.
-        // Actually, SettingsController might need a reload. 
-        // For now, we rely on services using BackendService singleton or reading prefs.
+        // Force update SettingsController if it's already initialized
+        // This is a bit of a hack, ideally SettingsController should listen to BackendService
+        // But since we don't have direct access to the controller instance here easily without GetIt/Provider context,
+        // we rely on the preference update.
+        // HOWEVER, SettingsController usually loads once. We need to tell the UI to refresh.
+        // Let's rely on the stream.
       });
+      _urlController.add(_backendUrl);
       // Notify internal listeners
       checkConnection();
     }
@@ -204,55 +302,149 @@ class BackendService {
 
   /// Periodically checks if the backend is reachable.
   void _startHealthCheck() {
-    Timer.periodic(const Duration(seconds: 5), (timer) {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       checkConnection();
     });
     // Check immediately
     checkConnection();
   }
 
+  void _stopHealthCheck() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
+  }
+
   Future<void> checkConnection() async {
+    if (!_enabled) return;
     try {
       final uri = Uri.parse('$_backendUrl/health'); // Assuming /health or root exists
       // Use a short timeout
       final response = await http.get(uri).timeout(const Duration(seconds: 2));
       
       if (response.statusCode == 200) {
-        if (!_isConnected) {
+        final body = jsonDecode(utf8.decode(response.bodyBytes));
+        final compatible = body is Map && body['service']?.toString() == 'nt-ai-backend';
+        if (compatible) {
           _isConnected = true;
           _updateStatus(BackendStatus.connected);
-          debugPrint('[BackendService] Connected to $_backendUrl');
+        } else {
+          _isConnected = false;
+          _updateStatus(BackendStatus.incompatible);
         }
       } else {
-        if (_isConnected) {
-          _isConnected = false;
-          _updateStatus(BackendStatus.disconnected);
-          debugPrint('[BackendService] Disconnected (Status ${response.statusCode})');
+        _isConnected = false;
+        _updateStatus(BackendStatus.disconnected);
+        _tryRecoverConnection();
+      }
+    } catch (e) {
+      _isConnected = false;
+      _updateStatus(BackendStatus.disconnected);
+      _tryRecoverConnection();
+    }
+  }
+
+  /// Tries to recover connection by checking server_info.json for a new port
+  Future<void> _tryRecoverConnection() async {
+    if (!Platform.isWindows) return;
+    try {
+      File? serverInfoFile;
+      
+      // In Debug mode, prioritize development paths because the build process might copy 'server' folder
+      // to the build output, causing the app to find the stale bundled backend info instead of the live dev backend.
+      if (kDebugMode) {
+         final devCandidates = [
+           '../backend/server_info.json',
+           '../../backend/server_info.json',
+           '../../../backend/server_info.json',
+           'server_info.json',
+         ];
+         for (final p in devCandidates) {
+           final f = File(p);
+           if (await f.exists()) {
+             serverInfoFile = f;
+             debugPrint('[BackendService] Debug mode: Found server_info.json at ${f.path}');
+             break;
+           }
+         }
+      }
+
+      // If not found (or not in debug mode), try bundled locations
+      if (serverInfoFile == null) {
+        // 1. 尝试通过 server.exe 定位 server_info.json (标准打包结构)
+        String? exePath;
+        final appDir = p.dirname(Platform.resolvedExecutable);
+        final candidateExes = [
+          p.join(appDir, 'server', 'server.exe'),
+          p.join(Directory.current.path, 'server', 'server.exe'),
+          p.join(Directory.current.path, 'flutter_application', 'server', 'server.exe'),
+        ];
+
+        for (final path in candidateExes) {
+          if (await File(path).exists()) {
+            exePath = path;
+            break;
+          }
+        }
+
+        if (exePath != null) {
+           serverInfoFile = File(p.join(p.dirname(exePath), 'server_info.json'));
+        }
+      }
+
+      // 2. 如果仍未找到，尝试其他常见位置 (最后的兜底)
+      if (serverInfoFile == null || !await serverInfoFile.exists()) {
+         final candidates = [
+           'server_info.json',                 
+           '../backend/server_info.json',      
+           '../server_info.json',              
+           'server/server_info.json',          
+           '../../backend/server_info.json',   
+         ];
+         
+         for (final c in candidates) {
+           final f = File(c);
+           if (await f.exists()) {
+             serverInfoFile = f;
+             break;
+           }
+         }
+      }
+
+      if (serverInfoFile != null && await serverInfoFile.exists()) {
+        final content = await serverInfoFile.readAsString();
+        final info = jsonDecode(content);
+        final url = info['url'] as String;
+        if (url != _backendUrl) {
+           debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
+           _updateUrlAndNotify(url);
         }
       }
     } catch (e) {
-      if (_isConnected) {
-        _isConnected = false;
-        _updateStatus(BackendStatus.disconnected);
-        debugPrint('[BackendService] Connection lost: $e');
-      }
+      debugPrint('[BackendService] Recovery check failed: $e');
     }
   }
 
   void _updateStatus(BackendStatus status) {
+    if (_currentStatus == status) return;
     _currentStatus = status;
     _statusController.add(status);
   }
 
   /// Stop the backend process if we started it.
   void dispose() {
+    _stopHealthCheck();
+    _serverInfoPollTimer?.cancel();
+    _serverInfoPollTimer = null;
     _backendProcess?.kill();
     _statusController.close();
+    _urlController.close();
   }
 }
 
 enum BackendStatus {
   initializing,
   connected,
+  incompatible,
   disconnected,
 }

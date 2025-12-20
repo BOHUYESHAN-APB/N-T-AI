@@ -201,7 +201,15 @@ class PPTGenerator:
         content_elements = []
         
         # Find all relevant tags in order
-        for element in slide_markup.find_all(["p", "li", "img", "table"]):
+        # Use recursive=True (default), but check parents to avoid duplication
+        all_elements = slide_markup.find_all(["p", "li", "img", "table"])
+        
+        for element in all_elements:
+            # Skip elements that are inside a table, as the table handler will process them (or at least the table cell content)
+            # This prevents <p> inside <td> from being added as a separate text box outside the table.
+            if element.find_parent("table"):
+                continue
+
             tag_name = element.name
             
             if tag_name == "img":

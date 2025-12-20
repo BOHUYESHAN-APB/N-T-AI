@@ -450,7 +450,17 @@ async def get_frontend_logs():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "service": "nt-ai-backend",
+        "project": settings.PROJECT_NAME,
+        "api_v1": settings.API_V1_STR,
+        "features": {
+            "deep_research": True,
+            "live2d": True,
+            "linux": True,
+        },
+    }
 
 @app.get("/")
 async def root():

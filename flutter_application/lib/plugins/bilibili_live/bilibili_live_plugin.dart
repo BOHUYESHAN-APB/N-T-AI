@@ -280,7 +280,7 @@ class BilibiliLivePlugin extends BasePlugin {
   Future<String> _loadBackendUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return _normalizeBackendUrl(
-      prefs.getString('settings.backend.url') ?? 'http://localhost:8000',
+      prefs.getString('settings.backend.url') ?? 'http://localhost:23456',
     );
   }
 

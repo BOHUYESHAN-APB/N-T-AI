@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:desktop_webview_window/desktop_webview_window.dart';
+import '../../core/services/backend_service.dart';
 import '../floating_window_service.dart';
 
 /// Windows 平台浮窗实现（使用 desktop_webview_window 独立 WebView 窗口）
@@ -18,11 +19,13 @@ class FloatingWindowWindows implements FloatingWindowService {
   /// 获取当前活跃的浮窗数量
   static int get activeCount => _activeInstances.length;
 
-  final String backendUrl;
+  String backendUrl;
   bool _isInitialized = false;
   bool _isVisible = false;
   Webview? _webview;
   VoidCallback? _onCloseCallback;
+  String? _currentModelPath;
+  StreamSubscription? _urlSubscription;
 
   FloatingWindowWindows({required this.backendUrl});
 
@@ -30,6 +33,43 @@ class FloatingWindowWindows implements FloatingWindowService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
+    
+    // Subscribe to backend URL changes to keep the window in sync
+    _urlSubscription = BackendService().urlStream.listen((url) {
+      debugPrint('[FloatingWindowWindows] Received backend URL update: $url');
+      updateBackendUrl(url);
+    });
+    
+    // Ensure we have the latest URL immediately
+    final currentUrl = BackendService().backendUrl;
+    if (currentUrl != backendUrl) {
+       updateBackendUrl(currentUrl);
+    }
+  }
+
+  @override
+  void updateBackendUrl(String url) {
+    if (backendUrl == url) return;
+    backendUrl = url;
+    if (_webview != null && _currentModelPath != null) {
+      _reloadWindow();
+    }
+  }
+
+  Future<void> _reloadWindow() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final debug = prefs.getBool('settings.live2dDebug') ?? false;
+      final url =
+          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=false';
+      
+      if (_webview != null) {
+        _webview!.launch(url);
+        debugPrint('[FloatingWindowWindows] Reloaded with URL: $url');
+      }
+    } catch (e) {
+      debugPrint('[FloatingWindowWindows] Failed to reload window: $e');
+    }
   }
 
   @override
@@ -76,6 +116,8 @@ class FloatingWindowWindows implements FloatingWindowService {
       }
     }
 
+    _currentModelPath = modelPath;
+
     try {
       // 如果当前实例已经存在浮窗，先关闭
       if (_webview != null) {
@@ -91,10 +133,10 @@ class FloatingWindowWindows implements FloatingWindowService {
         await prefs.setString('floating.window.modelPath', modelPath);
       }
 
-      // 构建 Live2D URL，强制关闭调试模式
-      const debug = false;
+      // 构建 Live2D URL，根据设置决定是否开启调试
+      final debug = prefs.getBool('settings.live2dDebug') ?? false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=true';
+          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=false';
 
       // 创建独立 WebView 窗口（隐藏标题栏和工具栏，只显示纯 WebView 内容）
       _webview = await WebviewWindow.create(
@@ -119,8 +161,8 @@ class FloatingWindowWindows implements FloatingWindowService {
         _activeInstances.remove(this);
         _webview = null;
         _isVisible = false;
-        SharedPreferences.getInstance().then((prefs) {
-          prefs.setBool('floating.window.enabled', false);
+        SharedPreferences.getInstance().then((p) {
+          p.setBool('floating.window.enabled', false);
         });
         // 通知外部回调
         if (_onCloseCallback != null) {
@@ -233,6 +275,7 @@ class FloatingWindowWindows implements FloatingWindowService {
 
   @override
   Future<void> dispose() async {
+    _urlSubscription?.cancel();
     await closeFloatingWindow();
     _isInitialized = false;
   }

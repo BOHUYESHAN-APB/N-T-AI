@@ -1,14 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../../core/services/backend_service.dart';
 import '../floating_window_service.dart';
 
 /// Android 平台浮窗实现
 class FloatingWindowAndroid implements FloatingWindowService {
-  final String backendUrl;
+  String backendUrl;
   static const platform = MethodChannel('com.bohuyeshan.ntai/floating_window');
   bool _isInitialized = false;
   bool _isVisible = false;
+  StreamSubscription? _urlSubscription;
 
   FloatingWindowAndroid({required this.backendUrl});
 
@@ -17,12 +19,38 @@ class FloatingWindowAndroid implements FloatingWindowService {
     if (_isInitialized) return;
 
     try {
+      // Subscribe to backend URL changes
+      _urlSubscription = BackendService().urlStream.listen((url) {
+        debugPrint('[FloatingWindowAndroid] Received backend URL update: $url');
+        updateBackendUrl(url);
+      });
+
+      // Ensure we have the latest URL
+      final currentUrl = BackendService().backendUrl;
+      if (currentUrl != backendUrl) {
+         backendUrl = currentUrl;
+      }
+
       // 检查权限和初始化
       await platform.invokeMethod('initialize', {'backendUrl': backendUrl});
       _isInitialized = true;
     } catch (e) {
       debugPrint('[FloatingWindowAndroid] Initialize failed: $e');
       rethrow;
+    }
+  }
+
+  @override
+  void updateBackendUrl(String url) {
+    backendUrl = url;
+    if (_isInitialized) {
+        // Try to update backend URL on native side if needed
+        // For now, we just update the local property which will be used 
+        // if we re-initialize or if other methods use it.
+        // If Android native side needs dynamic update, we should add a method there.
+        platform.invokeMethod('updateBackendUrl', {'backendUrl': url}).catchError((e) {
+           debugPrint('[FloatingWindowAndroid] Update backend URL failed (optional): $e');
+        });
     }
   }
 

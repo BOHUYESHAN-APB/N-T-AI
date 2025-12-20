@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 import os
@@ -53,7 +53,7 @@ class Planner:
         except:
             return "New Project"
 
-    async def analyze_request(self, user_input: str, memory_context: str, current_date: str, depth: str = "Medium", max_steps: int = 5) -> str:
+    async def analyze_request(self, user_input: str, memory_context: str, current_date: str, depth: str = "Medium", max_steps: int = 5) -> Tuple[str, Dict[str, Any]]:
         client = self._get_client()
         model = self._get_model()
 
@@ -75,12 +75,22 @@ class Planner:
         # Inject user preference
         user_prompt += f"\n\n[System Note]\nUser requested research depth: {depth}\nMax steps allowed: {max_steps}\nPlease generate a plan that respects these constraints."
 
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
         response = await client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=messages,
             response_format={"type": "json_object"}
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        
+        debug_info = {
+            "agent": "Planner",
+            "model": model,
+            "messages": messages,
+            "response": content
+        }
+        return content, debug_info

@@ -74,6 +74,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   bool _floatingControlsVisible = false;
   final Live2DController _live2dController = Live2DController();
   bool _lastEnableTts = false;
+  bool _initiativeLoopActive = false;
 
   @override
   void initState() {
@@ -126,10 +127,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
       }
     });
 
-    // Start Initiative Loop
-    _brain.startInitiativeLoop();
-    // logToFile("FireflyScreen.initState: Initiative loop started");
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // logToFile("FireflyScreen.postFrameCallback: checking first run");
       _checkFirstRun();
@@ -157,12 +154,18 @@ class _FireflyScreenState extends State<FireflyScreen> {
       _stopTtsPlayback();
     }
     _lastEnableTts = settings.enableTts;
+
+    final initiativeMode = settings.ai.initiativeMode;
+    if (initiativeMode && !_initiativeLoopActive) {
+      _initiativeLoopActive = true;
+      _brain.startInitiativeLoop();
+    } else if (!initiativeMode && _initiativeLoopActive) {
+      _initiativeLoopActive = false;
+      _brain.stopInitiativeLoop();
+    }
     // Check floating window setting and update accordingly
     // logToFile("FireflyScreen.didChangeDependencies: updating floating window");
     _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
-    
-    // logToFile("FireflyScreen.didChangeDependencies: connecting websocket");
-    _wsService.connect(settings.pythonBackendUrl);
     
     // Unify Broadcast Logic: Enable if ANY Live2D mode is active
     // This ensures Sidebar and Mini Window also receive WebSocket events
@@ -170,10 +173,21 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       settings.showLive2D || 
                       settings.showLive2DMiniWindow;
     _brain.expressionAgent.setBroadcastEnabled(anyLive2D);
+
+    if (settings.enablePythonBackend && settings.autoConnectBackend && anyLive2D) {
+      _wsService.connect(settings.pythonBackendUrl);
+    } else {
+      _wsService.disconnect();
+    }
     // logToFile("FireflyScreen.didChangeDependencies completed");
   }
 
   Future<void> _updateFloatingWindow(bool enabled, String backendUrl) async {
+    // Ensure service is initialized if we are enabling it or if it already exists
+    if (_floatingWindowService != null) {
+      _floatingWindowService!.updateBackendUrl(backendUrl);
+    }
+
     if (enabled == _floatingWindowEnabled) return;
     _floatingWindowEnabled = enabled;
 

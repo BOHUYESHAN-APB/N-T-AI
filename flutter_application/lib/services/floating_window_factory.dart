@@ -1,5 +1,4 @@
 import 'dart:io';
-import '../settings/settings.dart';
 import 'floating_window_service.dart';
 import 'android/floating_window_android.dart';
 import 'windows/floating_window_windows.dart';
@@ -11,6 +10,7 @@ class FloatingWindowServiceFactory {
   /// 获取平台特定的浮窗服务实例
   static FloatingWindowService getInstance({required String backendUrl}) {
     if (_instance != null) {
+      _instance!.updateBackendUrl(backendUrl);
       return _instance!;
     }
 

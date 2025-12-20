@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import '../../../core/services/chat_history_service.dart';
 // Import the plugin widget (simulated dynamic loading)
+import 'package:http/http.dart' as http;
+import '../../../settings/settings_scope.dart';
 import '../../../plugins/linux_terminal/linux_connection_button.dart';
 
 class DeepResearchSidebar extends StatefulWidget {
   final Function(String?)? onSessionSelected;
+  final String? currentSessionId;
   
-  const DeepResearchSidebar({super.key, this.onSessionSelected});
+  const DeepResearchSidebar({
+    super.key,
+    this.onSessionSelected,
+    this.currentSessionId,
+  });
 
   @override
   State<DeepResearchSidebar> createState() => _DeepResearchSidebarState();
@@ -97,7 +104,11 @@ class _DeepResearchSidebarState extends State<DeepResearchSidebar> {
                   );
                 }
                 final session = _sessions[index - 1];
-                return _buildHistoryItem(context, session);
+                return _buildHistoryItem(
+                  context,
+                  session,
+                  isActive: widget.currentSessionId == session.id,
+                );
               },
             ),
           ),
@@ -231,7 +242,18 @@ class _DeepResearchSidebarState extends State<DeepResearchSidebar> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("删除项目"),
-        content: Text("确定要删除 \"${session.title}\" 吗？此操作不可撤销。"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("确定要删除 \"${session.title}\" 吗？"),
+            const SizedBox(height: 8),
+            const Text(
+              "这将永久删除该项目的所有对话记录以及生成的报告文件。",
+              style: TextStyle(color: Colors.redAccent, fontSize: 12),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -239,13 +261,8 @@ class _DeepResearchSidebarState extends State<DeepResearchSidebar> {
           ),
           TextButton(
             onPressed: () {
-              _chatHistory.deleteSession(session.id);
-              Navigator.pop(context);
-              // If deleted active session, maybe notify parent?
-              // For now, parent just handles session ID selection.
-              // If currently selected ID is deleted, parent might need to reset.
-              // But sidebar doesn't know active ID easily unless passed in.
-              // We'll rely on user to select another or New Project.
+              Navigator.pop(context); // Close first dialog
+              _showSecondConfirm(session);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text("删除"),
@@ -253,5 +270,63 @@ class _DeepResearchSidebarState extends State<DeepResearchSidebar> {
         ],
       ),
     );
+  }
+
+  void _showSecondConfirm(ChatSession session) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("再次确认"),
+        content: const Text("此操作不可撤销，请确认是否继续？"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("取消"),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _deleteSessionAndFiles(session.id);
+            },
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("确认删除"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteSessionAndFiles(String sessionId) async {
+    // 1. Delete from local DB
+    await _chatHistory.deleteSession(sessionId);
+
+    if (mounted && widget.currentSessionId == sessionId) {
+      widget.onSessionSelected?.call(null);
+    }
+    
+    // 2. Call backend to delete files
+    if (mounted) {
+       _callBackendDelete(sessionId);
+    }
+  }
+
+  Future<void> _callBackendDelete(String sessionId) async {
+    try {
+       final settings = SettingsScope.of(context).settings;
+       if (!settings.enablePythonBackend) return;
+       final baseUrl = settings.pythonBackendUrl;
+       
+       final response = await http.delete(Uri.parse('$baseUrl/api/deep-research/task/$sessionId'));
+       if (response.statusCode != 200) {
+         debugPrint("Failed to delete remote session: ${response.body}");
+       } else {
+         debugPrint("Remote session deleted: $sessionId");
+       }
+    } catch (e) {
+       debugPrint("Delete failed: $e");
+    }
   }
 }

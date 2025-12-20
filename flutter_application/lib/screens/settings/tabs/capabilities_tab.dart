@@ -61,12 +61,11 @@ class CapabilitiesTab extends StatelessWidget {
                       ),
                     ),
                     Switch(
-                      value: true, // 强制开启
-                      onChanged: null, // 禁止关闭
+                      value: settings.enablePythonBackend,
+                      onChanged: (v) => controller.setEnablePythonBackend(v),
                     ),
                   ],
                 ),
-                // 强制显示后端控制
                 const Divider(height: 24),
                 _buildBackendControls(context, controller, settings),
                 
@@ -333,6 +332,12 @@ class CapabilitiesTab extends StatelessWidget {
                 value: settings.enableFloatingWindow,
                 onChanged: (v) => controller.setEnableFloatingWindow(v),
               ),
+              SwitchListTile(
+                title: const Text('Live2D 调试模式'),
+                subtitle: const Text('在角色窗口显示动作/表情日志'),
+                value: settings.live2dDebug,
+                onChanged: (v) => controller.setLive2dDebug(v),
+              ),
             ],
           ),
         ),
@@ -494,7 +499,7 @@ class CapabilitiesTab extends StatelessWidget {
                 ),
                 decoration: const InputDecoration(
                   labelText: '后端地址',
-                  hintText: 'http://localhost:8000',
+                  hintText: 'http://localhost:23456',
                   isDense: true,
                   border: OutlineInputBorder(),
                 ),

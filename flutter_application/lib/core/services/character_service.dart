@@ -20,7 +20,7 @@ class CharacterModel {
 
 class CharacterService {
   static const String _kBackendUrlKey = 'settings.backend.url';
-  static const String _kDefaultBackendUrl = 'http://localhost:8000';
+  static const String _kDefaultBackendUrl = 'http://localhost:23456';
 
   Future<String> get _baseUrl async {
     final prefs = await SharedPreferences.getInstance();

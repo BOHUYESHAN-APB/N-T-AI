@@ -10,12 +10,12 @@ import traceback
 import subprocess
 import shlex
 import sys
-from typing import Dict, Any, List, Optional
-from uuid import uuid4
-
+import datetime
 import os
 import shutil
 from pathlib import Path
+from typing import Dict, Any, List, Optional
+from uuid import uuid4
 
 class SandboxSession:
     def __init__(self, session_id: str):
@@ -23,12 +23,23 @@ class SandboxSession:
         self._globals: Dict[str, Any] = {}
         self.created_at = datetime.datetime.now()
         
-        # Create a dedicated workspace directory for this session
-        self.workspace_dir = Path("workspace") / self.session_id
+        # Enforce strict workspace isolation (free-OKC style)
+        # Use absolute path to avoid ambiguity
+        base_workspace = Path(os.getcwd()) / "workspace"
+        self.workspace_dir = base_workspace / self.session_id
+        
+        # Ensure pristine state for new sessions
+        if self.workspace_dir.exists():
+            try:
+                shutil.rmtree(self.workspace_dir)
+            except Exception as e:
+                print(f"Warning: Could not clear existing workspace {self.workspace_dir}: {e}")
+        
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         
         # Change CWD to workspace for subprocess calls
         self._cwd = str(self.workspace_dir.absolute())
+        print(f"[Sandbox] Initialized session {session_id} at {self._cwd}")
 
     def execute(self, code: str) -> Dict[str, Any]:
         """

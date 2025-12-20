@@ -41,7 +41,7 @@ class RemoteMemoryService {
       throw Exception('请先在设置中启用 Python 后端');
     }
     final baseUrl =
-        prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+        prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     return baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;

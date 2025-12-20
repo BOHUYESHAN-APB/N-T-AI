@@ -5,6 +5,26 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from app.skills.common.document_skill.scripts.office_processor import OfficeProcessor
 
+def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Extracts JSON object from text, handling markdown code blocks.
+    """
+    text = (text or "").strip()
+    # Remove markdown code blocks
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        text = match.group(1)
+    
+    try:
+        # Find the first '{' and last '}'
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
 def extract_file_content(context_files: List[Dict[str, Any]], office_processor: Any) -> str:
     revision_context_text = ""
     extracted_parts: List[str] = []

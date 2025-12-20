@@ -388,6 +388,8 @@ class AppSettings {
 
   // Python Backend / Neural Hub Settings
   final bool enablePythonBackend; // 是否启用 Python 后端
+  final bool autoConnectBackend; // 是否自动连接后端
+  final bool autoStartBackend; // 是否自动启动本地后端
   final String pythonBackendUrl; // Python 后端地址
   final bool enableDeepResearch; // 是否启用深度研究 (全自动闭环模式)
   final SearchRegionOption searchRegion; // 搜索区域偏好
@@ -455,6 +457,8 @@ class AppSettings {
     this.agents = const [],
     this.deepResearch = const DeepResearchSettings(),
     this.enablePythonBackend = true,
+    this.autoConnectBackend = true,
+    this.autoStartBackend = false,
     this.pythonBackendUrl = 'http://localhost:23456',
     this.enableDeepResearch = false,
     this.searchRegion = SearchRegionOption.auto,
@@ -515,6 +519,8 @@ class AppSettings {
     List<AgentConfig>? agents,
     DeepResearchSettings? deepResearch,
     bool? enablePythonBackend,
+    bool? autoConnectBackend,
+    bool? autoStartBackend,
     String? pythonBackendUrl,
     bool? enableDeepResearch,
     SearchRegionOption? searchRegion,
@@ -578,6 +584,8 @@ class AppSettings {
     agents: agents ?? this.agents,
     deepResearch: deepResearch ?? this.deepResearch,
     enablePythonBackend: enablePythonBackend ?? this.enablePythonBackend,
+    autoConnectBackend: autoConnectBackend ?? this.autoConnectBackend,
+    autoStartBackend: autoStartBackend ?? this.autoStartBackend,
     pythonBackendUrl: pythonBackendUrl ?? this.pythonBackendUrl,
     enableDeepResearch: enableDeepResearch ?? this.enableDeepResearch,
     searchRegion: searchRegion ?? this.searchRegion,

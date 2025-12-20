@@ -6,6 +6,38 @@ class LinuxConnectionButton extends StatelessWidget {
 
   const LinuxConnectionButton({super.key, this.onTap});
 
+  Future<void> _showDownloadProgress(BuildContext context) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text("正在下载 Linux 环境"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const LinearProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text("正在连接服务器..."),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text("取消"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -14,11 +46,7 @@ class LinuxConnectionButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: InkWell(
-        onTap: onTap ?? () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("正在连接 Linux 环境... (Plugin)")),
-          );
-        },
+        onTap: onTap ?? () => _showDownloadProgress(context),
         borderRadius: BorderRadius.circular(8),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),

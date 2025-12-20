@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'settings.dart';
@@ -53,6 +54,8 @@ class SettingsController extends ChangeNotifier {
   static const _kQuickActions = 'settings.ui.quickActions';
   static const _kAgents = 'settings.agents';
   static const _kEnablePythonBackend = 'settings.backend.enabled';
+  static const _kAutoConnectBackend = 'settings.backend.autoConnect';
+  static const _kAutoStartBackend = 'settings.backend.autoStart';
   static const _kPythonBackendUrl = 'settings.backend.url';
   static const _kEnableDeepResearch = 'settings.backend.deepResearch';
   static const _kSearchRegion = 'settings.agent.searchRegion';
@@ -79,11 +82,13 @@ class SettingsController extends ChangeNotifier {
   late SharedPreferences _prefs;
   AppSettings _settings = const AppSettings();
   int _rotationIndex = 0; // 内存轮换游标
+  StreamSubscription<String>? _backendUrlSubscription;
 
   AppSettings get settings => _settings;
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
+
     final themeIdx = _prefs.getInt(_kThemeMode);
     final localeIdx = _prefs.getInt(_kLocale);
     final densityIdx = _prefs.getInt(_kDensity);
@@ -159,9 +164,13 @@ class SettingsController extends ChangeNotifier {
     }
 
     final mcpServersRaw = _prefs.getString(_kAgentMcpServers);
-    final enablePythonBackend = true; // 强制启用后端
+    final enablePythonBackend =
+        _prefs.getBool(_kEnablePythonBackend) ?? (kReleaseMode ? true : false);
+    final autoConnectBackend =
+        _prefs.getBool(_kAutoConnectBackend) ?? false;
+    final autoStartBackend = _prefs.getBool(_kAutoStartBackend) ?? false;
     final pythonBackendUrl =
-        _prefs.getString(_kPythonBackendUrl) ?? 'http://localhost:8000';
+        _prefs.getString(_kPythonBackendUrl) ?? 'http://localhost:23456';
     final enableDeepResearch =
         _prefs.getBool(_kEnableDeepResearch) ?? false;
     final searchRegionIdx = _prefs.getInt(_kSearchRegion);
@@ -494,6 +503,8 @@ class SettingsController extends ChangeNotifier {
       agents: agents,
       deepResearch: deepResearch,
       enablePythonBackend: enablePythonBackend,
+      autoConnectBackend: autoConnectBackend,
+      autoStartBackend: autoStartBackend,
       pythonBackendUrl: pythonBackendUrl,
       enableDeepResearch: enableDeepResearch,
       searchRegion:
@@ -520,12 +531,32 @@ class SettingsController extends ChangeNotifier {
       aiBubbleColor: aiBubbleColor,
     );
     notifyListeners();
+
+    _backendUrlSubscription ??= BackendService().urlStream.listen((url) async {
+      if (_settings.pythonBackendUrl == url) return;
+      _settings = _settings.copyWith(pythonBackendUrl: url);
+      await _prefs.setString(_kPythonBackendUrl, url);
+      notifyListeners();
+    });
   }
 
   Future<void> setEnableExpressionAgent(bool v) async {
     _settings = _settings.copyWith(enableExpressionAgent: v);
     await _prefs.setBool(_kEnableExpressionAgent, v);
     debugPrint('[Settings] Expression Agent Enabled: $v');
+    notifyListeners();
+  }
+
+  Future<void> setPythonBackendUrl(String url) async {
+    if (_settings.pythonBackendUrl == url) return;
+    _settings = _settings.copyWith(pythonBackendUrl: url);
+    await _prefs.setString(_kPythonBackendUrl, url);
+    
+    // Notify BackendService to reconnect
+    if (_settings.enablePythonBackend && _settings.autoConnectBackend) {
+       BackendService().updateUrl(url);
+    }
+    
     notifyListeners();
   }
 
@@ -654,9 +685,8 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setLive2dDebug(bool v) async {
-    // Deprecated, do nothing or keep internal state if needed
     _settings = _settings.copyWith(live2dDebug: v);
-    // await _prefs.setBool(_kLive2dDebug, v); // No longer persisting
+    await _prefs.setBool(_kLive2dDebug, v);
     notifyListeners();
   }
 
@@ -1292,21 +1322,51 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setEnablePythonBackend(bool v) async {
-    // 强制保持开启，忽略传入的 v (如果为 false)
-    const forcedValue = true;
-    if (_settings.enablePythonBackend == forcedValue) return;
-    
-    _settings = _settings.copyWith(enablePythonBackend: forcedValue);
-    await _prefs.setBool(_kEnablePythonBackend, forcedValue);
+    if (_settings.enablePythonBackend == v) return;
+
+    _settings = _settings.copyWith(enablePythonBackend: v);
+    await _prefs.setBool(_kEnablePythonBackend, v);
+    try {
+      await BackendService().init(
+        _settings.pythonBackendUrl,
+        enabled: _settings.enablePythonBackend && _settings.autoConnectBackend,
+        autoStartLocal: _settings.autoStartBackend,
+      );
+    } catch (_) {}
     notifyListeners();
   }
 
-  Future<void> setPythonBackendUrl(String v) async {
-    _settings = _settings.copyWith(pythonBackendUrl: v);
-    await _prefs.setString(_kPythonBackendUrl, v);
-    BackendService().updateUrl(v);
+  Future<void> setAutoConnectBackend(bool v) async {
+    if (_settings.autoConnectBackend == v) return;
+
+    _settings = _settings.copyWith(autoConnectBackend: v);
+    await _prefs.setBool(_kAutoConnectBackend, v);
+    try {
+      await BackendService().init(
+        _settings.pythonBackendUrl,
+        enabled: _settings.enablePythonBackend && _settings.autoConnectBackend,
+        autoStartLocal: _settings.autoStartBackend,
+      );
+    } catch (_) {}
     notifyListeners();
   }
+
+  Future<void> setAutoStartBackend(bool v) async {
+    if (_settings.autoStartBackend == v) return;
+
+    _settings = _settings.copyWith(autoStartBackend: v);
+    await _prefs.setBool(_kAutoStartBackend, v);
+    try {
+      await BackendService().init(
+        _settings.pythonBackendUrl,
+        enabled: _settings.enablePythonBackend && _settings.autoConnectBackend,
+        autoStartLocal: _settings.autoStartBackend,
+      );
+    } catch (_) {}
+    notifyListeners();
+  }
+
+
 
   Future<void> setEnableDeepResearch(bool v) async {
     _settings = _settings.copyWith(enableDeepResearch: v);

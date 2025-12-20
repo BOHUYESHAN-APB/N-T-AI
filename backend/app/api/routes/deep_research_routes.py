@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 import asyncio
+import uuid
 
 from app.agents.deep_research import DeepResearchAgent
 from app.services.file_service import file_ingestion_service
@@ -29,6 +30,91 @@ class DeepResearchResponse(BaseModel):
 # In production, use Redis or Database
 active_agents: Dict[str, DeepResearchAgent] = {}
 
+@router.delete("/task/{session_id}")
+async def delete_research_task(session_id: str):
+    """
+    Deletes a research task session and its generated files.
+    """
+    import shutil
+    import os
+    
+    # 1. Remove from active agents
+    if session_id in active_agents:
+        del active_agents[session_id]
+        
+    # 2. Delete generated files directory
+    safe_session_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
+    report_dir = f"app/static/reports/{safe_session_id}"
+    
+    deleted_files = False
+    if os.path.exists(report_dir):
+        try:
+            shutil.rmtree(report_dir)
+            deleted_files = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete files: {str(e)}")
+            
+    return {"status": "success", "message": f"Session {session_id} deleted", "files_deleted": deleted_files}
+
+@router.get("/task/{session_id}")
+async def get_task_status(session_id: str):
+    """
+    Get the current status of a research task.
+    Useful for polling if SSE connection is lost.
+    """
+    if session_id not in active_agents:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+    
+    agent = active_agents[session_id]
+    
+    # Construct status response
+    response = {
+        "session_id": session_id,
+        "status": "active", # If in active_agents, it's generally active or holding state
+        "plan": [],
+        "current_step": None,
+        "logs": [] # We could expose recent logs if we stored them in a buffer
+    }
+    
+    if agent.flow:
+        snapshot = agent.flow.get_plan_snapshot()
+        response["plan"] = snapshot
+        
+        # Find current step
+        for step in snapshot:
+            if step["status"] == "in_progress":
+                response["current_step"] = step["title"]
+                break
+    
+    return response
+
+@router.post("/task/open_folder/{session_id}")
+async def open_task_folder(session_id: str):
+    """
+    Opens the folder containing generated files for the given session.
+    """
+    import os
+    import platform
+    import subprocess
+    
+    safe_session_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
+    report_dir = os.path.abspath(f"app/static/reports/{safe_session_id}")
+    
+    if not os.path.exists(report_dir):
+        # Fallback to base dir if specific dir doesn't exist yet
+        report_dir = os.path.abspath("app/static/reports")
+        
+    try:
+        if platform.system() == "Windows":
+            os.startfile(report_dir)
+        elif platform.system() == "Darwin":  # macOS
+            subprocess.Popen(["open", report_dir])
+        else:  # Linux
+            subprocess.Popen(["xdg-open", report_dir])
+        return {"status": "success", "message": "Folder opened"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to open folder: {str(e)}")
+
 @router.post("/task")
 async def create_research_task(request: DeepResearchRequest):
     """
@@ -40,10 +126,10 @@ async def create_research_task(request: DeepResearchRequest):
         agent_config = request.model_config_override or {} 
         
         # Use session_id or generate new
-        session_id = request.session_id or f"session_{len(active_agents) + 1}"
+        session_id = request.session_id or f"dr_{uuid.uuid4().hex}"
         
         if session_id not in active_agents:
-            active_agents[session_id] = DeepResearchAgent(model_config=agent_config)
+            active_agents[session_id] = DeepResearchAgent(model_config=agent_config, session_id=session_id)
             
         agent = active_agents[session_id]
         

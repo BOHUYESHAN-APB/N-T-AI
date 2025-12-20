@@ -278,6 +278,72 @@ abstract class AppLocalizations {
   /// **'Basic Settings'**
   String get generalBasicSettings;
 
+  /// No description provided for @generalAutoConnectBackend.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-connect Backend'**
+  String get generalAutoConnectBackend;
+
+  /// No description provided for @generalAutoConnectBackendSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically check and connect to the configured Python backend'**
+  String get generalAutoConnectBackendSubtitle;
+
+  /// No description provided for @generalAutoStartBackend.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-start Backend'**
+  String get generalAutoStartBackend;
+
+  /// No description provided for @generalAutoStartBackendSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically start local backend process (Windows release & localhost)'**
+  String get generalAutoStartBackendSubtitle;
+
+  /// No description provided for @generalBackendStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Backend Status'**
+  String get generalBackendStatus;
+
+  /// No description provided for @backendStatusConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get backendStatusConnected;
+
+  /// No description provided for @backendStatusInitializing.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting'**
+  String get backendStatusInitializing;
+
+  /// No description provided for @backendStatusIncompatible.
+  ///
+  /// In en, this message translates to:
+  /// **'Incompatible'**
+  String get backendStatusIncompatible;
+
+  /// No description provided for @backendStatusDisconnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnected'**
+  String get backendStatusDisconnected;
+
+  /// No description provided for @backendStatusAutoConnectOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-connect off'**
+  String get backendStatusAutoConnectOff;
+
+  /// No description provided for @backendStatusBackendDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get backendStatusBackendDisabled;
+
   /// No description provided for @generalUserNickname.
   ///
   /// In en, this message translates to:

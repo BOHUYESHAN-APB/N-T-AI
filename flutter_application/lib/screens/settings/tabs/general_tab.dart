@@ -5,6 +5,7 @@ import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../first_run_dialog.dart';
 import '../../../core/services/brain_service.dart';
+import '../../../core/services/backend_service.dart';
 import '../character_manager_screen.dart';
 
 class GeneralTab extends StatelessWidget {
@@ -20,6 +21,46 @@ class GeneralTab extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       children: [
         _buildSectionHeader(context, l10n.generalBasicSettings),
+        SwitchListTile(
+          secondary: const Icon(Icons.link),
+          title: Text(l10n.generalAutoConnectBackend),
+          subtitle: Text(l10n.generalAutoConnectBackendSubtitle),
+          value: s.autoConnectBackend,
+          onChanged: (v) => controller.setAutoConnectBackend(v),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.play_circle_outline),
+          title: Text(l10n.generalAutoStartBackend),
+          subtitle: Text(l10n.generalAutoStartBackendSubtitle),
+          value: s.autoStartBackend,
+          onChanged: (v) => controller.setAutoStartBackend(v),
+        ),
+        ListTile(
+          leading: const Icon(Icons.cloud_outlined),
+          title: Text(l10n.generalBackendStatus),
+          subtitle: Text(s.pythonBackendUrl),
+          trailing: StreamBuilder<BackendStatus>(
+            stream: BackendService().statusStream,
+            initialData: BackendService().currentStatus,
+            builder: (context, snapshot) {
+              final status = snapshot.data ?? BackendStatus.disconnected;
+              String text;
+              if (!s.enablePythonBackend) {
+                text = l10n.backendStatusBackendDisabled;
+              } else if (!s.autoConnectBackend) {
+                text = l10n.backendStatusAutoConnectOff;
+              } else {
+                text = switch (status) {
+                  BackendStatus.connected => l10n.backendStatusConnected,
+                  BackendStatus.initializing => l10n.backendStatusInitializing,
+                  BackendStatus.incompatible => l10n.backendStatusIncompatible,
+                  BackendStatus.disconnected => l10n.backendStatusDisconnected,
+                };
+              }
+              return Text(text);
+            },
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.face),
           title: Text(l10n.generalUserNickname),

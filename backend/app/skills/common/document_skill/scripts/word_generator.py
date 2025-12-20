@@ -182,9 +182,53 @@ class WordGenerator:
             for child in node.children:
                 add_runs(paragraph, child, next_style)
 
-        blocks = soup.find_all(["h1", "h2", "h3", "h4", "p", "ul", "ol", "img"])
+        blocks = soup.find_all(["h1", "h2", "h3", "h4", "p", "ul", "ol", "img", "table"])
+        
         for element in blocks:
+            # Skip elements that are nested inside other block-level elements we process
+            # e.g. <p> inside <table>, or <li> inside <ul> (though ul logic handles li)
+            # Actually find_all is flat list, but includes nested.
+            # We specifically want to ignore p/img/ul/ol if they are inside a table, 
+            # because we handle the table as a unit.
+            if element.find_parent("table"):
+                continue
+
             name = element.name.lower()
+
+            if name == "table":
+                rows = element.find_all("tr")
+                if not rows: continue
+                
+                # Determine dimensions
+                max_cols = 0
+                for row in rows:
+                    cols = row.find_all(["td", "th"])
+                    max_cols = max(max_cols, len(cols))
+                
+                if max_cols == 0: continue
+
+                # Add table
+                try:
+                    table = document.add_table(rows=len(rows), cols=max_cols)
+                    table.style = 'Table Grid'
+                except Exception:
+                    # Fallback if style doesn't exist
+                    table = document.add_table(rows=len(rows), cols=max_cols)
+
+                for i, row in enumerate(rows):
+                    cols = row.find_all(["td", "th"])
+                    for j, col in enumerate(cols):
+                        if j >= max_cols: break
+                        cell = table.cell(i, j)
+                        cell.text = col.get_text(strip=True)
+                        # Bold header
+                        if col.name == "th":
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.bold = True
+                
+                document.add_paragraph() # Add spacing after table
+                continue
 
             if name == "img":
                 src = element.get("src")
@@ -209,7 +253,13 @@ class WordGenerator:
             if name in ("ul", "ol"):
                 for li in element.find_all("li", recursive=False):
                     style_name = "List Bullet" if name == "ul" else "List Number"
-                    para = document.add_paragraph(style=style_name)
+                    try:
+                        para = document.add_paragraph(style=style_name)
+                    except:
+                        # Fallback if style missing
+                        para = document.add_paragraph()
+                        if name == "ul": para.style = "List Paragraph"
+                    
                     apply_paragraph_style(para, li)
                     for child in li.children:
                         add_runs(para, child, {})

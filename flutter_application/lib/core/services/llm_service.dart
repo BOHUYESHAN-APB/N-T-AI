@@ -104,7 +104,7 @@ class LLMService {
 
     final prefs = await SharedPreferences.getInstance();
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
-    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
 
     String requestUrl;
     Map<String, String> headers = {

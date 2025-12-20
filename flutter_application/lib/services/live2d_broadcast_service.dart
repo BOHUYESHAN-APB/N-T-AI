@@ -26,7 +26,7 @@ class Live2DBroadcastService {
 
   // Deprecated ctor left intentionally out; initialization runs in _internal
 
-  String _backendUrl = 'http://localhost:8000';
+  String _backendUrl = 'http://localhost:23456';
   bool _enabled = false;
 
   /// 设置后端 URL
