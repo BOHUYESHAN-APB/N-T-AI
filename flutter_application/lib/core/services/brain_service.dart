@@ -105,7 +105,7 @@ class BrainService {
     unawaited(() async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
         final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
         print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
         final response = await http.post(

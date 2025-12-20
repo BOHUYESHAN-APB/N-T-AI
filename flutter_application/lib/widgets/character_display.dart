@@ -13,7 +13,7 @@ import 'live2d_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CharacterDisplay extends StatefulWidget {
-  final String backendUrl; // e.g. http://localhost:8000
+  final String backendUrl; // e.g. http://localhost:23456
   final ExpressionAgentService? expressionAgent;
   final Live2DController? controller;
   final bool floatingUi;

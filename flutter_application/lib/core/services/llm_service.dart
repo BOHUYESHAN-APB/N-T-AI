@@ -182,7 +182,7 @@ class LLMService {
     final prefs = await SharedPreferences.getInstance();
     final userNickname = prefs.getString('settings.user.nickname') ?? '';
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
-    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
     
     // Parse search region from int setting (0: auto, 1: cn, 2: global)
@@ -527,7 +527,7 @@ class LLMService {
 
     final prefs = await SharedPreferences.getInstance();
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
-    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:8000';
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
 
     final apiKey = provider.apiKey;

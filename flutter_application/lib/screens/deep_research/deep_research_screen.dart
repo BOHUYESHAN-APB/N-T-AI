@@ -937,6 +937,7 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             _resourcesByStep.putIfAbsent(step, () => []);
           }
           break;
+        case 'step_finish':
         case 'step_complete':
            final stepIndex = _processSteps.lastIndexWhere((s) => s['title'] == event['title']);
            if (stepIndex != -1) {

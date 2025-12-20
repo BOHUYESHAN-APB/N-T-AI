@@ -116,14 +116,14 @@ cd docker/n-t-ai-system
 docker-compose up -d
 ```
 *   Frontend: `http://localhost:80`
-*   Backend: `http://localhost:8000`
+*   Backend: `http://localhost:23456`
 
 **Backend Only (Astra-Me):**
 ```bash
 cd docker/astra-me
 docker-compose up -d
 ```
-*   API: `http://localhost:8000`
+*   API: `http://localhost:23456`
 
 ### Option B: One-Click Startup Scripts
 For local deployment on Windows, Linux, or macOS without Docker.

@@ -47,9 +47,9 @@
 
 4.  **运行服务器**
     ```powershell
-    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn main:app --reload --host 0.0.0.0 --port 23456
     ```
-    *   API 文档地址: `http://localhost:8000/docs`
+    *   API 文档地址: `http://localhost:23456/docs`
 
 ---
 
@@ -107,5 +107,5 @@
 ## 5. 常见问题 (Troubleshooting)
 
 *   **WebView 白屏**: 检查 `flutter_application/assets/excalidraw/index.html` 是否存在。如果缺失，请参考之前的构建步骤重新生成。
-*   **后端连接失败**: 确保后端运行在 `localhost:8000`，且 Flutter 应用中的 API 地址配置正确。
+*   **后端连接失败**: 确保后端运行在 `localhost:23456`，且 Flutter 应用中的 API 地址配置正确。
 *   **Windows 构建错误**: 确保已安装 Visual Studio 2022 及其 C++ 组件。运行 `flutter doctor` 检查环境健康状况。

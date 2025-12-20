@@ -69,7 +69,7 @@ class BilibiliLivePlugin extends BasePlugin {
 
   String _normalizeBackendUrl(String raw) {
     final trimmed = raw.trim();
-    final base = trimmed.isEmpty ? 'http://localhost:8000' : trimmed;
+    final base = trimmed.isEmpty ? 'http://localhost:23456' : trimmed;
     return base.endsWith('/') ? base.substring(0, base.length - 1) : base;
   }
 

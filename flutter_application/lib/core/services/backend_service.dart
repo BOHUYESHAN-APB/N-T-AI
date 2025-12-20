@@ -14,7 +14,7 @@ class BackendService {
 
   Process? _backendProcess;
   bool _isConnected = false;
-  String _backendUrl = 'http://localhost:8000';
+  String _backendUrl = 'http://localhost:23456';
   String get backendUrl => _backendUrl;
   bool _enabled = false;
   Timer? _healthCheckTimer;
@@ -95,9 +95,9 @@ class BackendService {
     // We allow this in Debug mode too if the user explicitly enabled the switch.
     if (autoStartLocal && Platform.isWindows) {
       final uri = Uri.tryParse(configuredUrl);
-      final port = uri?.port ?? 8000;
+      final port = uri?.port ?? 23456;
       
-      // Heuristic: If port is custom (e.g. 23456), do not auto-start bundled backend (which uses 8000+).
+      // Heuristic: If port is custom (not 23456 or legacy 8000), do not auto-start bundled backend.
       // This prevents the bundled backend from overriding a manually configured backend that might just be slow to start.
       if (port != 23456 && port != 8000 && (port < 8000 || port > 8020)) {
          debugPrint('[BackendService] Configured port $port suggests custom backend. Skipping auto-start of bundled backend.');
@@ -162,7 +162,7 @@ class BackendService {
     }
 
     // Dynamic Port Logic:
-    // We do NOT strictly check port 8000 anymore, because the backend is now smart enough to auto-select a port (8000-8010).
+    // We do NOT strictly check port 23456 anymore, because the backend is now smart enough to auto-select a port (23456-23466).
     // Instead, we will:
     // 1. Try to read 'server_info.json' first to see if a valid backend is already alive.
     // 2. If alive, use that URL.

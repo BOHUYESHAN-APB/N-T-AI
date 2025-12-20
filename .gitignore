@@ -28,3 +28,4 @@ flutter_application/server/
 **/*.vdi
 **/*.qcow2
 
+/backend/app/static/reports/

@@ -57,9 +57,55 @@ class GeneralTab extends StatelessWidget {
                   BackendStatus.disconnected => l10n.backendStatusDisconnected,
                 };
               }
-              return Text(text);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(text),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.edit_outlined, size: 16),
+                ],
+              );
             },
           ),
+          onTap: () async {
+            final ctl = TextEditingController(text: s.pythonBackendUrl);
+            final newUrl = await showDialog<String>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(l10n.generalBackendStatus),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: ctl,
+                      decoration: const InputDecoration(
+                        labelText: 'Backend URL',
+                        hintText: 'http://localhost:23456',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Default: http://localhost:23456\nRemote: http://IP:PORT',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(l10n.commonCancel),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, ctl.text),
+                    child: Text(l10n.commonSave),
+                  ),
+                ],
+              ),
+            );
+            if (newUrl != null && newUrl.isNotEmpty) {
+              controller.setPythonBackendUrl(newUrl);
+            }
+          },
         ),
         ListTile(
           leading: const Icon(Icons.face),

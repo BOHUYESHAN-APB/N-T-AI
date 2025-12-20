@@ -27,7 +27,7 @@ This directory contains the Docker configuration for deploying the full **N-T-AI
 
 3.  Access the application:
     -   **Frontend (Web App):** `http://localhost` (or your server IP)
-    -   **Backend API:** `http://localhost:8000` (or your server IP:8000)
+    -   **Backend API:** `http://localhost:23456` (or your server IP:23456)
 
 ## Configuration
 
@@ -37,8 +37,8 @@ If you are deploying this on a remote server (e.g., VPS) and accessing it from a
 
 1.  Open the Web App in your browser (`http://<your-server-ip>`).
 2.  Go to **Settings**.
-3.  Update the **Backend URL** to `http://<your-server-ip>:8000` (or `http://<your-server-ip>/api` if using the proxy path, though the app currently defaults to root-based API calls).
-    *   *Note: The Nginx configuration proxies `/api` to the backend, but the Flutter app may expect the root URL. Using port 8000 is the most reliable method currently.*
+3.  Update the **Backend URL** to `http://<your-server-ip>:23456` (or `http://<your-server-ip>/api` if using the proxy path, though the app currently defaults to root-based API calls).
+    *   *Note: The Nginx configuration proxies `/api` to the backend, but the Flutter app may expect the root URL. Using port 23456 is the most reliable method currently.*
 
 ### Environment Variables
 
