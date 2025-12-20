@@ -159,7 +159,7 @@ class MessageBubble extends StatelessWidget {
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
 
     // Parse content into blocks (Text or Image)
-    final blocks = _parseMessageBlocks(message.text);
+    final blocks = _parseMessageBlocks(message.text, isMine: isMine);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -463,7 +463,7 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  List<Map<String, dynamic>> _parseMessageBlocks(String text) {
+  List<Map<String, dynamic>> _parseMessageBlocks(String text, {required bool isMine}) {
     // 1. Split by [IMAGE: ...] tags
     final regex = RegExp(r'\[IMAGE(?:_\d+)?:?\s*(.*?)\]', dotAll: true);
     final matches = regex.allMatches(text);
@@ -472,10 +472,12 @@ class MessageBubble extends StatelessWidget {
 
     void addTextBlock(String t) {
       if (t.trim().isEmpty) return;
+      final normalized = isMine ? t : t.replaceAll('[SPLIT]', '\n\n');
+      if (normalized.trim().isEmpty) return;
       blocks.add({
         'type': 'text',
-        'content': t,
-        'segments': _parseTextSegments(t),
+        'content': normalized,
+        'segments': _parseTextSegments(normalized, enableThoughtParsing: !isMine),
       });
     }
 
@@ -508,7 +510,12 @@ class MessageBubble extends StatelessWidget {
     return blocks;
   }
 
-  List<Map<String, dynamic>> _parseTextSegments(String text) {
+  List<Map<String, dynamic>> _parseTextSegments(String text, {required bool enableThoughtParsing}) {
+    if (!enableThoughtParsing) {
+      return [
+        {'text': text.trim(), 'isThought': false}
+      ];
+    }
     final regex = RegExp(r'(\（.*?\）|\(.*?\))', dotAll: true);
     final matches = regex.allMatches(text);
     final List<Map<String, dynamic>> result = [];

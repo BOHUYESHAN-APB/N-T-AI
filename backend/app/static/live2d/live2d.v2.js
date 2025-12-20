@@ -69,6 +69,20 @@ class Live2DManager {
 
         // [Parameter Override System]
         this.parameterOverrides = {}; // Stores active overrides: { "ParamName": value }
+        this.expressionOverrides = {};
+        this._overrideMeta = {};
+        this._paramLocks = {};
+        this._channelToken = {};
+        this._channelTokenCounter = 0;
+        this._expressionDebounceTimer = null;
+        this._pendingExpressionEmotion = null;
+        this._expressionDebouncePromise = null;
+        this._expressionDebounceResolve = null;
+        this._realtimeExpressionRAF = 0;
+        this._realtimeExpressionPending = null;
+        this._realtimeExpressionToken = 0;
+        this._proceduralMotionBusy = false;
+        this._agentBusyUntil = 0;
         
         // [Sway & Eye System]
         this.audioSwayParams = {}; // Stores sway offsets: { "ParamAngleX": offset }
@@ -200,6 +214,14 @@ class Live2DManager {
 
             if (this.isSpeaking) {
                 this.neuroBehaviorTimer = setTimeout(behaviorLoop, 6000);
+                return;
+            }
+            if (this._proceduralMotionBusy) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 4000);
+                return;
+            }
+            if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) {
+                this.neuroBehaviorTimer = setTimeout(behaviorLoop, 5000);
                 return;
             }
 
@@ -457,24 +479,6 @@ class Live2DManager {
                 try {
                     if (!this.currentModel || !this.currentModel.internalModel) return;
 
-                    if (this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
-                        const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-                        let intensity = Number(this.autonomyConfig.microIdleIntensity);
-                        if (!Number.isFinite(intensity)) intensity = 0.28;
-                        if (this.isSpeaking) intensity *= 0.55;
-                        if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') intensity *= 0.7;
-                        if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) intensity *= 0.35;
-
-                        const s = this._microIdleSeed || 0;
-                        this.microIdleOverrides.ParamAngleX = Math.sin(t * 0.55 + s) * 2.2 * intensity;
-                        this.microIdleOverrides.ParamAngleY = Math.sin(t * 0.45 + s * 1.3) * 1.4 * intensity;
-                        this.microIdleOverrides.ParamAngleZ = Math.sin(t * 0.60 + s * 1.7) * 1.0 * intensity;
-                        this.microIdleOverrides.ParamBodyAngleX = Math.sin(t * 0.25 + s * 2.1) * 0.8 * intensity;
-                        this.microIdleOverrides.ParamBodyAngleY = Math.sin(t * 0.20 + s * 2.6) * 0.5 * intensity;
-                        this.microIdleOverrides.ParamBodyAngleZ = Math.sin(t * 0.30 + s * 3.1) * 0.6 * intensity;
-                        this.microIdleOverrides.ParamBreath = Math.sin(t * 0.18 + s * 0.7) * 0.15 * intensity;
-                    }
-
                     // A. Capture pre-update parameters
                     const preUpdateParams = {};
                     // Capture audio sway params
@@ -483,17 +487,6 @@ class Live2DManager {
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) preUpdateParams[key] = coreModel.getParameterValueByIndex(idx);
-                            } catch (_) {}
-                        }
-                    }
-                    if (this.microIdleOverrides && this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
-                        for (const key in this.microIdleOverrides) {
-                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
-                            try {
-                                const idx = getParamIndex(key);
-                                if (idx >= 0 && preUpdateParams[key] === undefined) {
-                                    preUpdateParams[key] = getParamValue(idx);
-                                }
                             } catch (_) {}
                         }
                     }
@@ -506,6 +499,19 @@ class Live2DManager {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) {
                                     // Only capture if not already captured
+                                    if (preUpdateParams[key] === undefined) {
+                                        preUpdateParams[key] = getParamValue(idx);
+                                    }
+                                }
+                            } catch (_) {}
+                        }
+                    }
+                    if (this.expressionOverrides) {
+                        for (const key in this.expressionOverrides) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = getParamIndex(key);
+                                if (idx >= 0) {
                                     if (preUpdateParams[key] === undefined) {
                                         preUpdateParams[key] = getParamValue(idx);
                                     }
@@ -555,9 +561,27 @@ class Live2DManager {
                             } catch (_) {}
                         }
                     }
+                    if (this.expressionOverrides) {
+                        for (const key in this.expressionOverrides) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            try {
+                                const idx = getParamIndex(key);
+                                if (idx >= 0 && postUpdateParams[key] === undefined) {
+                                    postUpdateParams[key] = getParamValue(idx);
+                                }
+                            } catch (_) {}
+                        }
+                    }
                     this.internalParameterValues = postUpdateParams;
 
                     // C. Apply Smart Overlay (Stacking)
+                    const desiredByIdx = {};
+                    const hasDesired = (idx) => Object.prototype.hasOwnProperty.call(desiredByIdx, idx);
+                    const getDesiredOrCurrent = (idx) => hasDesired(idx) ? desiredByIdx[idx] : getParamValue(idx);
+                    const setDesired = (idx, v) => {
+                        if (typeof v !== 'number' || Number.isNaN(v)) return;
+                        desiredByIdx[idx] = v;
+                    };
                     
                     // 1. Apply Audio Sway Stacking (Smoothed Additive Mode)
                     if (this.audioSwayParams && this.isSwayEnabled) {
@@ -565,11 +589,11 @@ class Live2DManager {
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) {
-                                    const currentVal = getParamValue(idx);
+                                    const currentVal = getDesiredOrCurrent(idx);
                                     // Limit sway amplitude to avoid twitching (clamp additive offset)
                                     // Smoothly blend if needed, but here we just clamp max offset
                                     const clampedValue = Math.max(-5, Math.min(5, value));
-                                    setParamValue(idx, currentVal + clampedValue);
+                                    setDesired(idx, currentVal + clampedValue);
                                 }
                             } catch (_) {}
                         }
@@ -582,38 +606,40 @@ class Live2DManager {
                                  const idx = getParamIndex(key);
                                  if (idx >= 0) {
                                      if (!this._eyeSmoothed) this._eyeSmoothed = {};
-                                     const currentVal = getParamValue(idx);
+                                     const currentVal = getDesiredOrCurrent(idx);
                                      const prevVal = (this._eyeSmoothed[key] !== undefined) ? this._eyeSmoothed[key] : currentVal;
                                      const targetVal = value;
                                      const t = (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) ? 0.18 : 0.35;
                                      const nextVal = prevVal + (targetVal - prevVal) * t;
                                      this._eyeSmoothed[key] = nextVal;
-                                     setParamValue(idx, nextVal);
+                                     setDesired(idx, nextVal);
                                  }
                              } catch (_) {}
                          }
                     }
 
-                    if (this.microIdleOverrides && this.autonomyConfig && this.autonomyConfig.microIdleEnabled) {
-                        for (const [key, value] of Object.entries(this.microIdleOverrides)) {
+                    if (this.expressionOverrides) {
+                        const nowMs = Date.now();
+                        for (const [key, value] of Object.entries(this.expressionOverrides)) {
                             if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            if (value === null) continue;
+                            const meta = this._overrideMeta ? this._overrideMeta[key] : null;
+                            if (meta && meta.expiresAt && nowMs >= meta.expiresAt) {
+                                try { delete this.expressionOverrides[key]; } catch (_) {}
+                                try { delete this._overrideMeta[key]; } catch (_) {}
+                                continue;
+                            }
+
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) {
-                                    let defaultVal = 0;
-                                    try {
-                                        if (typeof coreModel.getParameterDefaultValueByIndex === 'function') {
-                                            defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
-                                        }
-                                    } catch (_) {}
-                                    const desiredVal = defaultVal + value;
-                                    const currentVal = getParamValue(idx);
+                                    const currentVal = getDesiredOrCurrent(idx);
                                     const preVal = preUpdateParams[key] !== undefined ? preUpdateParams[key] : currentVal;
-                                    const offset = desiredVal - defaultVal;
+                                    const t = (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) ? 0.22 : 0.35;
                                     if (Math.abs(currentVal - preVal) > 0.001) {
-                                        setParamValue(idx, currentVal + offset);
+                                        setDesired(idx, currentVal + (value - currentVal) * t);
                                     } else {
-                                        setParamValue(idx, desiredVal);
+                                        setDesired(idx, value);
                                     }
                                 }
                             } catch (_) {}
@@ -622,6 +648,7 @@ class Live2DManager {
 
                     // 3. Apply Parameter Overrides Stacking (Smart Overlay)
                     if (this.parameterOverrides) {
+                        const nowMs = Date.now();
                         for (const [key, value] of Object.entries(this.parameterOverrides)) {
                             if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
                             if (value === null) continue;
@@ -629,28 +656,30 @@ class Live2DManager {
                             try {
                                 const idx = getParamIndex(key);
                                 if (idx >= 0) {
-                                    const currentVal = getParamValue(idx);
+                                    const currentVal = getDesiredOrCurrent(idx);
                                     const preVal = preUpdateParams[key] !== undefined ? preUpdateParams[key] : currentVal;
-                                    
-                                    let defaultVal = 0;
-                                    try {
-                                        if (typeof coreModel.getParameterDefaultValueByIndex === 'function') {
-                                            defaultVal = coreModel.getParameterDefaultValueByIndex(idx);
-                                        }
-                                    } catch(_) {}
+                                    const meta = this._overrideMeta ? this._overrideMeta[key] : null;
+                                    if (meta && meta.expiresAt && nowMs >= meta.expiresAt) {
+                                        try { delete this.parameterOverrides[key]; } catch (_) {}
+                                        try { delete this._overrideMeta[key]; } catch (_) {}
+                                        continue;
+                                    }
 
-                                    const offset = value - defaultVal; // Calculate desired offset from default
-
-                                    // If motion changed the value, we add our offset (stacking)
+                                    const t = (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) ? 0.35 : 0.65;
                                     if (Math.abs(currentVal - preVal) > 0.001) {
-                                        setParamValue(idx, currentVal + offset);
+                                        setDesired(idx, currentVal + (value - currentVal) * t);
                                     } else {
-                                        // Motion didn't touch it, enforce our value
-                                        setParamValue(idx, value);
+                                        setDesired(idx, value);
                                     }
                                 }
                             } catch (_) {}
                         }
+                    }
+
+                    for (const [idxStr, value] of Object.entries(desiredByIdx)) {
+                        const idx = Number(idxStr);
+                        if (!Number.isFinite(idx)) continue;
+                        setParamValue(idx, value);
                     }
                 } catch (err) {
                     console.error('[Live2D] Error in MotionManager.update override:', err);
@@ -727,6 +756,56 @@ class Live2DManager {
             } catch (e) {
                 console.error('[Live2D] Error in CoreModel.update override (Post-LipSync):', e);
             }
+
+            try {
+                if (!this._microIdleLastApplied) this._microIdleLastApplied = {};
+                const doMicroIdle = !!(this.autonomyConfig && this.autonomyConfig.microIdleEnabled);
+
+                if (doMicroIdle) {
+                    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+                    let intensity = Number(this.autonomyConfig.microIdleIntensity);
+                    if (!Number.isFinite(intensity)) intensity = 0.28;
+                    if (this.isSpeaking) intensity *= 0.55;
+                    if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') intensity *= 0.7;
+                    if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) intensity *= 0.35;
+                    if (this._proceduralMotionBusy) intensity *= 0.35;
+                    if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) intensity *= 0.45;
+
+                    const s = this._microIdleSeed || 0;
+                    this.microIdleOverrides.ParamAngleX = Math.sin(t * 0.55 + s) * 2.2 * intensity;
+                    this.microIdleOverrides.ParamAngleY = Math.sin(t * 0.45 + s * 1.3) * 1.4 * intensity;
+                    this.microIdleOverrides.ParamAngleZ = Math.sin(t * 0.60 + s * 1.7) * 1.0 * intensity;
+                    this.microIdleOverrides.ParamBodyAngleX = Math.sin(t * 0.25 + s * 2.1) * 0.8 * intensity;
+                    this.microIdleOverrides.ParamBodyAngleY = Math.sin(t * 0.20 + s * 2.6) * 0.5 * intensity;
+                    this.microIdleOverrides.ParamBodyAngleZ = Math.sin(t * 0.30 + s * 3.1) * 0.6 * intensity;
+                    this.microIdleOverrides.ParamBreath = Math.sin(t * 0.18 + s * 0.7) * 0.15 * intensity;
+
+                    for (const [key, offsetVal] of Object.entries(this.microIdleOverrides || {})) {
+                        if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                        const idx = getParamIndex(key);
+                        if (idx < 0) continue;
+                        const offset = (typeof offsetVal === 'number' && !Number.isNaN(offsetVal)) ? offsetVal : 0;
+                        const prevOffset = (typeof this._microIdleLastApplied[key] === 'number' && !Number.isNaN(this._microIdleLastApplied[key]))
+                            ? this._microIdleLastApplied[key]
+                            : 0;
+                        const currentVal = getParamValue(idx);
+                        const baseline = currentVal - prevOffset;
+                        setParamValue(idx, baseline + offset);
+                        this._microIdleLastApplied[key] = offset;
+                    }
+                } else {
+                    for (const [key, prevOffsetVal] of Object.entries(this._microIdleLastApplied || {})) {
+                        if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                        const idx = getParamIndex(key);
+                        if (idx < 0) continue;
+                        const prevOffset = (typeof prevOffsetVal === 'number' && !Number.isNaN(prevOffsetVal)) ? prevOffsetVal : 0;
+                        if (Math.abs(prevOffset) < 0.000001) continue;
+                        const currentVal = getParamValue(idx);
+                        setParamValue(idx, currentVal - prevOffset);
+                    }
+                    this._microIdleLastApplied = {};
+                }
+            } catch (_) {}
         };
 
         this._coreOverrideInstalled = true;
@@ -792,7 +871,7 @@ class Live2DManager {
 
     // [New] Set Parameter Override (for procedural stacking)
     setParameterOverride(id, value) {
-        if (!this.parameterOverrides) this.parameterOverrides = {};
+        if (!this.expressionOverrides) this.expressionOverrides = {};
         
         // Model Compatibility Check: Only set if model supports it
         if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel) {
@@ -813,12 +892,21 @@ class Live2DManager {
             } catch (e) { return; }
         }
         
-        this.parameterOverrides[id] = value;
+        this.expressionOverrides[id] = value;
+        if (!this._overrideMeta) this._overrideMeta = {};
+        const prev = this._overrideMeta[id] || {};
+        this._overrideMeta[id] = { ...prev, store: 'expression', expiresAt: null };
     }
     
     // [New] Clear Parameter Overrides
     clearParameterOverrides() {
-        this.parameterOverrides = {};
+        const keys = Object.keys(this.expressionOverrides || {});
+        this.expressionOverrides = {};
+        if (this._overrideMeta && keys.length > 0) {
+            keys.forEach(k => {
+                try { delete this._overrideMeta[k]; } catch (_) {}
+            });
+        }
     }
 
 
@@ -964,6 +1052,61 @@ class Live2DManager {
             return;
         }
 
+        this._pendingExpressionEmotion = emotion;
+        if (this._expressionDebounceTimer) {
+            clearTimeout(this._expressionDebounceTimer);
+            this._expressionDebounceTimer = null;
+        }
+        if (!this._expressionDebouncePromise) {
+            this._expressionDebouncePromise = new Promise((resolve) => {
+                this._expressionDebounceResolve = resolve;
+            });
+        }
+        this._expressionDebounceTimer = setTimeout(() => {
+            const toPlay = this._pendingExpressionEmotion;
+            this._pendingExpressionEmotion = null;
+            this._expressionDebounceTimer = null;
+            (async () => {
+                try {
+                    await this._playExpressionNow(toPlay);
+                } catch (_) {}
+                const done = this._expressionDebounceResolve;
+                this._expressionDebounceResolve = null;
+                this._expressionDebouncePromise = null;
+                if (done) done();
+            })();
+        }, 160);
+        return this._expressionDebouncePromise;
+    }
+
+    _ensureChannelToken(src) {
+        const key = String(src || 'motion');
+        if (!this._channelToken) this._channelToken = {};
+        if (!this._channelTokenCounter) this._channelTokenCounter = 0;
+        const existing = this._channelToken[key];
+        if (existing && existing > 0) return existing;
+        this._channelTokenCounter += 1;
+        const t = this._channelTokenCounter;
+        this._channelToken[key] = t;
+        return t;
+    }
+
+    _nextChannelToken(src) {
+        const key = String(src || 'motion');
+        if (!this._channelToken) this._channelToken = {};
+        if (!this._channelTokenCounter) this._channelTokenCounter = 0;
+        this._channelTokenCounter += 1;
+        const t = this._channelTokenCounter;
+        this._channelToken[key] = t;
+        return t;
+    }
+
+    async _playExpressionNow(emotion) {
+        if (!this.currentModel || !this.emotionMapping) {
+            console.warn('无法播放表情：模型或映射配置未加载');
+            return;
+        }
+
         // EmotionMapping.expressions 规范：{ emotion: ["expressions/xxx.exp3.json", ...] }
         let expressionFiles = (this.emotionMapping.expressions && this.emotionMapping.expressions[emotion]) || [];
 
@@ -1030,13 +1173,16 @@ class Live2DManager {
             // 方法2: 回退到手动参数设置
             console.log('使用手动参数设置播放expression');
             if (expressionData.Parameters) {
+                const p = {};
                 for (const param of expressionData.Parameters) {
-                    try {
-                        this.currentModel.internalModel.coreModel.setParameterValueById(param.Id, param.Value);
-                    } catch (paramError) {
-                        console.warn(`设置参数 ${param.Id} 失败:`, paramError);
-                    }
+                    const id = param && param.Id;
+                    if (!id) continue;
+                    const v = Number(param.Value);
+                    if (Number.isNaN(v)) continue;
+                    p[id] = v;
                 }
+                const token = this._ensureChannelToken('expression');
+                this.applyParameters(p, true, 'expression', { token, lockMs: 650, expiresMs: 2600, immediate: !this._coreOverrideInstalled });
             }
             
             console.log(`手动设置表情: ${choiceFile}`);
@@ -1051,72 +1197,81 @@ class Live2DManager {
     // 直接设置参数 (用于 Flutter 实时控制)
     updateParameters(params) {
         if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
-        
-        const core = this.currentModel.internalModel.coreModel;
-        const trySet = (id, value) => {
-            try { core.setParameterValueById(id, value); } catch (_) {}
-        };
-        
-        // Mapping Flutter ExpressionData to Live2D Parameters (Standard Cubism)
-        // params: { mouth, eyes, eyebrow, blush, pupilX, pupilY, headTilt }
-        
-        if (params.mouth !== undefined) {
-            // Mouth Open: 0..1
-            // Flutter mouth: -1..1. Map -1..0 to frown (not standard param), 0..1 to open.
-            // Usually ParamMouthOpenY is 0..1.
-            let openY = params.mouth > 0 ? params.mouth : 0;
-            // core.setParameterValueById('ParamMouthOpenY', openY); // Let lip-sync handle this if active
-            
-            // Mouth Form: -1 (sad) .. 1 (smile)
-            trySet('ParamMouthForm', params.mouth); 
+
+        const mapped = {};
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+        if (params && params.mouth !== undefined) {
+            const v = Number(params.mouth);
+            if (!Number.isNaN(v)) mapped.ParamMouthForm = clamp(v, -1, 1);
         }
-        
-        if (params.eyes !== undefined) {
-            // Eyes Open: 0..1
-            trySet('ParamEyeLOpen', params.eyes);
-            trySet('ParamEyeROpen', params.eyes);
-        }
-        
-        if (params.eyebrow !== undefined) {
-            // Eyebrow Y: -1..1
-            trySet('ParamBrowLY', params.eyebrow);
-            trySet('ParamBrowRY', params.eyebrow);
-        }
-        
-        if (params.pupilX !== undefined) {
-            trySet('ParamEyeBallX', params.pupilX);
-            trySet('ParamEyeBallX_L', params.pupilX);
-            trySet('ParamEyeBallX_R', params.pupilX);
-        }
-        
-        if (params.pupilY !== undefined) {
-            trySet('ParamEyeBallY', params.pupilY);
-            trySet('ParamEyeBallY_L', params.pupilY);
-            trySet('ParamEyeBallY_R', params.pupilY);
-        }
-        
-        if (params.blush !== undefined) {
-            trySet('ParamCheek', params.blush);
-        }
-        
-        if (params.headTilt !== undefined) {
-            const ht = Number(params.headTilt);
-            if (!Number.isNaN(ht)) {
-                let z = 0;
-                if (Math.abs(ht) <= 1) {
-                    z = ht * 60;
-                } else {
-                    z = ht;
-                }
-                if (z > 30) z = 30;
-                if (z < -30) z = -30;
-                trySet('ParamAngleZ', z);
+        if (params && params.eyes !== undefined) {
+            const v = Number(params.eyes);
+            if (!Number.isNaN(v)) {
+                mapped.ParamEyeLOpen = clamp(v, 0, 1);
+                mapped.ParamEyeROpen = clamp(v, 0, 1);
             }
         }
+        if (params && params.eyebrow !== undefined) {
+            const v = Number(params.eyebrow);
+            if (!Number.isNaN(v)) {
+                mapped.ParamBrowLY = clamp(v, -1, 1);
+                mapped.ParamBrowRY = clamp(v, -1, 1);
+            }
+        }
+        if (params && params.pupilX !== undefined) {
+            const v = Number(params.pupilX);
+            if (!Number.isNaN(v)) {
+                const vv = clamp(v, -1, 1);
+                mapped.ParamEyeBallX = vv;
+                mapped.ParamEyeBallX_L = vv;
+                mapped.ParamEyeBallX_R = vv;
+            }
+        }
+        if (params && params.pupilY !== undefined) {
+            const v = Number(params.pupilY);
+            if (!Number.isNaN(v)) {
+                const vv = clamp(v, -1, 1);
+                mapped.ParamEyeBallY = vv;
+                mapped.ParamEyeBallY_L = vv;
+                mapped.ParamEyeBallY_R = vv;
+            }
+        }
+        if (params && params.blush !== undefined) {
+            const v = Number(params.blush);
+            if (!Number.isNaN(v)) mapped.ParamCheek = clamp(v, 0, 1);
+        }
+        if (params && params.headTilt !== undefined) {
+            const ht = Number(params.headTilt);
+            if (!Number.isNaN(ht)) {
+                let z = Math.abs(ht) <= 1 ? ht * 60 : ht;
+                z = clamp(z, -30, 30);
+                mapped.ParamAngleZ = z;
+            }
+        }
+
+        if (Object.keys(mapped).length === 0) return;
+
+        if (!this._realtimeExpressionToken) {
+            this._realtimeExpressionToken = this._ensureChannelToken('realtime_expression');
+        }
+        this._realtimeExpressionPending = { ...(this._realtimeExpressionPending || {}), ...mapped };
+        if (this._realtimeExpressionRAF) return;
+        this._realtimeExpressionRAF = requestAnimationFrame(() => {
+            this._realtimeExpressionRAF = 0;
+            const p = this._realtimeExpressionPending || {};
+            this._realtimeExpressionPending = null;
+            this.applyParameters(p, true, 'realtime_expression', {
+                token: this._realtimeExpressionToken,
+                lockMs: 120,
+                expiresMs: 240,
+                immediate: !this._coreOverrideInstalled
+            });
+        });
     }
 
     // 参数插值动画 helper
-    tweenParameters(targetParams, duration, easingFunc = (t) => t) {
+    tweenParameters(targetParams, duration, easingFunc = (t) => t, source = 'motion', options = {}) {
         return new Promise((resolve, reject) => {
             // Check cancellation token
             if (this.cancelProceduralMotion) {
@@ -1142,6 +1297,14 @@ class Live2DManager {
 
             const startTime = performance.now();
             let frameId = null;
+            const src = String(source || 'motion');
+            const token = (options && typeof options.token === 'number') ? options.token : this._ensureChannelToken(src);
+            const lockMs = (options && typeof options.lockMs === 'number')
+                ? options.lockMs
+                : Math.max(160, Math.min(900, (Number(duration) || 0) + 120));
+            const immediate = (options && Object.prototype.hasOwnProperty.call(options, 'immediate'))
+                ? !!options.immediate
+                : !this._coreOverrideInstalled;
 
             const animate = (currentTime) => {
                 // Check cancellation
@@ -1165,13 +1328,13 @@ class Live2DManager {
                     }
                 });
 
-                this.applyParameters(currentFrameParams, true); // Silent update
+                this.applyParameters(currentFrameParams, true, src, { token, lockMs, immediate }); // Silent update
 
                 if (progress < 1) {
                     frameId = requestAnimationFrame(animate);
                 } else {
                     // Ensure final state is applied exactly (handles nulls/releases)
-                    this.applyParameters(targetParams, true);
+                    this.applyParameters(targetParams, true, src, { token, lockMs, immediate });
                     resolve();
                 }
             };
@@ -1186,6 +1349,8 @@ class Live2DManager {
             return;
         }
 
+        this._proceduralMotionBusy = true;
+        try {
         // Cancel previous procedural motion & smooth release
         this.cancelProceduralMotion = true;
         await new Promise(r => setTimeout(r, 10));
@@ -1592,22 +1757,23 @@ class Live2DManager {
                     
                     // 这里可以添加其他备用方案，但目前方法1已经工作
                     console.warn('所有motion播放方法都失败，回退到简单动作');
-                    this.playSimpleMotion(emotion);
+                    await this.playSimpleMotion(emotion);
+                    return;
                 }
-                
-                // 如果所有方法都失败，回退到简单动作
-                console.warn(`无法播放motion: ${choice.File}，回退到简单动作`);
-                this.playSimpleMotion(emotion);
-                
             } catch (error) {
                 console.error('motion播放过程中出错:', error);
-                this.playSimpleMotion(emotion);
+                await this.playSimpleMotion(emotion);
+                return;
             }
             
         } catch (error) {
             console.error('播放动作失败:', error);
             // 回退到简单动作
-            this.playSimpleMotion(emotion);
+            await this.playSimpleMotion(emotion);
+            return;
+        }
+        } finally {
+            this._proceduralMotionBusy = false;
         }
     }
 
@@ -1618,16 +1784,15 @@ class Live2DManager {
             const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
             const easeInCubic = t => t * t * t;
             const easeInOutQuad = t => t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
             switch (emotion) {
                 case 'happy':
                     // 轻微点头
                     await this.tweenParameters({'ParamAngleY': 8.0}, 150, easeOutCubic);
-                    setTimeout(() => {
-                        this.tweenParameters({'ParamAngleY': 0.0}, 200, easeInCubic);
-                        this.motionTimer = null;
-                        this.clearEmotionEffects();
-                    }, 1000);
+                    await sleep(850);
+                    await this.tweenParameters({'ParamAngleY': 0.0}, 220, easeInCubic);
+                    await this.releaseParametersSmoothly(['ParamAngleY'], 260);
                     break;
                 case 'sad':
                     // 轻微低头 + 悲伤嘴角
@@ -1638,42 +1803,36 @@ class Live2DManager {
                         'ParamBrowLY': -0.3,
                         'ParamBrowRY': -0.3
                     }, 400, easeOutCubic);
-                    setTimeout(() => {
-                        this.tweenParameters({
-                            'ParamAngleY': 0.0,
-                            'ParamAngleZ': 0.0
-                        }, 500, easeInCubic);
-                        this.motionTimer = null;
-                        this.clearEmotionEffects();
-                    }, 1500);
+                    await sleep(1200);
+                    await this.tweenParameters({
+                        'ParamAngleY': 0.0,
+                        'ParamAngleZ': 0.0
+                    }, 500, easeInCubic);
+                    await this.releaseParametersSmoothly(['ParamAngleY', 'ParamAngleZ', 'ParamMouthForm', 'ParamBrowLY', 'ParamBrowRY'], 420);
                     break;
                 case 'angry':
                     // 轻微摇头
                     await this.tweenParameters({'ParamAngleX': 5.0}, 100, easeOutCubic);
-                    setTimeout(() => {
-                         this.tweenParameters({'ParamAngleX': -5.0}, 100, easeInOutQuad);
-                    }, 150);
-                    setTimeout(() => {
-                        this.tweenParameters({'ParamAngleX': 0.0}, 200, easeInCubic);
-                        this.motionTimer = null;
-                        this.clearEmotionEffects();
-                    }, 800);
+                    await sleep(150);
+                    await this.tweenParameters({'ParamAngleX': -5.0}, 100, easeInOutQuad);
+                    await sleep(450);
+                    await this.tweenParameters({'ParamAngleX': 0.0}, 200, easeInCubic);
+                    await this.releaseParametersSmoothly(['ParamAngleX'], 260);
                     break;
                 case 'surprised':
                     // 轻微后仰
                     await this.tweenParameters({'ParamAngleY': -8.0}, 150, easeOutCubic);
-                    setTimeout(() => {
-                        this.tweenParameters({'ParamAngleY': 0.0}, 200, easeInCubic);
-                        this.motionTimer = null;
-                        this.clearEmotionEffects();
-                    }, 800);
+                    await sleep(650);
+                    await this.tweenParameters({'ParamAngleY': 0.0}, 200, easeInCubic);
+                    await this.releaseParametersSmoothly(['ParamAngleY'], 260);
                     break;
                 default:
                     // 中性状态，重置角度
-                    this.tweenParameters({
+                    await this.tweenParameters({
                         'ParamAngleX': 0.0,
                         'ParamAngleY': 0.0
                     }, 300, easeInCubic);
+                    await this.releaseParametersSmoothly(['ParamAngleX', 'ParamAngleY'], 300);
                     break;
             }
             console.log(`播放简单动作(Smooth): ${emotion}`);
@@ -1715,7 +1874,7 @@ class Live2DManager {
             hasCleared = true;
         }
         
-        // 停止所有motion并重置所有参数到默认值
+        // 停止所有motion
         if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.motionManager) {
             try {
                 // 使用官方API停止所有motion
@@ -1728,51 +1887,21 @@ class Live2DManager {
                 console.warn('停止motion失败:', motionError);
             }
         }
-        
-        // 重置所有参数到默认值（关键步骤）
-        if (this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel) {
-            try {
-                const coreModel = this.currentModel.internalModel.coreModel;
-                const paramCount = coreModel.getParameterCount();
-                
-                console.log(`开始重置${paramCount}个参数到默认值...`);
-                
-                // 遍历所有参数，将其重置为默认值
-                for (let i = 0; i < paramCount; i++) {
+
+        try {
+            const keys = Object.keys(this.parameterOverrides || {});
+            if (keys.length > 0) {
+                const token = this._ensureChannelToken('motion');
+                this.cancelProceduralMotion = true;
+                setTimeout(() => {
+                    this.cancelProceduralMotion = false;
                     try {
-                        const paramId = coreModel.getParameterId(i);
-                        const defaultValue = coreModel.getParameterDefaultValueByIndex(i);
-                        
-                        // 跳过嘴巴相关参数（这些由口型同步控制）
-                        if (['ParamMouthOpenY', 'ParamMouthOpen', 'ParamA', 'ParamI', 'ParamU', 'ParamE', 'ParamO'].includes(paramId)) {
-                            continue;
-                        }
-                        
-                        // 重置参数到默认值
-                        coreModel.setParameterValueByIndex(i, defaultValue);
-                    } catch (e) {
-                        // 单个参数重置失败不影响其他参数
-                    }
-                }
-                try {
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', 0);
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleZ', 0);
-                    console.log('已使用备用方案重置角度参数');
-                } catch (e) {}
-                
-                console.log('所有motion参数已重置到默认值');
-            } catch (paramError) {
-                console.warn('重置参数失败，使用备用方案:', paramError);
-                // 备用方案：至少重置角度参数
-                try {
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleX', 0);
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleY', 0);
-                    this.currentModel.internalModel.coreModel.setParameterValueById('ParamAngleZ', 0);
-                    console.log('已使用备用方案重置角度参数');
-                } catch (e) {}
+                        this.releaseParametersSmoothly(keys, 520, 'motion', { token, immediate: !this._coreOverrideInstalled });
+                    } catch (_) {}
+                }, 20);
+                hasCleared = true;
             }
-        }
+        } catch (_) {}
         
         // 重新应用当前的expression（这样expression会覆盖需要修改的参数）
         if (this.currentEmotion && this.currentEmotion !== 'neutral') {
@@ -1791,7 +1920,7 @@ class Live2DManager {
             console.warn('重新应用常驻表情失败:', e);
         }
         
-        console.log('motion效果清理完成，所有参数已重置，expression已重新应用');
+        console.log('motion效果清理完成，expression已重新应用');
     }
 
     // 设置情感并播放对应的表情和动作
@@ -1988,6 +2117,8 @@ class Live2DManager {
         this.idleMotionTimer = setInterval(async () => {
             // 检查模型是否加载并初始化
             if (!this.currentModel || !this.isInitialized) return;
+            if (this._proceduralMotionBusy) return;
+            if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) return;
             
             // 仅在 neutral 或 idle 状态下播放
             // 且当前没有正在改变情感或播放其他动作
@@ -2084,6 +2215,8 @@ class Live2DManager {
                 if (!this._agentTweenAbortId) this._agentTweenAbortId = 0;
                 this._agentTweenAbortId++;
                 const abortId = this._agentTweenAbortId;
+                const token = this._nextChannelToken('idle_agent');
+                this._agentBusyUntil = Date.now() + 2600;
                 const sanitize = (p) => {
                     const out = {};
                     if (!p || typeof p !== 'object') return out;
@@ -2153,11 +2286,11 @@ class Live2DManager {
                                     currentFrameParams[key] = null;
                                 }
                             });
-                            this.applyParameters(currentFrameParams, true);
+                            this.applyParameters(currentFrameParams, true, 'idle_agent', { token, lockMs: 620, immediate: !this._coreOverrideInstalled });
                             if (progress < 1) {
                                 frameId = requestAnimationFrame(animate);
                             } else {
-                                this.applyParameters(targetParams, true);
+                                this.applyParameters(targetParams, true, 'idle_agent', { token, lockMs: 620, immediate: !this._coreOverrideInstalled });
                                 resolve();
                             }
                         };
@@ -2168,7 +2301,7 @@ class Live2DManager {
                 await tweenAgent(params, 900, easeInOut).catch((e) => {
                     if (e !== 'Cancelled') throw e;
                 });
-                await this.releaseParametersSmoothly(keys, 1200);
+                await this.releaseParametersSmoothly(keys, 1200, 'idle_agent', { token, immediate: !this._coreOverrideInstalled });
             }
 
             return decision;
@@ -3459,7 +3592,7 @@ class Live2DManager {
     }
 
     // 应用参数控制
-    applyParameters(params, silent = false) {
+    applyParameters(params, silent = false, source = 'motion', options = {}) {
         if (!this.currentModel || !this.currentModel.internalModel || !this.currentModel.internalModel.coreModel) return;
         
         if (!silent) {
@@ -3469,11 +3602,42 @@ class Live2DManager {
             }
         }
 
+        const src = String(source || 'motion');
+        const useExpressionStore = (src === 'expression' || src === 'realtime_expression' || src === 'persistent_expression' || src.includes('expression'));
+        const storeName = useExpressionStore ? 'expressionOverrides' : 'parameterOverrides';
+
         // Ensure overrides object exists
-        if (!this.parameterOverrides) this.parameterOverrides = {};
+        if (!this[storeName]) this[storeName] = {};
         if (!this.overriddenIndices) this.overriddenIndices = {}; // Cache for indices
 
         const core = this.currentModel.internalModel.coreModel;
+        if (!this._overrideMeta) this._overrideMeta = {};
+        if (!this._paramLocks) this._paramLocks = {};
+        if (!this._channelToken) this._channelToken = {};
+        if (!this._channelTokenCounter) this._channelTokenCounter = 0;
+
+        const priorityOf = (s) => {
+            const k = String(s || '');
+            if (k === 'motion') return 3;
+            if (k === 'agent') return 3;
+            if (k === 'idle_agent') return 1;
+            if (k === 'expression') return 2;
+            if (k === 'realtime_expression') return 1;
+            if (k === 'persistent_expression') return 0;
+            if (k.includes('expression')) return 1;
+            return 2;
+        };
+
+        const nowMs = Date.now();
+        const priority = priorityOf(src);
+        let token = (options && typeof options.token === 'number') ? options.token : (this._channelToken[src] || 0);
+        if (!token) token = this._ensureChannelToken(src);
+        const lockMs = (options && typeof options.lockMs === 'number') ? options.lockMs : (src === 'realtime_expression' ? 140 : 450);
+        const expiresMs = (options && typeof options.expiresMs === 'number') ? options.expiresMs : null;
+        const immediate = (options && Object.prototype.hasOwnProperty.call(options, 'immediate'))
+            ? !!options.immediate
+            : (priority >= 2 && !this._coreOverrideInstalled);
+
         if (!this._paramSupportCache) this._paramSupportCache = {};
         const isSupported = (id) => {
             if (this._paramSupportCache[id] !== undefined) return this._paramSupportCache[id];
@@ -3505,9 +3669,31 @@ class Live2DManager {
         // Update overrides
         Object.keys(expandedParams).forEach(key => {
             const value = expandedParams[key];
+            const lock = this._paramLocks[key];
+            if (lock && lock.expiresAt && nowMs >= lock.expiresAt) {
+                try { delete this._paramLocks[key]; } catch (_) {}
+            }
+            const activeLock = this._paramLocks[key];
+            if (activeLock && activeLock.expiresAt && nowMs < activeLock.expiresAt) {
+                if (activeLock.source !== src) {
+                    if (activeLock.priority > priority) return;
+                    if (activeLock.priority === priority && activeLock.token > token) return;
+                }
+            }
+
             // If value is null, remove from overrides (release control)
             if (value === null) {
-                delete this.parameterOverrides[key];
+                const lock2 = this._paramLocks[key];
+                if (lock2 && lock2.expiresAt && nowMs < lock2.expiresAt) {
+                    if (lock2.source !== src) {
+                        if (priority < lock2.priority) return;
+                        if (priority === lock2.priority && token < lock2.token) return;
+                    } else {
+                        if (lock2.token && lock2.token !== token) return;
+                    }
+                }
+
+                delete this[storeName][key];
                 
                 // Also remove from index cache
                 if (core.getParameterIndex) {
@@ -3516,9 +3702,27 @@ class Live2DManager {
                 }
 
                 if (typeof logToScreen === 'function') logToScreen(`[Motion] Released param: ${key}`);
+                if (this._overrideMeta && this._overrideMeta[key]) {
+                    try { delete this._overrideMeta[key]; } catch (_) {}
+                }
+                if (this._paramLocks && this._paramLocks[key]) {
+                    try { delete this._paramLocks[key]; } catch (_) {}
+                }
             } else {
                 if (!isSupported(key)) return;
-                this.parameterOverrides[key] = value;
+                this[storeName][key] = value;
+                this._overrideMeta[key] = {
+                    ...(this._overrideMeta[key] || {}),
+                    store: storeName,
+                    source: src,
+                    expiresAt: (expiresMs && expiresMs > 0) ? (nowMs + expiresMs) : null
+                };
+                this._paramLocks[key] = {
+                    source: src,
+                    token: token || 0,
+                    priority,
+                    expiresAt: nowMs + lockMs
+                };
                 
                 // Cache index
                 if (core.getParameterIndex) {
@@ -3527,15 +3731,37 @@ class Live2DManager {
                 }
 
                 // Also set immediately for responsiveness
-                try {
-                    core.setParameterValueById(key, value);
-                } catch (_) {}
+                if (immediate) {
+                    try {
+                        let idx = -1;
+                        try {
+                            if (typeof core.getParameterIndex === 'function') {
+                                idx = core.getParameterIndex(key);
+                            }
+                            if (idx < 0 && core._parameterIds && Array.isArray(core._parameterIds)) {
+                                idx = core._parameterIds.indexOf(key);
+                            }
+                        } catch (_) { idx = -1; }
+
+                        if (idx >= 0 && this._paramSmootherState) {
+                            this._paramSmootherState[idx] = value;
+                        }
+
+                        if (idx >= 0 && typeof core.setParameterValueByIndex === 'function') {
+                            core.setParameterValueByIndex(idx, value);
+                        } else if (idx >= 0 && typeof core.setParamFloat === 'function') {
+                            core.setParamFloat(idx, value);
+                        } else if (typeof core.setParameterValueById === 'function') {
+                            core.setParameterValueById(key, value);
+                        }
+                    } catch (_) {}
+                }
             }
         });
     }
 
     // Smoothly release parameters to their internal values (avoids snapping)
-    async releaseParametersSmoothly(keys, duration = 500) {
+    async releaseParametersSmoothly(keys, duration = 500, source = 'motion', options = {}) {
         if (!keys || keys.length === 0) return;
         
         return new Promise(resolve => {
@@ -3562,6 +3788,10 @@ class Live2DManager {
             
             const startTime = performance.now();
             const animate = (currentTime) => {
+                if (this.cancelProceduralMotion) {
+                    resolve();
+                    return;
+                }
                 const elapsed = currentTime - startTime;
                 const progress = Math.min(elapsed / duration, 1);
                 // Ease out cubic
@@ -3590,7 +3820,12 @@ class Live2DManager {
                     }
                 });
                 
-                this.applyParameters(frameParams, true);
+                const src = String(source || 'motion');
+                const token = (options && typeof options.token === 'number') ? options.token : (this._channelToken && this._channelToken[src] ? this._channelToken[src] : 0);
+                const immediate = (options && Object.prototype.hasOwnProperty.call(options, 'immediate'))
+                    ? !!options.immediate
+                    : !this._coreOverrideInstalled;
+                this.applyParameters(frameParams, true, src, { token, lockMs: Math.max(160, Math.min(900, (Number(duration) || 0) + 160)), immediate });
                 
                 if (stillRunning) {
                     requestAnimationFrame(animate);
@@ -3673,6 +3908,8 @@ class Live2DManager {
                 if (!this._agentTweenAbortId) this._agentTweenAbortId = 0;
                 this._agentTweenAbortId++;
                 const abortId = this._agentTweenAbortId;
+                const token = this._nextChannelToken('agent');
+                this._agentBusyUntil = Date.now() + 1800;
                 const sanitize = (p) => {
                     const out = {};
                     if (!p || typeof p !== 'object') return out;
@@ -3742,11 +3979,11 @@ class Live2DManager {
                                     currentFrameParams[key] = null;
                                 }
                             });
-                            this.applyParameters(currentFrameParams, true);
+                            this.applyParameters(currentFrameParams, true, 'agent', { token, lockMs: 520, immediate: !this._coreOverrideInstalled });
                             if (progress < 1) {
                                 frameId = requestAnimationFrame(animate);
                             } else {
-                                this.applyParameters(targetParams, true);
+                                this.applyParameters(targetParams, true, 'agent', { token, lockMs: 520, immediate: !this._coreOverrideInstalled });
                                 resolve();
                             }
                         };
@@ -3757,7 +3994,7 @@ class Live2DManager {
                 await tweenAgent(params, 500, t => 1 - Math.pow(1 - t, 3)).catch((e) => {
                     if (e !== 'Cancelled') throw e;
                 });
-                await this.releaseParametersSmoothly(keys, 900);
+                await this.releaseParametersSmoothly(keys, 900, 'agent', { token, immediate: !this._coreOverrideInstalled });
             }
             
             return decision;
@@ -3881,12 +4118,16 @@ Live2DManager.prototype.applyPersistentExpressionsNative = async function() {
                 // 回退：手动设置参数
                 try {
                     const params = this.persistentExpressionParamsByName[name];
-                    const core = this.currentModel.internalModel && this.currentModel.internalModel.coreModel;
-                    if (core) {
-                        for (const p of params) {
-                            try { core.setParameterValueById(p.Id, p.Value); } catch (_) {}
-                        }
+                    const mapped = {};
+                    for (const p of params) {
+                        const id = p && p.Id;
+                        if (!id) continue;
+                        const v = Number(p.Value);
+                        if (Number.isNaN(v)) continue;
+                        mapped[id] = v;
                     }
+                    const token = this._ensureChannelToken('persistent_expression');
+                    this.applyParameters(mapped, true, 'persistent_expression', { token, lockMs: 900, immediate: !this._coreOverrideInstalled });
                 } catch (_) {}
             }
         } catch (e) {
@@ -3894,12 +4135,16 @@ Live2DManager.prototype.applyPersistentExpressionsNative = async function() {
             try {
                 if (this.persistentExpressionParamsByName && Array.isArray(this.persistentExpressionParamsByName[name])) {
                     const params = this.persistentExpressionParamsByName[name];
-                    const core = this.currentModel.internalModel && this.currentModel.internalModel.coreModel;
-                    if (core) {
-                        for (const p of params) {
-                            try { core.setParameterValueById(p.Id, p.Value); } catch (_) {}
-                        }
+                    const mapped = {};
+                    for (const p of params) {
+                        const id = p && p.Id;
+                        if (!id) continue;
+                        const v = Number(p.Value);
+                        if (Number.isNaN(v)) continue;
+                        mapped[id] = v;
                     }
+                    const token = this._ensureChannelToken('persistent_expression');
+                    this.applyParameters(mapped, true, 'persistent_expression', { token, lockMs: 900, immediate: !this._coreOverrideInstalled });
                 }
             } catch (_) {}
         }

@@ -413,6 +413,8 @@ class MotionAgentService:
         # 如果有直接动作命令
         if direct_motion:
             print(f"[MotionAgent] Direct motion command: {direct_motion}")
+            if (direct_motion not in motions) and (direct_motion not in self._procedural_motions):
+                direct_motion = None
             result = {
                 "motion": direct_motion,
                 "expression": None,
@@ -454,8 +456,11 @@ class MotionAgentService:
             merged_params = self._sanitize_parameters(merged_params)
             
             print(f"[MotionAgent] Action trigger detected: {action_trigger['action']}. Skipping LLM.")
+            trigger_motion = action_trigger.get('motion')
+            if trigger_motion and (trigger_motion not in motions) and (trigger_motion not in self._procedural_motions):
+                trigger_motion = None
             result = {
-                "motion": action_trigger.get('motion'),
+                "motion": trigger_motion,
                 "expression": action_trigger.get('expression') if action_trigger.get('expression') in expressions else self._pick_expression(inferred_emotion, expressions),
                 "look_at": None,
                 "parameters": merged_params

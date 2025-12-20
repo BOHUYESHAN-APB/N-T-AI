@@ -1771,9 +1771,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         final msg = _messages[index];
         final isUser = msg['role'] == 'user';
         final time = msg['created_at'] as DateTime?;
-        final timeStr = time != null
-            ? DateFormat('yyyy:MM:dd:HH:mm:ss').format(time)
-            : '';
+        final timeStr = time != null ? _formatMessageTimestamp(time) : '';
 
         return RepaintBoundary(
           child: MessageBubble(
@@ -1790,6 +1788,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
         );
       },
     );
+  }
+
+  String _formatMessageTimestamp(DateTime time) {
+    final now = DateTime.now();
+    final sameDay =
+        time.year == now.year && time.month == now.month && time.day == now.day;
+    if (sameDay) return DateFormat('HH:mm').format(time);
+    if (time.year != now.year) return DateFormat('yyyy-MM-dd HH:mm').format(time);
+    return DateFormat('MM-dd HH:mm').format(time);
   }
 
   Widget _buildInputArea(
