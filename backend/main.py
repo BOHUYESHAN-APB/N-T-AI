@@ -17,6 +17,16 @@ from app.api.routes import memory_routes, model_routes, live2d_routes, audio_rou
 from app.plugins import startup_plugins, shutdown_plugins, get_plugin
 from app.plugins.bilibili_live import BilibiliLivePlugin
 
+import logging
+
+# Filter out /health endpoint logs from uvicorn.access
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.args and len(record.args) >= 3 and record.args[2] != "/health"
+
+# Apply the filter to uvicorn.access logger
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
 # Lifecycle manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
