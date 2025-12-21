@@ -51,6 +51,14 @@ If you find this project helpful, please consider supporting us:
 ### 2. Autonomous Agent System (ReAct)
 *   **Web Search & Browsing**: The system can autonomously search the web (DuckDuckGo, Bing, Baidu) and visit webpages to answer complex questions.
 *   **Multi-Engine Fallback**: Automatically switches search engines if results are insufficient.
+*   **Voice Interaction (Beta)**:
+    *   **Cloud STT/TTS**: Supports Speech-to-Text and Text-to-Speech via cloud APIs (e.g., SiliconFlow).
+    *   **Push-to-Talk**: Built-in push-to-talk recording in the chat interface.
+    *   **Virtual Microphone Injection (Optional)**: Inject TTS audio into a “virtual microphone (input device)” for Discord/KOOK-like voice apps.
+    *   **Local Voice Models (Planned)**:
+        *   **TTS**: IndexTTS-2, CosyVoice (prioritize CosyVoice 3.0 for local packaging; cloud providers may not expose new features yet).
+        *   **STT**: Fun-ASR-Nano (Chinese dialect coverage), Fun-ASR-MLT-Nano (multi-language coverage).
+    *   **Emotion Signal Propagation (Planned)**: Normalize TTS style/emotion parameters and STT emotion recognition (e.g., `emotion`/`intensity`/`arousal`/`valence`) and report them to the main brain to understand tone and drive Live2D fine-grained expressions/motions.
 *   **Tool Execution**: Capable of executing defined tools to interact with the environment.
 *   **Claude Skills & MCP Agent Integration**: Leverages advanced "Claude skills" for complex reasoning and "MCP agent" for orchestrating multi-task workflows, enabling the agent to complete more sophisticated tasks by combining these capabilities.
 

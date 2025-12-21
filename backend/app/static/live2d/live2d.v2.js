@@ -676,6 +676,54 @@ class Live2DManager {
                         }
                     }
 
+                    if (!this._microIdleLastApplied) this._microIdleLastApplied = {};
+                    const doMicroIdle = !!(this.autonomyConfig && this.autonomyConfig.microIdleEnabled);
+                    if (doMicroIdle) {
+                        const tNow = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+                        let intensity = Number(this.autonomyConfig.microIdleIntensity);
+                        if (!Number.isFinite(intensity)) intensity = 0.28;
+                        if (this.isSpeaking) intensity *= 0.55;
+                        if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') intensity *= 0.7;
+                        if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) intensity *= 0.35;
+                        if (this._proceduralMotionBusy) intensity *= 0.35;
+                        if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) intensity *= 0.45;
+
+                        const s = this._microIdleSeed || 0;
+                        if (!this.microIdleOverrides) this.microIdleOverrides = {};
+                        this.microIdleOverrides.ParamAngleX = Math.sin(tNow * 0.55 + s) * 2.2 * intensity;
+                        this.microIdleOverrides.ParamAngleY = Math.sin(tNow * 0.45 + s * 1.3) * 1.4 * intensity;
+                        this.microIdleOverrides.ParamAngleZ = Math.sin(tNow * 0.60 + s * 1.7) * 1.0 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleX = Math.sin(tNow * 0.25 + s * 2.1) * 0.8 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleY = Math.sin(tNow * 0.20 + s * 2.6) * 0.5 * intensity;
+                        this.microIdleOverrides.ParamBodyAngleZ = Math.sin(tNow * 0.30 + s * 3.1) * 0.6 * intensity;
+                        this.microIdleOverrides.ParamBreath = Math.sin(tNow * 0.18 + s * 0.7) * 0.15 * intensity;
+
+                        for (const [key, offsetVal] of Object.entries(this.microIdleOverrides || {})) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            const idx = getParamIndex(key);
+                            if (idx < 0) continue;
+                            const offset = (typeof offsetVal === 'number' && !Number.isNaN(offsetVal)) ? offsetVal : 0;
+                            const prevOffset = (typeof this._microIdleLastApplied[key] === 'number' && !Number.isNaN(this._microIdleLastApplied[key]))
+                                ? this._microIdleLastApplied[key]
+                                : 0;
+                            const currentVal = getDesiredOrCurrent(idx);
+                            const baseline = currentVal - prevOffset;
+                            setDesired(idx, baseline + offset);
+                            this._microIdleLastApplied[key] = offset;
+                        }
+                    } else {
+                        for (const [key, prevOffsetVal] of Object.entries(this._microIdleLastApplied || {})) {
+                            if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
+                            const idx = getParamIndex(key);
+                            if (idx < 0) continue;
+                            const prevOffset = (typeof prevOffsetVal === 'number' && !Number.isNaN(prevOffsetVal)) ? prevOffsetVal : 0;
+                            if (Math.abs(prevOffset) < 0.000001) continue;
+                            const currentVal = getDesiredOrCurrent(idx);
+                            setDesired(idx, currentVal - prevOffset);
+                        }
+                        this._microIdleLastApplied = {};
+                    }
+
                     for (const [idxStr, value] of Object.entries(desiredByIdx)) {
                         const idx = Number(idxStr);
                         if (!Number.isFinite(idx)) continue;
@@ -756,56 +804,6 @@ class Live2DManager {
             } catch (e) {
                 console.error('[Live2D] Error in CoreModel.update override (Post-LipSync):', e);
             }
-
-            try {
-                if (!this._microIdleLastApplied) this._microIdleLastApplied = {};
-                const doMicroIdle = !!(this.autonomyConfig && this.autonomyConfig.microIdleEnabled);
-
-                if (doMicroIdle) {
-                    const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
-                    let intensity = Number(this.autonomyConfig.microIdleIntensity);
-                    if (!Number.isFinite(intensity)) intensity = 0.28;
-                    if (this.isSpeaking) intensity *= 0.55;
-                    if (this.currentEmotion !== 'neutral' && this.currentEmotion !== 'idle') intensity *= 0.7;
-                    if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging) intensity *= 0.35;
-                    if (this._proceduralMotionBusy) intensity *= 0.35;
-                    if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) intensity *= 0.45;
-
-                    const s = this._microIdleSeed || 0;
-                    this.microIdleOverrides.ParamAngleX = Math.sin(t * 0.55 + s) * 2.2 * intensity;
-                    this.microIdleOverrides.ParamAngleY = Math.sin(t * 0.45 + s * 1.3) * 1.4 * intensity;
-                    this.microIdleOverrides.ParamAngleZ = Math.sin(t * 0.60 + s * 1.7) * 1.0 * intensity;
-                    this.microIdleOverrides.ParamBodyAngleX = Math.sin(t * 0.25 + s * 2.1) * 0.8 * intensity;
-                    this.microIdleOverrides.ParamBodyAngleY = Math.sin(t * 0.20 + s * 2.6) * 0.5 * intensity;
-                    this.microIdleOverrides.ParamBodyAngleZ = Math.sin(t * 0.30 + s * 3.1) * 0.6 * intensity;
-                    this.microIdleOverrides.ParamBreath = Math.sin(t * 0.18 + s * 0.7) * 0.15 * intensity;
-
-                    for (const [key, offsetVal] of Object.entries(this.microIdleOverrides || {})) {
-                        if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
-                        const idx = getParamIndex(key);
-                        if (idx < 0) continue;
-                        const offset = (typeof offsetVal === 'number' && !Number.isNaN(offsetVal)) ? offsetVal : 0;
-                        const prevOffset = (typeof this._microIdleLastApplied[key] === 'number' && !Number.isNaN(this._microIdleLastApplied[key]))
-                            ? this._microIdleLastApplied[key]
-                            : 0;
-                        const currentVal = getParamValue(idx);
-                        const baseline = currentVal - prevOffset;
-                        setParamValue(idx, baseline + offset);
-                        this._microIdleLastApplied[key] = offset;
-                    }
-                } else {
-                    for (const [key, prevOffsetVal] of Object.entries(this._microIdleLastApplied || {})) {
-                        if (mouthIds.includes(key) || key === 'ParamOpacity' || key === 'ParamVisibility') continue;
-                        const idx = getParamIndex(key);
-                        if (idx < 0) continue;
-                        const prevOffset = (typeof prevOffsetVal === 'number' && !Number.isNaN(prevOffsetVal)) ? prevOffsetVal : 0;
-                        if (Math.abs(prevOffset) < 0.000001) continue;
-                        const currentVal = getParamValue(idx);
-                        setParamValue(idx, currentVal - prevOffset);
-                    }
-                    this._microIdleLastApplied = {};
-                }
-            } catch (_) {}
         };
 
         this._coreOverrideInstalled = true;
