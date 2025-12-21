@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../data/mock_data.dart';
+import '../plugins/plugin_manager.dart';
 import '../theme/chat_colors.dart';
 
 class SimpleMessageRow extends StatelessWidget {
@@ -11,22 +12,73 @@ class SimpleMessageRow extends StatelessWidget {
     final theme = Theme.of(context);
     final chat = theme.extension<ChatColors>();
     final isMine = message.isMine;
-    final textColor = isMine ? (chat?.mineText ?? theme.colorScheme.onSurface) : (chat?.otherText ?? theme.colorScheme.onSurface);
+    final kind = message.kind;
+    final alignRight = isMine || kind == ChatMessageKind.sttHeard;
+    final textColor = alignRight ? (chat?.mineText ?? theme.colorScheme.onSurface) : (chat?.otherText ?? theme.colorScheme.onSurface);
+    final borderColor = switch (kind) {
+      ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.5),
+      ChatMessageKind.user => Colors.blue.withValues(alpha: 0.5),
+      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.5),
+      ChatMessageKind.pluginSummary => Colors.green.withValues(alpha: 0.45),
+      ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: 0.3),
+      _ => theme.colorScheme.outline.withValues(alpha: 0.2),
+    };
+    final bgColor = switch (kind) {
+      ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.06),
+      ChatMessageKind.user => Colors.blue.withValues(alpha: 0.06),
+      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.06),
+      ChatMessageKind.system => theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      _ => theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
+    };
+    final outerPadding = EdgeInsets.fromLTRB(8, 6, kind == ChatMessageKind.sttHeard ? 56 : 8, 6);
+
+    if (kind == ChatMessageKind.pluginSummary) {
+      final enabled = globalPluginManager.enabledPlugins.any((p) => p.isDanmakuPlugin);
+      if (!enabled) return const SizedBox.shrink();
+      return Padding(
+        padding: outerPadding,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: borderColor, width: 1),
+              ),
+              child: Text(
+                message.text,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: theme.colorScheme.onSurface, height: 1.35),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      padding: outerPadding,
       child: Column(
-        crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: alignRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           if (message.text.isNotEmpty)
-            Text(
-              message.text,
-              style: TextStyle(
-                color: textColor,
-                height: 1.35,
-                // 保持与气泡版一致的回退链，尽量避免缺字
-                fontFamilyFallback: const ['MiSansVF', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Roboto'],
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: borderColor, width: 1),
               ),
-              textAlign: isMine ? TextAlign.right : TextAlign.left,
+              child: Text(
+                message.text,
+                style: TextStyle(
+                  color: textColor,
+                  height: 1.35,
+                  fontFamilyFallback: const ['MiSansVF', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Roboto'],
+                ),
+                textAlign: alignRight ? TextAlign.right : TextAlign.left,
+              ),
             ),
           if (message.attachments.isNotEmpty) ...[
             if (message.text.isNotEmpty) const SizedBox(height: 6),
@@ -65,7 +117,6 @@ class SimpleMessageRow extends StatelessWidget {
             message.time,
             style: TextStyle(fontSize: 10, color: textColor.withValues(alpha: 0.7)),
           ),
-          const Divider(height: 16),
         ],
       ),
     );

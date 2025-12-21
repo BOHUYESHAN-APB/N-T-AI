@@ -9,6 +9,15 @@ class Attachment {
 
 enum ContactType { ai, human, other }
 
+enum ChatMessageKind {
+  assistant,
+  user,
+  sttHeard,
+  pluginSummary,
+  system,
+  other,
+}
+
 class Contact {
   final String id;
   final String name;
@@ -41,6 +50,7 @@ class ChatMessage {
   final String text;
   final bool isMine;
   final String? role; // 'user', 'assistant', 'chat_normal', 'chat_sc', 'system'
+  final ChatMessageKind kind;
   final String time;
   final List<Attachment> attachments;
   final String? reasoningContent;
@@ -51,11 +61,30 @@ class ChatMessage {
     required this.text,
     this.isMine = false,
     this.role,
+    ChatMessageKind? kind,
     required this.time,
     List<Attachment>? attachments,
     this.reasoningContent,
     this.toolCalls,
-  }) : attachments = attachments ?? const [];
+  })  : kind = kind ?? _deriveKind(isMine: isMine, role: role),
+        attachments = attachments ?? const [];
+
+  static ChatMessageKind _deriveKind({required bool isMine, required String? role}) {
+    switch (role) {
+      case 'assistant':
+        return ChatMessageKind.assistant;
+      case 'user':
+        return ChatMessageKind.user;
+      case 'system':
+        return ChatMessageKind.system;
+      case 'chat_summary':
+        return ChatMessageKind.pluginSummary;
+      case 'stt_heard':
+        return ChatMessageKind.sttHeard;
+      default:
+        return isMine ? ChatMessageKind.user : ChatMessageKind.assistant;
+    }
+  }
 }
 
 final List<ChatMessage> chatMessages = [

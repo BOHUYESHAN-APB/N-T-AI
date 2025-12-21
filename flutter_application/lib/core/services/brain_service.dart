@@ -193,6 +193,7 @@ class BrainService {
                 body: jsonEncode({
                   'audio_b64': base64Encode(bytes),
                   'format': 'wav',
+                  'device_role': 'input',
                   if (ttsBackendDeviceIndex != null)
                     'device_index': ttsBackendDeviceIndex,
                 }),
@@ -265,6 +266,7 @@ class BrainService {
                   body: jsonEncode({
                     'audio_b64': base64Encode(bytes),
                     'format': 'wav',
+                    'device_role': 'input',
                     if (ttsBackendDeviceIndex != null)
                       'device_index': ttsBackendDeviceIndex,
                   }),

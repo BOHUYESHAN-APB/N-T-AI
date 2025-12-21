@@ -54,9 +54,12 @@ async def play_audio(
     audio_b64: str = Body(..., embed=True),
     format: str = Body("wav", embed=True),
     device_index: Optional[int] = Body(None, embed=True),
+    device_role: str = Body("output", embed=True),
 ):
     if format.lower() != "wav":
         raise HTTPException(status_code=400, detail="only wav is supported")
+    if device_role not in ["output", "input"]:
+        raise HTTPException(status_code=400, detail="invalid device_role")
 
     try:
         wav_bytes = base64.b64decode(audio_b64)
@@ -64,8 +67,27 @@ async def play_audio(
         raise HTTPException(status_code=400, detail="invalid audio_b64")
 
     try:
-        play_info = await asyncio.to_thread(audio_service.play_wav_bytes, wav_bytes, device_index)
-        return {"status": "ok", "play": play_info}
+        used_device_index = device_index
+        if device_role == "input":
+            if device_index is not None:
+                used_device_index = await asyncio.to_thread(
+                    audio_service.resolve_output_device_index,
+                    device_index,
+                )
+                if used_device_index is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="cannot_resolve_output_device",
+                    )
+        play_info = await asyncio.to_thread(audio_service.play_wav_bytes, wav_bytes, used_device_index)
+        return {
+            "status": "ok",
+            "requested": {"device_index": device_index, "device_role": device_role},
+            "used": {"output_device_index": used_device_index},
+            "play": play_info,
+        }
+    except HTTPException:
+        raise
     except RuntimeError as e:
         if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
             raise HTTPException(status_code=503, detail=str(e))

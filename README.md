@@ -82,7 +82,7 @@ N-T-AI adopts a **Client-Server** architecture to balance performance, privacy, 
 *   **Tech Stack**: Flutter (Windows, Android, Linux, macOS).
 *   **Responsibilities**: 
     *   User Interface (UI) and Interaction.
-    *   **Perception (CRITICAL)**: Handling TTS (Text-to-Speech) generation and STT (Speech-to-Text) recording directly. **This MUST stay in the frontend to guarantee Live2D Lip-Sync accuracy.**
+    *   **Perception (CRITICAL)**: Handling TTS (Text-to-Speech) generation and STT (Speech-to-Text) recording directly. Audio generation/recording stays in the frontend to guarantee Live2D Lip-Sync accuracy. The local backend may optionally be used for audio device routing (e.g., virtual microphone injection).
     *   **Rendering**: Displaying Live2D models and animations.
     *   **Secure Storage**: Encrypted storage of user configurations and API keys.
 
@@ -201,6 +201,11 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [x] **Deployment Tools**: Docker support and One-click startup scripts.
 - [x] **Stateless Backend**: Per-request target configuration via headers (`X-Target-*`), no server-side key storage.
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
+- [ ] **Fast Mode (Minimal Orchestration)**: Default to the main loop; only invoke extra agents/services when required.
+- [ ] **Ultra-Low Latency Voice Loop**: Stream LLM output → chunking → early TTS playback (keep sentence-level playback as default).
+- [ ] **Emotion-Aware Voice**: Bind expression/emotion signals to TTS styles/parameters; prefer evaluating omni-class models.
+- [ ] **Voice Chat Integration**: Virtual microphone injection, auto-capture, and fast routing presets for Discord/KOOK-like apps.
+- [ ] **Continuous STT + Gating Agent**: VAD/endpointing, multi-segment merge, “should-send-to-LLM” filtering, summarize-then-send when needed.
 - [ ] **Advanced Note Editor**: Implement Obsidian-style real-time overlay preview and seamless edit/view mode switching.
 - [ ] **Enhanced Live2D**: Continued optimization of motion smoothing and expression accuracy.
 - [ ] **Claude Skills & Deep Capability Enhancement (Next Core Focus)**:
@@ -225,23 +230,24 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 
 ## 🙏 Acknowledgements
 
-N-T-AI stands on the shoulders of many great open-source projects.
+N-T-AI stands on the shoulders of many great open-source projects and tools.
 
-- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Thanks to the N.E.K.O. project for inspiration around Live2D interaction logic, emotive parameter layering, WebRTC/audio utilities, and related tooling. *License*: MIT.
-- **dlp3d.ai**: Thanks to the dlp3d.ai project for architecture and design ideas used in our 3D rendering and scene management efforts. *License*: MIT.
-- **Excalidraw**: The built-in whiteboard note type is powered by an offline copy of the [Excalidraw](https://github.com/excalidraw/excalidraw) project, which is licensed under the MIT License.[^excalidraw-license]
-- **GitHub Copilot**: Thanks for code-assist help during development.
-- **Trae (AI coding IDE)**: Provided major assistance in model programming and model-related implementation during development.
-- **Qoder (AI coding IDE)**: Although Qoder sometimes introduced issues during AI coding, its generated project Wiki satisfied basic needs and will be used as a foundation to further improve the repository Wiki; the current Wiki is an acceptable starting point.
-- **DeepResearchAgent**: Thanks for the inspiration on hierarchical multi-agent architecture and the Tool-Environment-Agent (TEA) protocol. *License*: MIT.
-- **free-OKC (OK Computer Virtual Machine)**: Thanks for the innovative HTML-to-PPTX generation logic and sandboxed tool execution concepts. *License*: MIT.
-- **OpenManus**: Thanks for the insights on "Deep Research" planning workflows, browser automation strategies, and ReAct agent patterns. *License*: MIT.
+### Referenced Open-Source Projects
+- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Live2D interaction logic, emotive parameter layering, WebRTC/audio utilities inspiration. *License*: MIT. [Repository](https://github.com/BOHUYESHAN-APB/N.E.K.O.)
+- **dlp3d.ai**: 3D rendering and scene management architecture inspiration. *License*: MIT. [Repository](https://github.com/dlp3d/dlp3d.ai)
+- **Excalidraw**: Built-in whiteboard note type (offline copy). *License*: MIT. [Repository](https://github.com/excalidraw/excalidraw)
+- **live2d-py**: Live2D integration support inspiration. *License*: MIT. [Repository](https://github.com/EasyLive2D/live2d-py)
+- **DeepResearchAgent**: Hierarchical multi-agent architecture and TEA protocol inspiration. *License*: MIT. [Repository](https://github.com/SkyworkAI/DeepResearchAgent)
+- **free-OKC (OK Computer Virtual Machine)**: HTML-to-PPTX generation logic and sandboxed tool execution inspiration. *License*: MIT. [Repository](https://github.com/kexinoh/free-OKC)
+- **OpenManus**: Deep Research planning workflows, browser automation strategies, and ReAct patterns inspiration. *License*: MIT. [Repository](https://github.com/FoundationAgents/OpenManus)
+- **Skywork-Super-Agents**: MCP Server implementation inspiration. *License*: The Unlicense. [Repository](https://github.com/Skywork-ai/Skywork-Super-Agents)
 
-We respect the open-source community and strictly follow these upstream projects' MIT license terms.
+### Development Tools
+- **GitHub Copilot**: Code-assist help during development.
+- **Trae (AI coding IDE)**: Model programming and implementation assistance during development.
+- **Qoder (AI coding IDE)**: Project Wiki generation support.
 
-- For a more complete list of upstream projects and inspiration, see the Chinese documentation: [`docs/README_zh-CN.md`](docs/README_zh-CN.md).
-
-[^excalidraw-license]: Excalidraw License (MIT): https://github.com/excalidraw/excalidraw/blob/master/LICENSE
+We respect the open-source community and follow upstream license terms.
 
 ## 🧩 Extending & Plugins
 

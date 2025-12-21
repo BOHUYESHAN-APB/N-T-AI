@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,6 +17,7 @@ import '../services/rate_limiter.dart';
 import '../data/contacts_storage.dart';
 import '../data/contacts_repository.dart';
 import '../theme/chat_colors.dart';
+import '../plugins/plugin_manager.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({Key? key}) : super(key: key);
@@ -35,6 +38,62 @@ class _ChatsScreenState extends State<ChatsScreen> {
   AiContactConfig? _aiCfg; // per-contact config
   bool _showDetails = false; // 右侧详情面板（默认隐藏）
 
+  String _safeFileName(String input) {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return '未命名';
+    return trimmed.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
+
+  Future<void> _exportConversation() async {
+    final now = DateTime.now();
+    final stamp =
+        '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final fileName = '聊天记录_${_safeFileName(_current.name)}_$stamp.json';
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: '导出对话日志',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (path == null || path.isEmpty) return;
+
+    final data = <String, dynamic>{
+      'conversation': <String, dynamic>{
+        'id': _current.id,
+        'name': _current.name,
+        'type': _current.type.name,
+      },
+      'exportedAt': now.toIso8601String(),
+      'messages': _messages
+          .map(
+            (m) => <String, dynamic>{
+              'id': m.id,
+              'time': m.time,
+              'isMine': m.isMine,
+              'kind': m.kind.name,
+              if (m.role != null) 'role': m.role,
+              'text': m.text,
+              'attachments': m.attachments
+                  .map(
+                    (a) => <String, dynamic>{
+                      'name': a.name,
+                      'path': a.path,
+                      if (a.size != null) 'size': a.size,
+                      if (a.mime != null) 'mime': a.mime,
+                    },
+                  )
+                  .toList(),
+            },
+          )
+          .toList(),
+    };
+    final jsonText = const JsonEncoder.withIndent('  ').convert(data);
+    await File(path).writeAsString(jsonText);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导出到: $path')));
+  }
+
   void _scrollToBottom() {
     if (!_scroll.hasClients) return;
     _scroll.animateTo(
@@ -47,6 +106,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
+    globalPluginManager.ensureInitialized();
     // 初始加载联系人与会话
     _initContacts();
   }
@@ -679,6 +739,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 tooltip: 'AI 设置',
                 icon: const Icon(Icons.tune_outlined),
               ),
+            IconButton(
+              onPressed: _exportConversation,
+              tooltip: '导出对话日志',
+              icon: const Icon(Icons.file_download_outlined),
+            ),
           ],
         ),
       ),

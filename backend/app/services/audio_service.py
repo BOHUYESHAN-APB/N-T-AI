@@ -358,3 +358,85 @@ class AudioService:
             "frames": frame_count,
             "bytes": len(audio_data),
         }
+
+    def resolve_output_device_index(self, device_index: Optional[int]) -> Optional[int]:
+        if device_index is None:
+            return None
+
+        import re
+        from difflib import SequenceMatcher
+
+        sd = self._require_sounddevice()
+        devices = sd.query_devices()
+        if device_index < 0 or device_index >= len(devices):
+            return None
+
+        src = dict(devices[device_index])
+        src_max_out = int(src.get("max_output_channels") or 0)
+        if src_max_out > 0:
+            return device_index
+
+        src_name = str(src.get("name") or "").strip()
+        if not src_name:
+            return None
+
+        src_hostapi = src.get("hostapi")
+        src_lower = src_name.lower()
+
+        def _expected_output_name(s: str) -> str:
+            s = s.lower()
+            s = s.replace("cable output", "cable input")
+            s = s.replace("voicemeeter output", "voicemeeter input")
+            s = s.replace("output", "input")
+            s = s.replace("录音", "播放")
+            return s
+
+        def _base_norm(s: str) -> str:
+            s = s.lower()
+            s = re.sub(r"\(.*?\)", "", s)
+            s = s.replace("cable input", "cable")
+            s = s.replace("cable output", "cable")
+            s = s.replace("voicemeeter input", "voicemeeter")
+            s = s.replace("voicemeeter output", "voicemeeter")
+            s = s.replace("input", "")
+            s = s.replace("output", "")
+            s = s.replace("播放", "")
+            s = s.replace("录音", "")
+            s = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", s)
+            return s
+
+        expected = _expected_output_name(src_lower)
+        expected_base = _base_norm(expected)
+
+        best_idx: Optional[int] = None
+        best_score = 0.0
+
+        for idx, dev in enumerate(devices):
+            d = dict(dev)
+            max_out = int(d.get("max_output_channels") or 0)
+            if max_out <= 0:
+                continue
+            name = str(d.get("name") or "").strip()
+            if not name:
+                continue
+            lower = name.lower()
+
+            score = 0.0
+            if expected and expected in lower:
+                score += 2.0
+
+            score += SequenceMatcher(None, expected, lower).ratio()
+            score += 1.5 * SequenceMatcher(None, expected_base, _base_norm(lower)).ratio()
+
+            if src_hostapi is not None and d.get("hostapi") == src_hostapi:
+                score += 0.3
+
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        if best_idx is None:
+            return None
+        if best_score < 1.2:
+            return None
+        return best_idx

@@ -52,8 +52,13 @@
     *   **搜索**：如果结果不足或受阻，自动按 DuckDuckGo -> Bing -> Baidu 顺序回退。
     *   **图片搜索**：实时验证图片 URL（检查 403/404 错误）并重试不同引擎，确保图片有效显示。
 *   **语音交互 (Beta)**：
-    *   **STT/TTS**: 支持通过云端 API (如 SiliconFlow) 进行语音转文字和文字转语音。
-    *   **按住说话**: 聊天界面集成 Push-to-Talk 功能。
+    *   **云端 STT/TTS**：支持通过云端 API（如 SiliconFlow）进行语音转文字/文字转语音。
+    *   **按住说话**：聊天界面集成 Push-to-Talk 功能。
+    *   **虚拟麦克风注入（可选）**：可将 TTS 音频注入到“虚拟麦克风（输入设备）”，用于对接 Discord/KOOK 等语音软件。
+    *   **本地语音模型（计划）**：
+        *   **TTS**：IndexTTS-2、CosyVoice（本地打包时优先接入 CosyVoice 3.0；云端侧可能暂未同步新版本特性）。
+        *   **STT**：Fun-ASR-Nano（更偏中文方言覆盖）、Fun-ASR-MLT-Nano（更偏多语种覆盖）。
+    *   **情感信号回传（计划）**：TTS 的风格/情感参数与 STT 的情感识别结果会归一化（如 `emotion`/`intensity`/`arousal`/`valence`）后上报主脑，用于理解语气与驱动 Live2D 细粒度表情/动作。
 *   **工具执行**：能够执行定义的工具来与环境交互。
 *   **Claude Skills 与 MCP Agent 集成**：利用先进的 "Claude 技能" 进行复杂推理，并结合 "MCP Agent" 编排多任务工作流，通过整合这些能力，使 Agent 能够完成更复杂的任务。
 *   **纯前端模式 (计划中)**：未来的更新将直接在 Flutter 前端实现这些 Agent 能力，移除对 Python 后端的依赖。
@@ -223,14 +228,21 @@ flutter build apk --release
 - [x] **前端 TTS/STT**：将音频相关逻辑迁移到 Flutter，降低延迟。
 - [x] **部署工具**：完善 Docker 支持与一键启动脚本。
 - [x] **日志增强**：提升前端与后端的错误日志与诊断能力。
+- [ ] **极速模式（最小编排）**：默认只走主链路，只有必要时才调用额外 Agent/Service。
+- [ ] **极速响应语音链路**：LLM 流式输出 → 分段 → TTS 尽快播放（默认保留整句播放模式）。
+- [ ] **语音情绪参数联动**：将表情/情绪推理映射到 TTS 风格或参数，优先评估 omni 类模型。
+- [ ] **语音聊天软件接入**：虚拟麦克风注入、自动收音与快捷配置（Discord/KOOK 等）。
+- [ ] **连续 STT 与内容判定 Agent**：VAD/端点检测、多段合并、是否上送 LLM 判定、必要时先摘要再投喂。
 - [ ] **高级笔记编辑器**：实现 Obsidian 风格的实时叠加预览与无缝编辑/预览切换。
-- [ ] **Live2D 增强**：继续优化动作平滑与表情准确度。
+- [ ] **Live2D 增强**：
+    - 参考 `live2d-py` 的更新链路组织：动作 → 表情 → 眨眼/呼吸 → 拖拽/视线 → 物理 → Pose，提升“自然感”与稳定性。
+    - 强化参数叠加：将“动作/表情/口型/音频摆动/微待机”分通道混合，避免互相抢参数导致抽搐或僵硬。
+    - 丰富微动作库：更细颗粒的眨眼、呼吸、扫视、轻点头/摇头、身体轻摆等，用于闲置与情绪过渡。
 - [ ] **Claude Skills × MCP**：评估“能力装箱 + 分层加载”的工程化方案，与 MCP 工具连接正交组合。
 - [ ] **前端迁移**: 优先将后端逻辑 (ReAct Agent, 记忆系统) 迁移至 Flutter 前端，减少对 Python 环境的依赖。
 - [ ] **本地模型适配**:
     - 针对开源 STT/TTS 模型 (如 CosyVoice, SenseVoice) 制作 "一键启动包"，解决其配置比传统 LLM (Ollama/LM Studio) 更复杂的问题。
     - 将通过网盘分发这些兼容的副本。
-- [ ] **Live2D 增强**: 优化人物神态、动作及表情的互动效果。
 - [ ] **3D 引擎**: 基于 Babylon.js 实现 3D 形象渲染 (Havok 物理引擎) - *制作中*。
 - [ ] **笔记系统与知识库 RAG**：强化内置 Markdown/Excalidraw 笔记能力，支持导入专业知识库，并作为检索增强生成 (RAG) 的数据源，提升回答准确度与人设一致性。
 - [ ] **SQL 记忆系统优化**：针对大规模长期记忆数据设计索引与分层检索策略，保证在记忆变得庞大时仍能高效利用。
@@ -266,35 +278,22 @@ flutter build apk --release
 
 ## 🤝 致谢 (Acknowledgements)
 
-本项目站在巨人的肩膀上。我们衷心感谢以下开源项目和工具提供的灵感与支持：
+本项目站在巨人的肩膀上。我们衷心感谢以下开源项目与工具提供的灵感与支持。
 
-*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**:
-    *   感谢其为 **Live2D 交互逻辑**（包括智能参数叠加、模型加载回退机制）以及 **WebRTC 屏幕共享/音频处理** 模块提供的宝贵灵感。
-    *   *许可证*: MIT License.
-*   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**:
-    *   感谢其为我们正在制作中的 **3D 渲染引擎** 提供的架构灵感。
-    *   *许可证*: MIT License.
-*   **[Excalidraw](https://github.com/excalidraw/excalidraw)**：
-    *   内置白板笔记功能基于 Excalidraw 的离线副本，用于在本地创建和编辑手绘风格的图表和草图，所有数据均保存在本机。
-    *   *许可证*: MIT License。我们严格遵守其 MIT 许可条款，未对原项目作任何与许可冲突的修改。
-*   **GitHub Copilot**:
-    *   感谢 AI 编程助手在开发过程中提供的代码逻辑梳理与支持。
+### 参考开源项目
+*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**：为 **Live2D 交互逻辑**、**WebRTC 屏幕共享/音频处理** 等模块提供参考。*许可证*: MIT License.
+*   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**：为 **3D 渲染引擎** 的架构设计提供参考。*许可证*: MIT License.
+*   **[Excalidraw](https://github.com/excalidraw/excalidraw)**：内置白板笔记功能基于其离线副本。*许可证*: MIT License.
+*   **[live2d-py](https://github.com/EasyLive2D/live2d-py)**：为 Live2D 集成方案提供参考。*许可证*: MIT License.
+*   **[DeepResearchAgent](https://github.com/SkyworkAI/DeepResearchAgent)**：为分层多智能体架构与 TEA 协议提供启发。*许可证*: MIT License.
+*   **[free-OKC (OK Computer Virtual Machine)](https://github.com/kexinoh/free-OKC)**：为 “HTML 转 PPTX” 与沙箱工具执行概念提供参考。*许可证*: MIT License.
+*   **[OpenManus](https://github.com/FoundationAgents/OpenManus)**：为 “深度研究” 工作流、浏览器自动化策略与 ReAct 模式提供参考。*许可证*: MIT License.
+*   **[Skywork-Super-Agents](https://github.com/Skywork-ai/Skywork-Super-Agents)**：为 MCP Server 实现等内容提供参考。*许可证*: The Unlicense.
 
-*   **Trae（AI 编程 IDE）**：在模型编程与模型相关实现方面提供了主要支持，帮助完成关键的模型代码实现。
-
-*   **Qoder（AI 编程 IDE）**：尽管 Qoder 在 AI 编程过程中曾带来一些阻碍，但其生成的项目 Wiki 满足基本需求，后续计划基于 Qoder 的 Repo Wiki 功能进一步完善仓库文档；当前 Wiki 可作为可用的起点。
-*   **DeepResearchAgent**:
-    *   感谢其在分层多智能体架构 (Hierarchical Multi-Agent Architecture) 和 TEA (Tool-Environment-Agent) 协议方面的启发。
-    *   *许可证*: MIT License.
-*   **free-OKC (OK Computer Virtual Machine)**:
-    *   感谢其创新的 "HTML 转 PPTX" 生成逻辑以及沙箱工具执行 (Sandboxed Tool Execution) 的概念。
-    *   *许可证*: MIT License.
-*   **OpenManus**:
-    *   感谢其在 "深度研究" (Deep Research) 规划工作流、浏览器自动化策略以及 ReAct Agent 模式方面的宝贵参考。
-    *   *许可证*: MIT License.
-*   **Skywork-Super-Agents**:
-    *   感谢其在 MCP Server 实现以及 Office 文档生成工具方面的参考。
-    *   *许可证*: The Unlicense.
+### 开发工具
+*   **GitHub Copilot**：在开发过程中提供代码辅助能力。
+*   **Trae（AI 编程 IDE）**：在模型相关实现与工程改造方面提供支持。
+*   **Qoder（AI 编程 IDE）**：提供项目 Wiki 生成能力，用作仓库 Wiki 的起点参考。
 
 我们尊重开源社区，并严格遵守这些上游项目的许可条款。
 

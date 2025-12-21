@@ -146,6 +146,59 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
+  String _safeFileName(String input) {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return '未命名';
+    return trimmed.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
+
+  Future<void> _exportCurrentSession() async {
+    if (_currentSessionId == null) return;
+    ChatSession? session;
+    for (final s in _sessions) {
+      if (s.id == _currentSessionId) {
+        session = s;
+        break;
+      }
+    }
+    final now = DateTime.now();
+    final stamp =
+        '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
+        '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final title = session?.title ?? '会话';
+    final fileName = '聊天记录_${_safeFileName(title)}_$stamp.json';
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: '导出对话日志',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (path == null || path.isEmpty) return;
+
+    final data = <String, dynamic>{
+      'session': <String, dynamic>{
+        'id': _currentSessionId,
+        'title': title,
+      },
+      'exportedAt': now.toIso8601String(),
+      'messages': _messages
+          .map(
+            (m) => <String, dynamic>{
+              'role': m['role']?.toString() ?? '',
+              'content': m['content']?.toString() ?? '',
+              if (m['created_at'] is DateTime) 'createdAt': (m['created_at'] as DateTime).toIso8601String(),
+              if (m['reasoning_content'] != null) 'reasoningContent': m['reasoning_content'],
+              if (m['tool_calls'] != null) 'toolCalls': m['tool_calls'],
+            },
+          )
+          .toList(),
+    };
+    final jsonText = const JsonEncoder.withIndent('  ').convert(data);
+    await File(path).writeAsString(jsonText);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导出到: $path')));
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -573,7 +626,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     return null;
   }
 
-  Future<void> _handleVoiceInput(String path) async {
+  Future<void> _handleVoiceInput(String path, {bool fromLoopback = false}) async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
@@ -586,7 +639,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       final text = await _brain.transcribe(path, sttProvider);
       if (text.isNotEmpty) {
         _controller.text = text;
-        _sendMessage();
+        _sendMessage(uiRole: fromLoopback ? 'stt_heard' : 'user');
       }
     } catch (e) {
       if (mounted)
@@ -614,7 +667,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         durationSeconds: settings.sttLoopbackDurationSeconds.toDouble(),
         deviceIndex: settings.sttLoopbackDeviceIndex,
       );
-      await _handleVoiceInput(path);
+      await _handleVoiceInput(path, fromLoopback: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -624,7 +677,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
-  void _sendMessage() async {
+  void _sendMessage({String uiRole = 'user'}) async {
     final text = _controller.text.trim();
     if (text.isEmpty && _pendingImageBytes == null) return;
     if (_currentSessionId == null) await _createNewSession();
@@ -632,7 +685,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     setState(() {
       // Explicitly cast to Map<String, dynamic> to match _messages definition
       _messages.add(<String, dynamic>{
-        'role': 'user',
+        'role': uiRole,
         'content': _pendingImageBytes != null
             ? (text.isNotEmpty ? '$text\n[已附加图片]' : '[已附加图片]')
             : text,
@@ -686,7 +739,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               final visionMessages = _messages
                   .map(
                     (m) => {
-                      'role': m['role'].toString(),
+                      'role': (m['role'] == 'stt_heard' ? 'user' : m['role']).toString(),
                       'content': m['content'].toString(),
                     },
                   )
@@ -2162,6 +2215,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
                         ),
                       );
                     },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.file_download_outlined),
+                    onPressed: _exportCurrentSession,
                   ),
                 ],
               ),

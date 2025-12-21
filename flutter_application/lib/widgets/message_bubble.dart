@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import '../data/mock_data.dart';
+import '../plugins/plugin_manager.dart';
 import '../settings/settings_scope.dart';
 import '../settings/settings.dart';
 import '../theme/chat_colors.dart';
@@ -15,20 +16,24 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     // Special handling for Plugin Messages (Centered)
     if (message.role == 'chat_summary') {
+      final enabled = globalPluginManager.enabledPlugins.any((p) => p.isDanmakuPlugin);
+      if (!enabled) return const SizedBox.shrink();
+      final theme = Theme.of(context);
+      final cs = theme.colorScheme;
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 32),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.9), // Slightly different background
+            color: const Color(0xFFF0FFF0),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-              width: 1.0
+              color: Colors.green.withValues(alpha: 0.45),
+              width: 1.0,
             ),
             boxShadow: [
                BoxShadow(
-                 color: Colors.black.withOpacity(0.05), 
+                 color: Colors.black.withValues(alpha: 0.05), 
                  blurRadius: 4, 
                  offset: const Offset(0, 2)
                ),
@@ -40,14 +45,14 @@ class MessageBubble extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.insights, size: 14, color: Theme.of(context).colorScheme.primary),
+                  Icon(Icons.insights, size: 14, color: Colors.green.withValues(alpha: 0.9)),
                   const SizedBox(width: 6),
                   Text(
-                    "弹幕趋势", 
+                    "弹幕总结",
                     style: TextStyle(
                       fontSize: 11, 
                       fontWeight: FontWeight.bold, 
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Colors.green.withValues(alpha: 0.9),
                       letterSpacing: 1.0
                     )
                   ),
@@ -58,7 +63,7 @@ class MessageBubble extends StatelessWidget {
                 message.text,
                 style: TextStyle(
                   fontSize: 13, 
-                  color: Theme.of(context).colorScheme.onSurface,
+                  color: cs.onSurface,
                   height: 1.4
                 ),
                 textAlign: TextAlign.center,
@@ -75,11 +80,11 @@ class MessageBubble extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 24),
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.9),
+            color: Colors.white.withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.3)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
             boxShadow: [
-               BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2)),
+               BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2)),
             ],
           ),
           child: Text(
@@ -105,7 +110,7 @@ class MessageBubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0xFFFFEEBA)),
             boxShadow: [
-               BoxShadow(color: Colors.orange.withOpacity(0.2), blurRadius: 6, offset: const Offset(0, 3)),
+               BoxShadow(color: Colors.orange.withValues(alpha: 0.2), blurRadius: 6, offset: const Offset(0, 3)),
             ],
           ),
           child: Column(
@@ -137,6 +142,7 @@ class MessageBubble extends StatelessWidget {
     final chat = theme.extension<ChatColors>();
     final isMine = message.isMine;
     final settings = SettingsScope.of(context).settings;
+    final kind = message.kind;
 
     // Helper to get Color from int
     Color? getColor(int? argb) => argb != null ? Color(argb) : null;
@@ -155,23 +161,40 @@ class MessageBubble extends StatelessWidget {
         ? (aiOverride.computeLuminance() > 0.5 ? Colors.black : Colors.white)
         : (chat?.otherText ?? theme.colorScheme.onSurface);
 
+    final isSttHeard = kind == ChatMessageKind.sttHeard;
+    final alignRight = isMine || isSttHeard;
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
+    final borderColor = switch (kind) {
+      ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.55),
+      ChatMessageKind.user => Colors.blue.withValues(alpha: 0.55),
+      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.55),
+      ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: 0.35),
+      _ => theme.colorScheme.outline.withValues(alpha: 0.25),
+    };
+    final bubbleBg = isSttHeard ? const Color(0xFFEDE7F6) : (isMine ? bgMine : bgOther);
+    final bubbleTxt = isSttHeard ? theme.colorScheme.onSurface : (isMine ? txtMine : txtOther);
+    final outerPadding = EdgeInsets.fromLTRB(
+      8,
+      6,
+      kind == ChatMessageKind.sttHeard ? 56 : 8,
+      6,
+    );
 
     // Parse content into blocks (Text or Image)
-    final suppressInnerMonologue = !isMine && settings.suppressInnerMonologue;
-    final enableThoughtParsing = !isMine && !settings.suppressInnerMonologue;
+    final suppressInnerMonologue = !isMine && !isSttHeard && settings.suppressInnerMonologue;
+    final enableThoughtParsing = !isMine && !isSttHeard && !settings.suppressInnerMonologue;
     final blocks = _parseMessageBlocks(
       message.text,
-      isMine: isMine,
+      isMine: alignRight,
       enableThoughtParsing: enableThoughtParsing,
       suppressInnerMonologue: suppressInnerMonologue,
     );
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      padding: outerPadding,
       child: Column(
-        crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: alignRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           // Render each block
           for (final block in blocks)
@@ -190,14 +213,14 @@ class MessageBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4.0),
                 child: Row(
-                  mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+                  mainAxisAlignment: alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
                   crossAxisAlignment: CrossAxisAlignment.end, // Align tail to bottom
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     // Tail for Other (Left)
-                    if (!isMine)
+                    if (!alignRight)
                       CustomPaint(
-                        painter: _TailPainter(color: bgOther, isMine: false),
+                        painter: _TailPainter(color: bubbleBg, isMine: false),
                         size: const Size(8, 16),
                       ),
 
@@ -207,26 +230,27 @@ class MessageBubble extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                           decoration: BoxDecoration(
-                            color: isMine ? bgMine : bgOther,
+                            color: bubbleBg,
                             borderRadius: BorderRadius.only(
                               topLeft: const Radius.circular(16),
                               topRight: const Radius.circular(16),
-                              bottomLeft: Radius.circular(isMine ? 16 : 4),
-                              bottomRight: Radius.circular(isMine ? 4 : 16),
+                              bottomLeft: Radius.circular(alignRight ? 16 : 4),
+                              bottomRight: Radius.circular(alignRight ? 4 : 16),
                             ),
+                            border: Border.all(color: borderColor, width: 1.0),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Reasoning Content (DeepSeek)
-                              if (!isMine && message.reasoningContent != null && message.reasoningContent!.isNotEmpty)
+                              if (!isMine && !isSttHeard && message.reasoningContent != null && message.reasoningContent!.isNotEmpty)
                                 _buildReasoningBlock(context, message.reasoningContent!),
                               
                               // Tool Calls
-                              if (!isMine && message.toolCalls != null && message.toolCalls!.isNotEmpty)
+                              if (!isMine && !isSttHeard && message.toolCalls != null && message.toolCalls!.isNotEmpty)
                                 _buildToolCallsBlock(context, message.toolCalls!),
 
-                              _buildContent(context, block['segments'] as List<Map<String, dynamic>>, isMine ? txtMine : txtOther, isMine),
+                              _buildContent(context, block['segments'] as List<Map<String, dynamic>>, bubbleTxt, alignRight),
                             ],
                           ),
                         ),
@@ -234,9 +258,9 @@ class MessageBubble extends StatelessWidget {
                     ),
 
                     // Tail for Mine (Right)
-                    if (isMine)
+                    if (alignRight)
                       CustomPaint(
-                        painter: _TailPainter(color: bgMine, isMine: true),
+                        painter: _TailPainter(color: bubbleBg, isMine: true),
                         size: const Size(8, 16),
                       ),
                   ],
@@ -249,10 +273,10 @@ class MessageBubble extends StatelessWidget {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              alignment: isMine ? WrapAlignment.end : WrapAlignment.start,
+              alignment: alignRight ? WrapAlignment.end : WrapAlignment.start,
               children: [
                 for (final att in message.attachments)
-                  _AttachmentChip(att: att, isMine: isMine, txtColor: isMine ? txtMine : txtOther),
+                  _AttachmentChip(att: att, isMine: alignRight, txtColor: bubbleTxt),
               ],
             ),
           ],
@@ -267,10 +291,10 @@ class MessageBubble extends StatelessWidget {
                   message.time,
                   style: TextStyle(
                     fontSize: 10,
-                    color: isMine ? (chat?.timeMine ?? txtMine.withValues(alpha: 0.7)) : (chat?.timeOther ?? txtOther.withValues(alpha: 0.7)),
+                    color: alignRight ? (chat?.timeMine ?? bubbleTxt.withValues(alpha: 0.7)) : (chat?.timeOther ?? bubbleTxt.withValues(alpha: 0.7)),
                   ),
                 ),
-                if (!isMine) ...[
+                if (!isMine && !isSttHeard) ...[
                   const SizedBox(width: 8),
                   _ActionButton(icon: Icons.copy, size: 14, onTap: () => _copyText(context, message.text)),
                   const SizedBox(width: 8),
@@ -419,7 +443,7 @@ class MessageBubble extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
               border: Border(left: BorderSide(color: Colors.grey.shade400, width: 3)),
             ),
@@ -446,9 +470,9 @@ class MessageBubble extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
+              color: Colors.blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [

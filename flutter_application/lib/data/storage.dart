@@ -18,6 +18,7 @@ class ChatStorage {
           id: e['id'] as String,
           text: e['text'] as String? ?? '',
           isMine: e['isMine'] as bool? ?? false,
+          kind: _decodeKind(e['kind']),
           time: e['time'] as String? ?? '',
           attachments: atts.map((a) => Attachment(
             name: a['name'] as String? ?? '',
@@ -38,6 +39,7 @@ class ChatStorage {
           'id': m.id,
           'text': m.text,
           'isMine': m.isMine,
+          'kind': _encodeKind(m.kind),
           'time': m.time,
           'attachments': m.attachments
               .map((a) => {
@@ -63,6 +65,7 @@ class ChatStorage {
                 id: e['id'] as String,
                 text: e['text'] as String? ?? '',
                 isMine: e['isMine'] as bool? ?? false,
+                kind: _decodeKind(e['kind']),
                 time: e['time'] as String? ?? '',
                 attachments: ((e['attachments'] as List?) ?? const [])
                     .map((a) => Attachment(
@@ -91,6 +94,7 @@ class ChatStorage {
               'id': m.id,
               'text': m.text,
               'isMine': m.isMine,
+              'kind': _encodeKind(m.kind),
               'time': m.time,
               'attachments': m.attachments
                   .map((a) => {
@@ -108,5 +112,15 @@ class ChatStorage {
   static Future<void> removeConversation(String conversationId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyFor(conversationId));
+  }
+
+  static String _encodeKind(ChatMessageKind kind) => kind.name;
+
+  static ChatMessageKind? _decodeKind(dynamic raw) {
+    if (raw is! String) return null;
+    for (final k in ChatMessageKind.values) {
+      if (k.name == raw) return k;
+    }
+    return null;
   }
 }

@@ -88,6 +88,13 @@ class AboutTab extends StatelessWidget {
         _buildLicenseTile(context, 'FZG 字体', '方正字库 (SIL Open Font License 1.1)', 'https://www.foundertype.com'),
         _buildLicenseTile(context, 'NFDCS 字体', '南构字库 (MIT/ISAS License)', 'https://github.com/Hansha2011/'),
         _buildLicenseTile(context, 'Excalidraw', 'Virtual Whiteboard (MIT License)', 'https://github.com/excalidraw/excalidraw'),
+        _buildLicenseTile(context, 'N.E.K.O.', 'Next-gen Emotive Kernel for Operators (MIT License)', 'https://github.com/BOHUYESHAN-APB/N.E.K.O.'),
+        _buildLicenseTile(context, 'dlp3d.ai', '3D Rendering Architecture Ideas (MIT License)', 'https://github.com/dlp3d/dlp3d.ai'),
+        _buildLicenseTile(context, 'live2d-py', 'Live2D Integration Support (MIT License)', 'https://github.com/EasyLive2D/live2d-py'),
+        _buildLicenseTile(context, 'DeepResearchAgent', 'Hierarchical Multi-Agent Inspiration (MIT License)', 'https://github.com/SkyworkAI/DeepResearchAgent'),
+        _buildLicenseTile(context, 'free-OKC', 'OK Computer Virtual Machine (MIT License)', 'https://github.com/kexinoh/free-OKC'),
+        _buildLicenseTile(context, 'OpenManus', 'Deep Research Workflow Inspiration (MIT License)', 'https://github.com/FoundationAgents/OpenManus'),
+        _buildLicenseTile(context, 'Skywork-Super-Agents', 'MCP Server Inspiration (The Unlicense)', 'https://github.com/Skywork-ai/Skywork-Super-Agents'),
         
         ListTile(
           leading: const Icon(Icons.description_outlined),

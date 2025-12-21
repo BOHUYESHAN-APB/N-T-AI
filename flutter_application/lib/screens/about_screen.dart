@@ -11,6 +11,50 @@ class AboutScreen extends StatefulWidget {
 
 class _AboutScreenState extends State<AboutScreen> {
   String _version = '';
+
+  static const List<Map<String, String>> _referencedProjects = [
+    {
+      'name': 'N.E.K.O. (Next-gen Emotive Kernel for Operators)',
+      'license': 'MIT',
+      'url': 'https://github.com/BOHUYESHAN-APB/N.E.K.O.',
+    },
+    {
+      'name': 'dlp3d.ai',
+      'license': 'MIT',
+      'url': 'https://github.com/dlp3d/dlp3d.ai',
+    },
+    {
+      'name': 'Excalidraw',
+      'license': 'MIT',
+      'url': 'https://github.com/excalidraw/excalidraw',
+    },
+    {
+      'name': 'live2d-py',
+      'license': 'MIT',
+      'url': 'https://github.com/EasyLive2D/live2d-py',
+    },
+    {
+      'name': 'DeepResearchAgent',
+      'license': 'MIT',
+      'url': 'https://github.com/SkyworkAI/DeepResearchAgent',
+    },
+    {
+      'name': 'free-OKC (OK Computer Virtual Machine)',
+      'license': 'MIT',
+      'url': 'https://github.com/kexinoh/free-OKC',
+    },
+    {
+      'name': 'OpenManus',
+      'license': 'MIT',
+      'url': 'https://github.com/FoundationAgents/OpenManus',
+    },
+    {
+      'name': 'Skywork-Super-Agents',
+      'license': 'The Unlicense',
+      'url': 'https://github.com/Skywork-ai/Skywork-Super-Agents',
+    },
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -23,6 +67,21 @@ class _AboutScreenState extends State<AboutScreen> {
       if (!mounted) return;
       setState(() => _version = '${info.version}+${info.buildNumber}');
     } catch (_) {}
+  }
+
+  void _showProjectInfoDialog({
+    required String name,
+    required String license,
+    required String url,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(name),
+        content: SelectableText('许可证：$license\n仓库：$url'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
+      ),
+    );
   }
 
   @override
@@ -85,6 +144,22 @@ class _AboutScreenState extends State<AboutScreen> {
             title: const Text('nfdcs 字体许可（作者声明）'),
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LicenseViewer(title: 'nfdcs License', assetPath: 'assets/licenses/nfdcs-LICENSE.txt'))),
           ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.code_outlined),
+            title: Text('参考开源项目'),
+            subtitle: Text('本应用参考/使用的开源项目与许可证信息'),
+          ),
+          for (final p in _referencedProjects)
+            ListTile(
+              title: Text('${p['name']} · ${p['license']}'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showProjectInfoDialog(
+                name: p['name'] ?? '',
+                license: p['license'] ?? '',
+                url: p['url'] ?? '',
+              ),
+            ),
           const Divider(),
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
