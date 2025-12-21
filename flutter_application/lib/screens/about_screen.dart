@@ -53,6 +53,16 @@ class _AboutScreenState extends State<AboutScreen> {
       'license': 'The Unlicense',
       'url': 'https://github.com/Skywork-ai/Skywork-Super-Agents',
     },
+    {
+      'name': 'FFmpeg',
+      'license': 'LGPLv2.1+',
+      'url': 'https://ffmpeg.org/',
+    },
+    {
+      'name': 'FFmpeg-Builds (BtbN)',
+      'license': 'GPL/LGPL (FFmpeg)',
+      'url': 'https://github.com/BtbN/FFmpeg-Builds',
+    },
   ];
 
   @override

@@ -317,6 +317,12 @@ class AiClient {
   }) async {
     var base = config.baseUrl;
     if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+    if (base == 'https://api.siliconflow.cn') base += '/v1';
+    if (base.contains('siliconflow') &&
+        !base.endsWith('/v1') &&
+        !base.contains('/v1/')) {
+      base += '/v1';
+    }
     
     // SiliconFlow endpoint structure
     final url = Uri.parse('$base/uploads/audio/voice');
@@ -325,6 +331,7 @@ class AiClient {
     request.headers['Authorization'] = 'Bearer ${config.apiKey}';
     
     request.fields['customName'] = customName;
+    request.fields['custom_name'] = customName;
     if (text != null && text.isNotEmpty) {
       request.fields['text'] = text;
     }
@@ -335,9 +342,12 @@ class AiClient {
     final response = await http.Response.fromStream(streamedResponse);
     
     if (response.statusCode == 200) {
-      final json = jsonDecode(response.body);
-      // SiliconFlow returns { "uri": "voice:..." }
-      return json['uri'] as String; 
+      final json = jsonDecode(utf8.decode(response.bodyBytes));
+      final uri = (json is Map ? json['uri'] : null)?.toString().trim();
+      if (uri == null || uri.isEmpty) {
+        throw Exception('Upload failed: missing uri');
+      }
+      return uri;
     } else {
       throw Exception('Upload failed: ${response.statusCode} ${response.body}');
     }
@@ -406,14 +416,21 @@ class AiClient {
     effectiveVoice = effectiveVoice.trim();
     effectiveModel = effectiveModel.trim();
 
+    bool isCustomVoiceId(String v) =>
+        v.startsWith('voice:') || v.startsWith('speech:');
+
     if (base.contains('siliconflow')) {
       final adjustedModelLower = effectiveModel.toLowerCase();
       if (adjustedModelLower.contains('cosyvoice')) {
-        if (!effectiveVoice.startsWith('voice:') && !effectiveVoice.contains(':')) {
+        if (!isCustomVoiceId(effectiveVoice) && !effectiveVoice.contains(':')) {
+          effectiveVoice = '$effectiveModel:$effectiveVoice';
+        }
+      } else if (adjustedModelLower.contains('fish')) {
+        if (!isCustomVoiceId(effectiveVoice) && !effectiveVoice.contains(':')) {
           effectiveVoice = '$effectiveModel:$effectiveVoice';
         }
       } else if (adjustedModelLower.contains('moss')) {
-        if (!effectiveVoice.startsWith('voice:') &&
+        if (!isCustomVoiceId(effectiveVoice) &&
             (effectiveVoice == 'alex' || !effectiveVoice.contains(':'))) {
           effectiveVoice = 'fnlp/MOSS-TTSD-v0.5:anna';
         }
@@ -425,7 +442,7 @@ class AiClient {
     if (effectiveSampleRate == null) {
       if (fmtLower == 'opus') {
         effectiveSampleRate = 48000;
-      } else if (fmtLower == 'wav' || fmtLower == 'pcm') {
+      } else if (fmtLower == 'wav' || fmtLower == 'pcm' || fmtLower == 'mp3') {
         effectiveSampleRate = 44100;
       }
     }
@@ -442,7 +459,7 @@ class AiClient {
       if (reqSampleRate == null) {
         if (fmtLower == 'opus') {
           reqSampleRate = 48000;
-        } else if (fmtLower == 'wav' || fmtLower == 'pcm') {
+        } else if (fmtLower == 'wav' || fmtLower == 'pcm' || fmtLower == 'mp3') {
           reqSampleRate = effectiveSampleRate;
         }
       }
@@ -461,10 +478,10 @@ class AiClient {
           'Accept': 'audio/*',
         },
         body: reqBody,
-      );
+      ).timeout(const Duration(seconds: 60));
     }
 
-    int? _tryParseErrorCode(String bodyText) {
+    int? tryParseErrorCode(String bodyText) {
       try {
         final decoded = jsonDecode(bodyText);
         if (decoded is Map && decoded['code'] is num) {
@@ -482,7 +499,7 @@ class AiClient {
     );
     if (first.statusCode == 200) return first.bodyBytes;
 
-    final code = _tryParseErrorCode(first.body);
+    final code = tryParseErrorCode(first.body);
     if ((fmtLower == 'wav' || fmtLower == 'pcm' || fmtLower == 'opus') &&
         code != 50507) {
       final retryNoSr = await send(
@@ -495,49 +512,55 @@ class AiClient {
       if (retryNoSr.statusCode == 200) return retryNoSr.bodyBytes;
     }
     if (code == 50507) {
-      final retryCandidates = <({String model, String voice, String fmt})>[];
-
-      if (effectiveVoice.startsWith('voice:')) {
-        retryCandidates.add((model: effectiveModel, voice: effectiveVoice, fmt: responseFormat));
-        if (responseFormat != 'wav') retryCandidates.add((model: effectiveModel, voice: effectiveVoice, fmt: 'wav'));
-      }
-
-      if (effectiveModel.toLowerCase().contains('cosyvoice') &&
-          !effectiveVoice.startsWith('voice:') &&
-          effectiveVoice.contains(':')) {
-        final stripped = effectiveVoice.split(':').last;
-        if (stripped.isNotEmpty && stripped != effectiveVoice) {
-          retryCandidates.add((model: effectiveModel, voice: stripped, fmt: responseFormat));
+      final voiceVariants = <String>{effectiveVoice};
+      if (!isCustomVoiceId(effectiveVoice) && effectiveVoice.contains(':')) {
+        final last = effectiveVoice.split(':').last.trim();
+        if (last.isNotEmpty) {
+          voiceVariants.add(last);
+          voiceVariants.add('$effectiveModel:$last');
         }
       }
 
-      for (final c in retryCandidates) {
-        final respNoSr = await send(
-          model: c.model,
-          voice: c.voice,
-          fmt: c.fmt,
-          sr: effectiveSampleRate,
-          includeSampleRate: false,
-        );
-        if (respNoSr.statusCode == 200) return respNoSr.bodyBytes;
+      final formatVariants = <String>[responseFormat];
+      if (fmtLower == 'wav') {
+        formatVariants.add('pcm');
+      } else if (fmtLower == 'pcm') {
+        formatVariants.add('wav');
+      }
 
-        final respWithSr = await send(
-          model: c.model,
-          voice: c.voice,
-          fmt: c.fmt,
-          sr: effectiveSampleRate,
-          includeSampleRate: true,
-        );
-        if (respWithSr.statusCode == 200) return respWithSr.bodyBytes;
+      List<int?> candidateSampleRatesFor(String fmt) {
+        final l = fmt.toLowerCase();
+        if (l == 'opus') return <int?>[48000, null];
+        if (l == 'mp3') {
+          final sr = effectiveSampleRate ?? 44100;
+          return <int?>[sr, 32000, null];
+        }
+        if (l == 'wav' || l == 'pcm') {
+          final sr = effectiveSampleRate ?? 44100;
+          return <int?>[sr, 24000, 32000, 16000, 8000, null];
+        }
+        return <int?>[effectiveSampleRate, null];
+      }
 
-        final respAltSr = await send(
-          model: c.model,
-          voice: c.voice,
-          fmt: c.fmt,
-          sr: 24000,
-          includeSampleRate: true,
-        );
-        if (respAltSr.statusCode == 200) return respAltSr.bodyBytes;
+      var attempts = 0;
+      const maxAttempts = 14;
+
+      for (final fmt in formatVariants) {
+        for (final v in voiceVariants) {
+          for (final sr in candidateSampleRatesFor(fmt)) {
+            if (attempts >= maxAttempts) break;
+            attempts++;
+            final includeSr = sr != null;
+            final resp = await send(
+              model: effectiveModel,
+              voice: v,
+              fmt: fmt,
+              sr: sr,
+              includeSampleRate: includeSr,
+            );
+            if (resp.statusCode == 200) return resp.bodyBytes;
+          }
+        }
       }
     }
 

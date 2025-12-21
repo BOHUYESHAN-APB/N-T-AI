@@ -83,14 +83,19 @@ class BrainService {
 
   bool _looksLikeWav(Uint8List bytes) {
     if (bytes.length < 12) return false;
-    return bytes[0] == 0x52 &&
+    final isRiff = bytes[0] == 0x52 &&
         bytes[1] == 0x49 &&
         bytes[2] == 0x46 &&
-        bytes[3] == 0x46 &&
-        bytes[8] == 0x57 &&
+        bytes[3] == 0x46;
+    final isRf64 = bytes[0] == 0x52 &&
+        bytes[1] == 0x46 &&
+        bytes[2] == 0x36 &&
+        bytes[3] == 0x34;
+    final isWave = bytes[8] == 0x57 &&
         bytes[9] == 0x41 &&
         bytes[10] == 0x56 &&
         bytes[11] == 0x45;
+    return (isRiff || isRf64) && isWave;
   }
 
   bool _looksLikeMp3(Uint8List bytes) {
@@ -180,6 +185,10 @@ class BrainService {
       return '音频不是 WAV（无法注入）';
     }
     try {
+      final duration = _estimateWavDuration(wavBytes);
+      final timeoutSeconds =
+          (duration == null ? 25 : (10 + (duration.inMilliseconds / 1000).ceil()))
+              .clamp(25, 180);
       final resp = await http
           .post(
             Uri.parse('$backendBase/api/audio/play'),
@@ -191,7 +200,7 @@ class BrainService {
               if (deviceIndex != null) 'device_index': deviceIndex,
             }),
           )
-          .timeout(const Duration(seconds: 25));
+          .timeout(Duration(seconds: timeoutSeconds));
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         return null;
       }
@@ -201,9 +210,36 @@ class BrainService {
     }
   }
 
+  Future<Uint8List?> _convertToWavViaBackend({
+    required String backendBase,
+    required Uint8List audioBytes,
+  }) async {
+    if (audioBytes.isEmpty) return null;
+    if (_looksLikeWav(audioBytes)) return audioBytes;
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$backendBase/api/audio/convert/wav'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'audio_b64': base64Encode(audioBytes)}),
+          )
+          .timeout(const Duration(seconds: 35));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        logger.error(_formatHttpFailure(resp, prefix: '后端音频转 WAV 失败'));
+        return null;
+      }
+      final wav = resp.bodyBytes;
+      return _looksLikeWav(wav) ? wav : null;
+    } catch (e) {
+      logger.error('后端音频转 WAV 异常', e);
+      return null;
+    }
+  }
+
   Future<Uint8List?> _getInjectionWavBytes({
     required String text,
     required AiProviderConfig ttsProvider,
+    String? backendBase,
   }) async {
     final voice = ttsProvider.meta['voice'] as String?;
     const preferredSampleRates = <int>[44100, 24000];
@@ -243,22 +279,85 @@ class BrainService {
       } catch (_) {}
     }
 
+    if (backendBase != null) {
+      try {
+        final mp3 = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: text,
+          voice: voice,
+          responseFormat: 'mp3',
+        );
+        final converted = await _convertToWavViaBackend(
+          backendBase: backendBase,
+          audioBytes: mp3,
+        );
+        if (converted != null) return converted;
+      } catch (_) {}
+    }
+
     return null;
   }
 
   Future<Uint8List> _generateSpeechBytesForPlayback({
     required AiProviderConfig ttsProvider,
     required String text,
+    String? backendBase,
   }) async {
-    final wav = await _getInjectionWavBytes(text: text, ttsProvider: ttsProvider);
-    if (wav != null) return wav;
+    final voice = ttsProvider.meta['voice'] as String?;
+    const preferredSampleRates = <int>[44100, 24000];
 
-    return AiClient.generateSpeech(
+    for (final sr in preferredSampleRates) {
+      try {
+        final wav = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: text,
+          voice: voice,
+          responseFormat: 'wav',
+          sampleRate: sr,
+        );
+        if (_looksLikeWav(wav)) return wav;
+        if (wav.isNotEmpty && !_looksLikeMp3(wav) && wav.length % 2 == 0) {
+          final wrapped = _wrapPcm16LeToWav(wav, sampleRate: sr);
+          if (_looksLikeWav(wrapped)) return wrapped;
+        }
+      } catch (_) {}
+    }
+
+    for (final sr in preferredSampleRates) {
+      try {
+        final pcm = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: text,
+          voice: voice,
+          responseFormat: 'pcm',
+          sampleRate: sr,
+        );
+        if (pcm.isEmpty) continue;
+        if (_looksLikeWav(pcm)) return pcm;
+        if (_looksLikeMp3(pcm)) continue;
+        if (pcm.length % 2 != 0) continue;
+        final wrapped = _wrapPcm16LeToWav(pcm, sampleRate: sr);
+        if (_looksLikeWav(wrapped)) return wrapped;
+      } catch (_) {}
+    }
+
+    final mp3 = await AiClient.generateSpeech(
       config: ttsProvider,
       text: text,
-      voice: ttsProvider.meta['voice'] as String?,
+      voice: voice,
       responseFormat: 'mp3',
     );
+    if (backendBase != null) {
+      final converted = await _convertToWavViaBackend(
+        backendBase: backendBase,
+        audioBytes: mp3,
+      );
+      if (converted != null) return converted;
+      logger.error('无法通过后端转换为 WAV，回退为 MP3（Live2D 口型/注入可能受影响）');
+    } else {
+      logger.error('无法生成 WAV 音频，回退为 MP3（Live2D 口型/注入可能受影响）');
+    }
+    return mp3;
   }
 
   Duration? _estimateWavDuration(Uint8List bytes) {
@@ -362,6 +461,7 @@ class BrainService {
       final backendBase = backendUrl.endsWith('/')
           ? backendUrl.substring(0, backendUrl.length - 1)
           : backendUrl;
+      final convertBackendBase = enablePythonBackend ? backendBase : null;
 
       final injectToBackend = ttsViaBackendDevice && enablePythonBackend;
       Uint8List? injWav;
@@ -371,15 +471,18 @@ class BrainService {
         injWav = await _getInjectionWavBytes(
           text: cleanText,
           ttsProvider: ttsProvider,
+          backendBase: convertBackendBase,
         );
         bytes = injWav ?? await _generateSpeechBytesForPlayback(
           ttsProvider: ttsProvider,
           text: cleanText,
+          backendBase: convertBackendBase,
         );
       } else {
         bytes = await _generateSpeechBytesForPlayback(
           ttsProvider: ttsProvider,
           text: cleanText,
+          backendBase: convertBackendBase,
         );
       }
 
@@ -434,6 +537,7 @@ class BrainService {
       final backendBase = backendUrl.endsWith('/')
           ? backendUrl.substring(0, backendUrl.length - 1)
           : backendUrl;
+      final convertBackendBase = enablePythonBackend ? backendBase : null;
 
       final injectToBackend = ttsViaBackendDevice && enablePythonBackend;
 
@@ -448,15 +552,18 @@ class BrainService {
           injWav = await _getInjectionWavBytes(
             text: partText,
             ttsProvider: ttsProvider,
+            backendBase: convertBackendBase,
           );
           bytes = injWav ?? await _generateSpeechBytesForPlayback(
             ttsProvider: ttsProvider,
             text: partText,
+            backendBase: convertBackendBase,
           );
         } else {
           bytes = await _generateSpeechBytesForPlayback(
             ttsProvider: ttsProvider,
             text: partText,
+            backendBase: convertBackendBase,
           );
         }
 

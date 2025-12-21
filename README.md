@@ -53,6 +53,7 @@ If you find this project helpful, please consider supporting us:
 *   **Multi-Engine Fallback**: Automatically switches search engines if results are insufficient.
 *   **Voice Interaction (Beta)**:
     *   **Cloud STT/TTS**: Supports Speech-to-Text and Text-to-Speech via cloud APIs (e.g., SiliconFlow).
+    *   **FFmpeg Fallback (Backend, Windows Recommended)**: We currently recommend Windows deployments and bundle a prebuilt FFmpeg package from https://github.com/BtbN/FFmpeg-Builds. For other platforms, please provide your own FFmpeg binary and adjust code/config as needed (aggregation-only, no source modification; see https://ffmpeg.org/).
     *   **Push-to-Talk**: Built-in push-to-talk recording in the chat interface.
     *   **Virtual Microphone Injection (Optional)**: Inject TTS audio into a “virtual microphone (input device)” for Discord/KOOK-like voice apps.
     *   **Local Voice Models (Planned)**:

@@ -3,6 +3,7 @@ import openai
 from fastapi import UploadFile
 from typing import Optional, List, Dict, Any
 import json
+from app.core.config import settings
 
 class AudioService:
     def __init__(self):
@@ -87,7 +88,11 @@ class AudioService:
             )
             duration = time.time() - start_time
             print(f"[AudioService] TTS API Completed in {duration:.2f}s. Size: {len(response.content)} bytes")
-            return response.content
+            audio_bytes = response.content
+            if str(response_format).lower() == "wav" and not self._is_wav_bytes(audio_bytes):
+                print("[AudioService] TTS returned non-wav bytes, converting to wav via ffmpeg")
+                audio_bytes = await self._convert_audio_bytes_to_wav(audio_bytes)
+            return audio_bytes
         except openai.APIStatusError as e:
             duration = time.time() - start_time
             print(f"[AudioService] TTS API Error after {duration:.2f}s: {e.status_code} - {e.response.text}")
@@ -98,6 +103,80 @@ class AudioService:
             raise e
         finally:
             await client.close()
+
+    def _is_wav_bytes(self, audio_bytes: bytes) -> bool:
+        if not isinstance(audio_bytes, (bytes, bytearray)):
+            return False
+        if len(audio_bytes) < 12:
+            return False
+        return audio_bytes[0:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"
+
+    def _resolve_ffmpeg_path(self) -> str:
+        import os
+        from pathlib import Path
+
+        configured = (getattr(settings, "FFMPEG_PATH", None) or "").strip()
+        if configured:
+            return configured
+
+        if os.name == "nt":
+            backend_dir = Path(__file__).resolve().parents[2]
+            root = backend_dir / "third_party" / "ffmpeg"
+            candidate = root / "bin" / "ffmpeg.exe"
+            if candidate.exists():
+                return str(candidate)
+            if root.exists():
+                for found in root.rglob("ffmpeg.exe"):
+                    if found.exists():
+                        return str(found)
+
+        return "ffmpeg"
+
+    async def _convert_audio_bytes_to_wav(self, audio_bytes: bytes) -> bytes:
+        import asyncio
+
+        return await asyncio.to_thread(self._convert_audio_bytes_to_wav_blocking, audio_bytes)
+
+    async def convert_to_wav(self, audio_bytes: bytes) -> bytes:
+        if self._is_wav_bytes(audio_bytes):
+            return audio_bytes
+        return await self._convert_audio_bytes_to_wav(audio_bytes)
+
+    def _convert_audio_bytes_to_wav_blocking(self, audio_bytes: bytes) -> bytes:
+        import subprocess
+
+        ffmpeg_path = self._resolve_ffmpeg_path()
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "wav",
+            "-acodec",
+            "pcm_s16le",
+            "pipe:1",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=audio_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError("ffmpeg_not_found") from e
+
+        if proc.returncode != 0:
+            stderr = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"ffmpeg_convert_failed: {stderr}")
+        out = proc.stdout or b""
+        if not self._is_wav_bytes(out):
+            raise RuntimeError("ffmpeg_convert_failed: output_not_wav")
+        return out
 
     async def generate_speech_stream(self, 
                               text: str, 

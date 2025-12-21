@@ -53,6 +53,7 @@
     *   **图片搜索**：实时验证图片 URL（检查 403/404 错误）并重试不同引擎，确保图片有效显示。
 *   **语音交互 (Beta)**：
     *   **云端 STT/TTS**：支持通过云端 API（如 SiliconFlow）进行语音转文字/文字转语音。
+    *   **FFmpeg 兜底（后端，暂仅推荐 Windows）**：目前仅推荐 Windows 用户部署，并内置使用来自 https://github.com/BtbN/FFmpeg-Builds 的编译包；其他系统请自行提供 FFmpeg 并按需修改代码/配置（仅聚合使用，不修改源代码；见 https://ffmpeg.org/）。
     *   **按住说话**：聊天界面集成 Push-to-Talk 功能。
     *   **虚拟麦克风注入（可选）**：可将 TTS 音频注入到“虚拟麦克风（输入设备）”，用于对接 Discord/KOOK 等语音软件。
     *   **本地语音模型（计划）**：

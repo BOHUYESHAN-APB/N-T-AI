@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     TTS_API_KEY: str = ""
     TTS_BASE_URL: str = "https://api.siliconflow.cn/v1"
 
+    FFMPEG_PATH: str = ""
+
     LOG_MAX_ERRORS: int = 5
 
     # Server / HTTPS

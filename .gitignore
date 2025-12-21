@@ -29,3 +29,4 @@ flutter_application/server/
 **/*.qcow2
 
 /backend/app/static/reports/
+/backend/third_party/ffmpeg/

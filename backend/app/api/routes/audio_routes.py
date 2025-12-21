@@ -306,6 +306,34 @@ async def play_audio(
         )
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/convert/wav")
+async def convert_to_wav(
+    audio_b64: str = Body(..., embed=True),
+):
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception as e:
+        logger.error(f"[AudioRoutes] convert_to_wav invalid audio_b64: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"invalid audio_b64: {e}")
+
+    try:
+        logger.info(f"[AudioRoutes] convert_to_wav request: bytes={len(audio_bytes)}")
+        wav_bytes = await audio_service.convert_to_wav(audio_bytes)
+        return Response(content=wav_bytes, media_type="audio/wav")
+    except RuntimeError as e:
+        logger.error(f"[AudioRoutes] convert_to_wav runtime error: {e}", exc_info=True)
+        if str(e) == "ffmpeg_not_found":
+            raise HTTPException(
+                status_code=500,
+                detail="ffmpeg_not_found: 请安装 ffmpeg 并设置后端环境变量 FFMPEG_PATH（例如 C:\\\\path\\\\to\\\\ffmpeg.exe），用于音频格式转换兜底",
+            )
+        if str(e).startswith("ffmpeg_convert_failed"):
+            raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"[AudioRoutes] convert_to_wav unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/loopback/transcribe")
 async def loopback_transcribe(
     duration_seconds: float = Body(5.0, embed=True),
@@ -431,6 +459,13 @@ async def tts_play(
         gen_ms = int((time.time() - gen_start) * 1000)
     except Exception as e:
         logger.error(f"[AudioRoutes] tts_play generate error: {e}", exc_info=True)
+        if str(e) == "ffmpeg_not_found":
+            raise HTTPException(
+                status_code=500,
+                detail="ffmpeg_not_found: 请安装 ffmpeg 并设置后端环境变量 FFMPEG_PATH（例如 C:\\\\path\\\\to\\\\ffmpeg.exe），用于音频格式转换兜底",
+            )
+        if str(e).startswith("ffmpeg_convert_failed"):
+            raise HTTPException(status_code=500, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
     try:
