@@ -296,6 +296,8 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     chat_mode = raw_request.headers.get("X-Chat-Mode", "persona")
     deep_research_str = raw_request.headers.get("X-Deep-Research", "false")
     deep_research = deep_research_str.lower() in ["true", "1", "yes"]
+    suppress_inner_monologue_str = raw_request.headers.get("X-Suppress-Inner-Monologue", "false")
+    suppress_inner_monologue = suppress_inner_monologue_str.lower() in ["true", "1", "yes"]
     user_nickname = raw_request.headers.get("X-User-Nickname")
     if user_nickname:
         try:
@@ -403,6 +405,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 enable_backend_tts=enable_backend_tts,
                 chat_mode=chat_mode,
                 deep_research=deep_research,
+                suppress_inner_monologue=suppress_inner_monologue,
                 user_nickname=user_nickname
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)

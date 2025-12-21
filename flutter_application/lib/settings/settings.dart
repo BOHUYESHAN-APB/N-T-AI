@@ -342,6 +342,7 @@ class McpServerConfig {
 }
 
 class AppSettings {
+  static const Object _notSet = Object();
   final ThemeModeOption themeMode;
   final LocaleOption locale;
   final DensityOption density;
@@ -382,6 +383,7 @@ class AppSettings {
   final bool enableSearchRetry; // 启用搜索重试 (防止 Token 浪费)
   final bool enableNoteAccess; // 启用笔记读取权限
   final bool showAgentThoughts; // 显示 Agent 思考过程
+  final bool suppressInnerMonologue; // 禁用“心里描写/旁白”输出
   final List<McpServerConfig> mcpServers; // MCP 服务器列表
   final List<AgentConfig> agents; // 独立 Agent 配置 (Standard Mode)
   final DeepResearchSettings deepResearch; // 深度研究模式配置
@@ -411,6 +413,11 @@ class AppSettings {
   final bool isFirstRun; // 是否首次运行 (用于显示引导页)
   final bool enableTts; // 启用语音合成输出
   final bool enableStt; // 启用语音识别输入
+  final bool ttsViaBackendDevice; // 通过后端播放到指定输出设备
+  final int? ttsBackendDeviceIndex; // 后端输出设备索引
+  final bool sttViaBackendLoopback; // 通过后端回环采集系统声音
+  final int? sttLoopbackDeviceIndex; // 后端回环设备索引（通常为输出设备）
+  final int sttLoopbackDurationSeconds; // 回环采集时长（秒）
   final int logMaxErrors; // 最近错误日志条数
   final int? userBubbleColor; // 用户气泡颜色 (ARGB)
   final int? aiBubbleColor; // AI 气泡颜色 (ARGB)
@@ -453,6 +460,7 @@ class AppSettings {
     this.enableSearchRetry = true,
     this.enableNoteAccess = false,
     this.showAgentThoughts = false,
+    this.suppressInnerMonologue = false,
     this.mcpServers = const [],
     this.agents = const [],
     this.deepResearch = const DeepResearchSettings(),
@@ -474,6 +482,11 @@ class AppSettings {
     this.isFirstRun = true,
     this.enableTts = false,
     this.enableStt = false,
+    this.ttsViaBackendDevice = false,
+    this.ttsBackendDeviceIndex,
+    this.sttViaBackendLoopback = false,
+    this.sttLoopbackDeviceIndex,
+    this.sttLoopbackDurationSeconds = 5,
     this.logMaxErrors = 5,
     this.userBubbleColor,
     this.aiBubbleColor,
@@ -515,6 +528,7 @@ class AppSettings {
     bool? enableSearchRetry,
     bool? enableNoteAccess,
     bool? showAgentThoughts,
+    bool? suppressInnerMonologue,
     List<McpServerConfig>? mcpServers,
     List<AgentConfig>? agents,
     DeepResearchSettings? deepResearch,
@@ -535,6 +549,11 @@ class AppSettings {
     bool? isFirstRun,
     bool? enableTts,
     bool? enableStt,
+    bool? ttsViaBackendDevice,
+    Object? ttsBackendDeviceIndex = _notSet,
+    bool? sttViaBackendLoopback,
+    Object? sttLoopbackDeviceIndex = _notSet,
+    int? sttLoopbackDurationSeconds,
     int? logMaxErrors,
     int? userBubbleColor,
     int? aiBubbleColor,
@@ -580,6 +599,7 @@ class AppSettings {
     enableSearchRetry: enableSearchRetry ?? this.enableSearchRetry,
     enableNoteAccess: enableNoteAccess ?? this.enableNoteAccess,
     showAgentThoughts: showAgentThoughts ?? this.showAgentThoughts,
+    suppressInnerMonologue: suppressInnerMonologue ?? this.suppressInnerMonologue,
     mcpServers: mcpServers ?? this.mcpServers,
     agents: agents ?? this.agents,
     deepResearch: deepResearch ?? this.deepResearch,
@@ -600,6 +620,18 @@ class AppSettings {
     isFirstRun: isFirstRun ?? this.isFirstRun,
     enableTts: enableTts ?? this.enableTts,
     enableStt: enableStt ?? this.enableStt,
+    ttsViaBackendDevice: ttsViaBackendDevice ?? this.ttsViaBackendDevice,
+    ttsBackendDeviceIndex:
+        identical(ttsBackendDeviceIndex, _notSet)
+            ? this.ttsBackendDeviceIndex
+            : ttsBackendDeviceIndex as int?,
+    sttViaBackendLoopback: sttViaBackendLoopback ?? this.sttViaBackendLoopback,
+    sttLoopbackDeviceIndex:
+        identical(sttLoopbackDeviceIndex, _notSet)
+            ? this.sttLoopbackDeviceIndex
+            : sttLoopbackDeviceIndex as int?,
+    sttLoopbackDurationSeconds:
+        sttLoopbackDurationSeconds ?? this.sttLoopbackDurationSeconds,
     logMaxErrors: logMaxErrors ?? this.logMaxErrors,
     userBubbleColor: userBubbleColor ?? this.userBubbleColor,
     aiBubbleColor: aiBubbleColor ?? this.aiBubbleColor,

@@ -184,6 +184,7 @@ class LLMService {
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
+    final suppressInnerMonologue = prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
     
     // Parse search region from int setting (0: auto, 1: cn, 2: global)
     final searchRegionIdx = prefs.getInt('settings.agent.searchRegion');
@@ -254,6 +255,7 @@ class LLMService {
       headers['X-Persona-Mode'] = personaMode;
       headers['X-Chat-Mode'] = chatMode;
       headers['X-Deep-Research'] = enableDeepResearch.toString();
+      headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
       if (sessionId != null && sessionId.isNotEmpty) {
         headers['X-Session-Id'] = sessionId;
       }

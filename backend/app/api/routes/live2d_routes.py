@@ -303,8 +303,12 @@ async def broadcast_audio(request: AudioBroadcastRequest):
             temp_dir = "app/static/live2d/temp"
             os.makedirs(temp_dir, exist_ok=True)
             
+            ext = "mp3"
+            if len(audio_data) >= 12 and audio_data[0:4] == b"RIFF" and audio_data[8:12] == b"WAVE":
+                ext = "wav"
+
             # 3. Save to file (unique name)
-            filename = f"tts_{uuid.uuid4().hex}.mp3"
+            filename = f"tts_{uuid.uuid4().hex}.{ext}"
             file_path = os.path.join(temp_dir, filename)
             
             with open(file_path, "wb") as f:

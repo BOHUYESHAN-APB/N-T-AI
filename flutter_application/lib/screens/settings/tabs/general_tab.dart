@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
+import 'package:http/http.dart' as http;
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../first_run_dialog.dart';
@@ -8,8 +9,157 @@ import '../../../core/services/brain_service.dart';
 import '../../../core/services/backend_service.dart';
 import '../character_manager_screen.dart';
 
-class GeneralTab extends StatelessWidget {
+class GeneralTab extends StatefulWidget {
   const GeneralTab({Key? key}) : super(key: key);
+
+  @override
+  State<GeneralTab> createState() => _GeneralTabState();
+}
+
+class _GeneralTabState extends State<GeneralTab> {
+  bool _didInit = false;
+  bool _loadingAudioDevices = false;
+  String? _audioDevicesError;
+  List<Map<String, dynamic>> _outputDevices = const [];
+  int? _defaultOutputDeviceIndex;
+  Map<int, String> _hostApiNames = const {};
+
+  String _formatOutputDeviceLabel(Map<String, dynamic> d) {
+    final idx = (d['_index'] as int?) ?? -1;
+    final nameRaw = (d['name'] ?? '').toString().trim();
+    final name = nameRaw.isEmpty ? '(未命名设备)' : nameRaw;
+
+    final hostApiIndex = (d['hostapi'] is num) ? (d['hostapi'] as num).toInt() : null;
+    final hostApiName = (hostApiIndex != null) ? _hostApiNames[hostApiIndex] : null;
+
+    final maxOut = (d['max_output_channels'] is num)
+        ? (d['max_output_channels'] as num).toInt()
+        : 0;
+    final defaultSr = (d['default_samplerate'] is num)
+        ? (d['default_samplerate'] as num).toInt()
+        : null;
+
+    final tags = <String>[];
+    final lowerName = name.toLowerCase();
+    final isVirtual = lowerName.contains('virtual') ||
+        lowerName.contains('cable') ||
+        lowerName.contains('vb-audio') ||
+        lowerName.contains('voicemeeter') ||
+        lowerName.contains('loopback') ||
+        lowerName.contains('blackhole');
+    if (isVirtual) {
+      tags.add('虚拟');
+    }
+    if (hostApiName != null && hostApiName.trim().isNotEmpty) {
+      tags.add(hostApiName.trim());
+    }
+    if (maxOut > 0) {
+      tags.add('输出${maxOut}ch');
+    }
+    if (defaultSr != null && defaultSr > 0) {
+      tags.add('${defaultSr}Hz');
+    }
+
+    final tagText = tags.isEmpty ? '' : '〔${tags.join(' / ')}〕';
+    final defaultText =
+        (_defaultOutputDeviceIndex != null && idx == _defaultOutputDeviceIndex)
+            ? '（默认输出）'
+            : '';
+    return '[$idx] $name $tagText$defaultText'.trim();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didInit) return;
+    _didInit = true;
+    _refreshAudioDevices();
+  }
+
+  Future<void> _refreshAudioDevices() async {
+    final controller = SettingsScope.of(context);
+    final s = controller.settings;
+
+    if (!s.enablePythonBackend) {
+      if (mounted) {
+        setState(() {
+          _outputDevices = const [];
+          _audioDevicesError = null;
+          _loadingAudioDevices = false;
+        });
+      }
+      return;
+    }
+
+    final backendBase =
+        s.pythonBackendUrl.endsWith('/') ? s.pythonBackendUrl.substring(0, s.pythonBackendUrl.length - 1) : s.pythonBackendUrl;
+
+    if (mounted) {
+      setState(() {
+        _loadingAudioDevices = true;
+        _audioDevicesError = null;
+      });
+    }
+
+    try {
+      final resp = await http
+          .get(Uri.parse('$backendBase/api/audio/devices'))
+          .timeout(const Duration(seconds: 5));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception('HTTP ${resp.statusCode}');
+      }
+
+      final data = jsonDecode(utf8.decode(resp.bodyBytes));
+      final rawDevices =
+          (data is Map ? (data['devices'] as List?) : null) ?? const [];
+      final rawHostApis =
+          (data is Map ? (data['hostapis'] as List?) : null) ?? const [];
+      final defaultOut = (data is Map && data['default'] is Map)
+          ? ((data['default'] as Map)['output'] as num?)?.toInt()
+          : null;
+
+      final hostApiNames = <int, String>{};
+      for (var i = 0; i < rawHostApis.length; i++) {
+        final h = rawHostApis[i];
+        if (h is! Map) continue;
+        final name = (h['name'] ?? '').toString();
+        if (name.isNotEmpty) {
+          hostApiNames[i] = name;
+        }
+      }
+
+      final outputDevices = <Map<String, dynamic>>[];
+      for (var i = 0; i < rawDevices.length; i++) {
+        final d = rawDevices[i];
+        if (d is! Map) continue;
+        final map = Map<String, dynamic>.from(d);
+        final maxOut = (map['max_output_channels'] is num)
+            ? (map['max_output_channels'] as num).toInt()
+            : 0;
+        if (maxOut > 0) {
+          map['_index'] = i;
+          outputDevices.add(map);
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _outputDevices = outputDevices;
+        _defaultOutputDeviceIndex = defaultOut;
+        _hostApiNames = hostApiNames;
+        _loadingAudioDevices = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _outputDevices = const [];
+        _defaultOutputDeviceIndex = null;
+        _hostApiNames = const {};
+        _audioDevicesError = e.toString();
+        _loadingAudioDevices = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -194,19 +344,174 @@ class GeneralTab extends StatelessWidget {
 
         const SizedBox(height: 24),
         _buildSectionHeader(context, l10n.generalVoiceInteraction),
-        SwitchListTile(
-          secondary: const Icon(Icons.record_voice_over),
-          title: Text(l10n.generalEnableTts),
-          subtitle: Text(l10n.generalEnableTtsSubtitle),
-          value: s.enableTts,
-          onChanged: (v) => controller.setEnableTts(v),
+        Card(
+          child: Column(
+            children: [
+              SwitchListTile(
+                secondary: const Icon(Icons.record_voice_over),
+                title: Text(l10n.generalEnableTts),
+                subtitle: Text(l10n.generalEnableTtsSubtitle),
+                value: s.enableTts,
+                onChanged: (v) => controller.setEnableTts(v),
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.volume_up),
+                title: const Text('TTS 输出到指定设备（后端播放）'),
+                subtitle: const Text('用于把语音输出到虚拟声卡/聊天软件等'),
+                value: s.ttsViaBackendDevice,
+                onChanged: (s.enableTts && s.enablePythonBackend)
+                    ? (v) async {
+                        await controller.setTtsViaBackendDevice(v);
+                        if (v) {
+                          await _refreshAudioDevices();
+                        }
+                      }
+                    : null,
+              ),
+              if (s.ttsViaBackendDevice)
+                ListTile(
+                  leading: const Icon(Icons.volume_up),
+                  title: const Text('后端输出设备'),
+                  subtitle: _loadingAudioDevices
+                      ? const Text('正在获取设备列表…')
+                      : (_audioDevicesError != null
+                          ? Text('获取失败：$_audioDevicesError')
+                          : const Text('选择用于播放 TTS 的输出设备')),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: '刷新',
+                        icon: const Icon(Icons.refresh, size: 18),
+                        onPressed:
+                            (s.enablePythonBackend) ? _refreshAudioDevices : null,
+                      ),
+                      DropdownButton<int?>(
+                        value: s.ttsBackendDeviceIndex,
+                        underline: const SizedBox(),
+                        onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
+                            ? (v) => controller.setTtsBackendDeviceIndex(v)
+                            : null,
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('默认（系统默认输出）'),
+                          ),
+                          ..._outputDevices.map((d) {
+                            final idx = (d['_index'] as int?) ?? -1;
+                            return DropdownMenuItem<int?>(
+                              value: idx,
+                              child: Text(_formatOutputDeviceLabel(d)),
+                            );
+                          }),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              if (s.ttsViaBackendDevice || s.sttViaBackendLoopback)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Text(
+                    'VB-Cable 推荐：\n'
+                    '1) 语音软件麦克风：选择 CABLE Output（录音设备）\n'
+                    '2) 本软件 TTS 输出设备：选择 CABLE Input（播放设备）\n'
+                    '3) 语音软件播放设备：选择 CABLE Input（播放设备），并在下方“回环监听设备”选择同一个设备',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+            ],
+          ),
         ),
-        SwitchListTile(
-          secondary: const Icon(Icons.hearing),
-          title: Text(l10n.generalEnableStt),
-          subtitle: Text(l10n.generalEnableSttSubtitle),
-          value: s.enableStt,
-          onChanged: (v) => controller.setEnableStt(v),
+        const SizedBox(height: 12),
+        Card(
+          child: Column(
+            children: [
+              SwitchListTile(
+                secondary: const Icon(Icons.hearing),
+                title: Text(l10n.generalEnableStt),
+                subtitle: Text(l10n.generalEnableSttSubtitle),
+                value: s.enableStt,
+                onChanged: (v) => controller.setEnableStt(v),
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.headphones),
+                title: const Text('从系统声音识别（回环采集）'),
+                subtitle: const Text('把 Discord/KOOK 的语音频道声音转成文字发给 AI'),
+                value: s.sttViaBackendLoopback,
+                onChanged: (s.enableStt && s.enablePythonBackend)
+                    ? (v) async {
+                        await controller.setSttViaBackendLoopback(v);
+                        if (v) {
+                          await _refreshAudioDevices();
+                        }
+                      }
+                    : null,
+              ),
+              if (s.sttViaBackendLoopback)
+                ListTile(
+                  leading: const Icon(Icons.headphones),
+                  title: const Text('回环监听设备（输出设备）'),
+                  subtitle: _loadingAudioDevices
+                      ? const Text('正在获取设备列表…')
+                      : (_audioDevicesError != null
+                          ? Text('获取失败：$_audioDevicesError')
+                          : const Text('应与语音软件的“播放设备”一致')),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: '刷新',
+                        icon: const Icon(Icons.refresh, size: 18),
+                        onPressed:
+                            (s.enablePythonBackend) ? _refreshAudioDevices : null,
+                      ),
+                      DropdownButton<int?>(
+                        value: s.sttLoopbackDeviceIndex,
+                        underline: const SizedBox(),
+                        onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
+                            ? (v) => controller.setSttLoopbackDeviceIndex(v)
+                            : null,
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('默认（系统默认输出）'),
+                          ),
+                          ..._outputDevices.map((d) {
+                            final idx = (d['_index'] as int?) ?? -1;
+                            return DropdownMenuItem<int?>(
+                              value: idx,
+                              child: Text(_formatOutputDeviceLabel(d)),
+                            );
+                          }),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              if (s.sttViaBackendLoopback)
+                ListTile(
+                  leading: const Icon(Icons.timer),
+                  title: const Text('回环采集时长'),
+                  subtitle: const Text('越长越完整，但识别更慢'),
+                  trailing: DropdownButton<int>(
+                    value: s.sttLoopbackDurationSeconds,
+                    underline: const SizedBox(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        controller.setSttLoopbackDurationSeconds(v);
+                      }
+                    },
+                    items: const [
+                      DropdownMenuItem(value: 3, child: Text('3 秒')),
+                      DropdownMenuItem(value: 5, child: Text('5 秒')),
+                      DropdownMenuItem(value: 8, child: Text('8 秒')),
+                      DropdownMenuItem(value: 12, child: Text('12 秒')),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
 
         const SizedBox(height: 24),

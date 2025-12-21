@@ -57,6 +57,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   List<Map<String, dynamic>> _messages =
       []; // {role: user/assistant, content: text, created_at: DateTime}
   bool _isLoading = false;
+  bool _isLoopbackCapturing = false;
   Completer<void>? _interruptCompleter;
 
   StreamSubscription? _historySubscription;
@@ -593,7 +594,33 @@ class _FireflyScreenState extends State<FireflyScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
     } finally {
+      try {
+        final f = File(path);
+        if (await f.exists()) {
+          await f.delete();
+        }
+      } catch (_) {}
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleLoopbackVoiceInput() async {
+    if (!mounted) return;
+    if (_isLoading || _isLoopbackCapturing) return;
+    setState(() => _isLoopbackCapturing = true);
+    try {
+      final settings = SettingsScope.of(context).settings;
+      final path = await _brain.captureSystemLoopbackToFile(
+        durationSeconds: settings.sttLoopbackDurationSeconds.toDouble(),
+        deviceIndex: settings.sttLoopbackDeviceIndex,
+      );
+      await _handleVoiceInput(path);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('系统回环监听失败: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoopbackCapturing = false);
     }
   }
 
@@ -1866,6 +1893,187 @@ class _FireflyScreenState extends State<FireflyScreen> {
           padding: const EdgeInsets.all(8.0),
           child: Row(
             children: [
+              PopupMenuButton<String>(
+                tooltip: '更多',
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'attach_image':
+                      _attachImage();
+                      break;
+                    case 'compress':
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(l10n.msgCompressing)),
+                      );
+                      await _brain.compressContext();
+                      break;
+                    case 'new_chat':
+                      _createNewSession();
+                      break;
+                    case 'memory':
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const MemoryManagerScreen(
+                            heroTag: 'memory_fab_sidebar',
+                          ),
+                        ),
+                      );
+                      break;
+                    case 'expression_toggle':
+                      settingsController.setShowExpressionFace(
+                        !settings.showExpressionFace,
+                      );
+                      break;
+                    case 'tts_toggle':
+                      settingsController.setEnableTts(!settings.enableTts);
+                      break;
+                    case 'loopback':
+                      await _handleLoopbackVoiceInput();
+                      break;
+                  }
+                },
+                itemBuilder: (context) {
+                  final items = <PopupMenuEntry<String>>[];
+
+                  final hasAttachImage = quickActions.contains('attach_image');
+                  final hasCompress = quickActions.contains('compress');
+                  final hasNewChat = quickActions.contains('new_chat');
+                  final hasMemory = quickActions.contains('memory');
+                  final hasExpressionToggle =
+                      quickActions.contains('expression_toggle');
+
+                  if (hasAttachImage) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'attach_image',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.image_outlined, size: 18),
+                            const SizedBox(width: 10),
+                            Text(l10n.quickActionAttachImage),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (settings.enableStt &&
+                      settings.sttViaBackendLoopback &&
+                      settings.enablePythonBackend) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'loopback',
+                        enabled: !_isLoading && !_isLoopbackCapturing,
+                        child: Row(
+                          children: [
+                            Icon(
+                              _isLoopbackCapturing
+                                  ? Icons.hearing_disabled
+                                  : Icons.headphones,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              _isLoopbackCapturing
+                                  ? '回环采集中…'
+                                  : '回环采集（系统声音）',
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (hasCompress) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'compress',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.cleaning_services_outlined,
+                                size: 18),
+                            const SizedBox(width: 10),
+                            Text(l10n.quickActionCompress),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (hasNewChat) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'new_chat',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.add_comment_outlined, size: 18),
+                            const SizedBox(width: 10),
+                            Text(l10n.quickActionNewChat),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (hasMemory) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'memory',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.memory, size: 18),
+                            const SizedBox(width: 10),
+                            Text(l10n.quickActionMemory),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (hasExpressionToggle) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'expression_toggle',
+                        child: Row(
+                          children: [
+                            Icon(
+                              settings.showExpressionFace
+                                  ? Icons.emoji_emotions
+                                  : Icons.emoji_emotions_outlined,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(l10n.quickActionExpression),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  items.add(const PopupMenuDivider());
+                  items.add(
+                    PopupMenuItem(
+                      value: 'tts_toggle',
+                      child: Row(
+                        children: [
+                          Icon(
+                            settings.enableTts
+                                ? Icons.record_voice_over
+                                : Icons.voice_over_off,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(settings.enableTts ? 'TTS：开' : 'TTS：关'),
+                        ],
+                      ),
+                    ),
+                  );
+
+                  return items;
+                },
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+              const SizedBox(width: 6),
               _VoiceInputButton(onRecorded: _handleVoiceInput),
               const SizedBox(width: 8),
               Expanded(
@@ -1907,89 +2115,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              ...quickActions.map((id) {
-                IconData icon;
-                String tooltip;
-                VoidCallback onTap;
-                switch (id) {
-                  case 'attach_image':
-                    icon = Icons.image_outlined;
-                    tooltip = l10n.quickActionAttachImage;
-                    onTap = _attachImage;
-                    break;
-                  case 'compress':
-                    icon = Icons.cleaning_services_outlined;
-                    tooltip = l10n.quickActionCompress;
-                    onTap = () async {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(l10n.msgCompressing)),
-                      );
-                      await _brain.compressContext();
-                    };
-                    break;
-                  case 'new_chat':
-                    icon = Icons.add_comment_outlined;
-                    tooltip = l10n.quickActionNewChat;
-                    onTap = _createNewSession;
-                    break;
-                  case 'memory':
-                    icon = Icons.memory;
-                    tooltip = l10n.quickActionMemory;
-                    onTap = () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const MemoryManagerScreen(
-                            heroTag: 'memory_fab_sidebar',
-                          ),
-                        ),
-                      );
-                    };
-                    break;
-                  case 'expression_toggle':
-                    icon = settings.showExpressionFace
-                        ? Icons.emoji_emotions
-                        : Icons.emoji_emotions_outlined;
-                    tooltip = l10n.quickActionExpression;
-                    onTap = () {
-                      settingsController.setShowExpressionFace(
-                        !settings.showExpressionFace,
-                      );
-                    };
-                    break;
-                  default:
-                    icon = Icons.extension;
-                    tooltip = id;
-                    onTap = () {};
-                    break;
-                }
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: IconButton(
-                    icon: Icon(icon),
-                    tooltip: tooltip,
-                    onPressed: onTap,
-                  ),
-                );
-              }).toList(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: IconButton(
-                  icon: Icon(
-                    settings.enableTts
-                        ? Icons.record_voice_over
-                        : Icons.voice_over_off,
-                  ),
-                  tooltip: settings.enableTts ? 'TTS On' : 'TTS Off',
-                  onPressed: () {
-                    settingsController.setEnableTts(!settings.enableTts);
-                  },
-                  color: settings.enableTts
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
                 ),
               ),
               const SizedBox(width: 4),

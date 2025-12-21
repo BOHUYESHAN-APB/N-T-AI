@@ -58,6 +58,22 @@ class ChatService:
         s = "\n".join(lines)
         return s.strip()
 
+    def _strip_inner_monologue_text(self, text: str) -> str:
+        s = text or ""
+        s = re.sub(r"（[^）]*）", "", s, flags=re.DOTALL)
+
+        def repl(m: re.Match) -> str:
+            inner = (m.group(1) or "").strip()
+            has_cjk = re.search(r"[\u4e00-\u9fff]", inner) is not None
+            if has_cjk and len(inner) <= 40:
+                return ""
+            return m.group(0) or ""
+
+        s = re.sub(r"(?<!\])\(([^)]*)\)", repl, s, flags=re.DOTALL)
+        s = re.sub(r"[ \t]+\n", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip()
+
     def _parse_tool_kwargs(self, args_str: str) -> Dict[str, Any]:
         raw = (args_str or "").strip()
         if not raw:
@@ -262,6 +278,7 @@ class ChatService:
                             persona_mode: str = "full",
                             chat_mode: str = "persona",
                             deep_research: bool = False,
+                            suppress_inner_monologue: bool = False,
                             user_nickname: Optional[str] = None) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
@@ -347,6 +364,14 @@ class ChatService:
 - 在日常拟人聊天模式下，请使用纯文本回复。
 - 不要使用 Markdown 格式（例如粗体 **文本**、列表符号 - 或标题 #）。
 - 只有在用户明确要求使用 Markdown、或者需要展示代码片段 / 表格 / 结构化数据时，才可以使用 Markdown 或代码块。
+"""
+        if suppress_inner_monologue and not deep_research:
+            system_prompt += """
+
+[Inner Monologue Policy]:
+- 严禁输出任何“心里描写/旁白/动作描写/OS”。
+- 不要输出任何括号（() 或 （））包裹的舞台指令、动作或表情描述。
+- 只输出对用户可见的正文内容。
 """
 
         # Inject Agent Instructions if enabled
@@ -503,7 +528,7 @@ class ChatService:
                                                                   model=target_model,
                                                                   temperature=temperature,
                                                                   enable_thinking=enable_thinking)
-                        response_text += "\n\n(注：当前模型不支持视觉输入，已自动转为纯文本模式)"
+                        response_text += "\n\n" + ("注：当前模型不支持视觉输入，已自动转为纯文本模式" if suppress_inner_monologue else "(注：当前模型不支持视觉输入，已自动转为纯文本模式)")
                 else:
                     raise e
 
@@ -541,6 +566,9 @@ class ChatService:
                 else:
                     final_response_text = response_text
                 break
+
+        if suppress_inner_monologue:
+            final_response_text = self._strip_inner_monologue_text(final_response_text)
 
         # 6. Save Assistant Response
         with Session(engine) as session:

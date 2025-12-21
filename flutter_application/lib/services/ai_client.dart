@@ -378,6 +378,7 @@ class AiClient {
     required AiProviderConfig config,
     required String text,
     String? voice,
+    String responseFormat = 'mp3',
   }) async {
     var base = config.baseUrl;
     if (base.endsWith('/')) base = base.substring(0, base.length - 1);
@@ -412,7 +413,7 @@ class AiClient {
       'model': config.model.isNotEmpty ? config.model : 'FunAudioLLM/CosyVoice2-0.5B',
       'input': text,
       'voice': effectiveVoice, 
-      'response_format': 'mp3',
+      'response_format': responseFormat,
     });
     
     final response = await http.post(

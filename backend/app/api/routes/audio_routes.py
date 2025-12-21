@@ -1,11 +1,171 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Header, Response
 from fastapi.responses import StreamingResponse
 from typing import Optional, List
+import asyncio
+import base64
 from app.services.audio_service import AudioService
 from app.core.config import settings
 
 router = APIRouter()
 audio_service = AudioService()
+
+@router.get("/devices")
+async def list_devices():
+    try:
+        return audio_service.list_audio_devices()
+    except RuntimeError as e:
+        if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/loopback/capture")
+async def loopback_capture(
+    duration_seconds: float = Body(5.0, embed=True),
+    device_index: Optional[int] = Body(None, embed=True),
+    samplerate: int = Body(48000, embed=True),
+    channels: int = Body(2, embed=True),
+):
+    try:
+        wav_bytes = await asyncio.to_thread(
+            audio_service.capture_loopback_wav_bytes,
+            duration_seconds,
+            device_index,
+            samplerate,
+            channels,
+        )
+        return {
+            "format": "wav",
+            "duration_seconds": duration_seconds,
+            "samplerate": samplerate,
+            "channels": channels,
+            "audio_b64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+    except RuntimeError as e:
+        if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/play")
+async def play_audio(
+    audio_b64: str = Body(..., embed=True),
+    format: str = Body("wav", embed=True),
+    device_index: Optional[int] = Body(None, embed=True),
+):
+    if format.lower() != "wav":
+        raise HTTPException(status_code=400, detail="only wav is supported")
+
+    try:
+        wav_bytes = base64.b64decode(audio_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid audio_b64")
+
+    try:
+        play_info = await asyncio.to_thread(audio_service.play_wav_bytes, wav_bytes, device_index)
+        return {"status": "ok", "play": play_info}
+    except RuntimeError as e:
+        if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/loopback/transcribe")
+async def loopback_transcribe(
+    duration_seconds: float = Body(5.0, embed=True),
+    device_index: Optional[int] = Body(None, embed=True),
+    samplerate: int = Body(48000, embed=True),
+    channels: int = Body(2, embed=True),
+    model: str = Body("FunAudioLLM/SenseVoiceSmall", embed=True),
+    api_key: Optional[str] = Header(None, alias="X-SiliconFlow-Api-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    base_url: Optional[str] = Header("https://api.siliconflow.cn/v1", alias="X-SiliconFlow-Base-Url"),
+):
+    final_api_key = api_key
+    if not final_api_key and authorization and authorization.startswith("Bearer "):
+        final_api_key = authorization.replace("Bearer ", "")
+
+    final_api_key = final_api_key or settings.OPENAI_API_KEY
+    if not final_api_key:
+        raise HTTPException(status_code=401, detail="API Key is required")
+
+    try:
+        wav_bytes = await asyncio.to_thread(
+            audio_service.capture_loopback_wav_bytes,
+            duration_seconds,
+            device_index,
+            samplerate,
+            channels,
+        )
+    except RuntimeError as e:
+        if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        text = await audio_service.transcribe(
+            file_obj=wav_bytes,
+            filename="loopback.wav",
+            api_key=final_api_key,
+            base_url=base_url,
+            model=model,
+        )
+        return {"text": text, "duration_seconds": duration_seconds}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/speech/play")
+async def tts_play(
+    input: str = Body(..., embed=True),
+    model: str = Body("FunAudioLLM/CosyVoice2-0.5B", embed=True),
+    voice: Optional[str] = Body("alex", embed=True),
+    speed: float = Body(1.0, embed=True),
+    output_device_index: Optional[int] = Body(None, embed=True),
+    api_key: Optional[str] = Header(None, alias="X-SiliconFlow-Api-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    base_url: Optional[str] = Header("https://api.siliconflow.cn/v1", alias="X-SiliconFlow-Base-Url"),
+):
+    final_api_key = api_key
+    if not final_api_key and authorization and authorization.startswith("Bearer "):
+        final_api_key = authorization.replace("Bearer ", "")
+
+    final_api_key = final_api_key or settings.OPENAI_API_KEY
+    if not final_api_key:
+        raise HTTPException(status_code=401, detail="API Key is required")
+
+    try:
+        wav_bytes = await audio_service.generate_speech(
+            text=input,
+            api_key=final_api_key,
+            base_url=base_url,
+            model=model,
+            voice=voice,
+            response_format="wav",
+            speed=speed,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        play_info = await asyncio.to_thread(audio_service.play_wav_bytes, wav_bytes, output_device_index)
+        return {"status": "ok", "play": play_info}
+    except RuntimeError as e:
+        if str(e) in ["sounddevice_not_available", "platform_not_supported"]:
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/transcriptions")
 async def transcribe_audio(

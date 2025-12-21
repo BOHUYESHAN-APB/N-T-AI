@@ -32,6 +32,7 @@ class SettingsController extends ChangeNotifier {
   static const _kAgentEnableSearchRetry = 'settings.agent.enableSearchRetry';
   static const _kEnableNoteAccess = 'settings.agent.enableNoteAccess';
   static const _kAgentShowThoughts = 'settings.agent.showThoughts';
+  static const _kSuppressInnerMonologue = 'settings.chat.suppressInnerMonologue';
   static const _kAgentMcpServers = 'settings.agent.mcpServers';
   static const _kEnableExpressionAgent = 'settings.agent.expression.enabled';
   static const _kShowExpressionFace = 'settings.ui.showExpressionFace';
@@ -64,6 +65,12 @@ class SettingsController extends ChangeNotifier {
   static const _kIsFirstRun = 'settings.app.isFirstRun';
   static const _kEnableTts = 'settings.audio.enableTts';
   static const _kEnableStt = 'settings.audio.enableStt';
+  static const _kTtsViaBackendDevice = 'settings.audio.ttsViaBackendDevice';
+  static const _kTtsBackendDeviceIndex = 'settings.audio.ttsBackendDeviceIndex';
+  static const _kSttViaBackendLoopback = 'settings.audio.sttViaBackendLoopback';
+  static const _kSttLoopbackDeviceIndex = 'settings.audio.sttLoopbackDeviceIndex';
+  static const _kSttLoopbackDurationSeconds =
+      'settings.audio.sttLoopbackDurationSeconds';
   static const _kLogMaxErrors = 'settings.logs.maxErrors';
   static const _kUserBubbleColor = 'settings.ui.userBubbleColor';
   static const _kAiBubbleColor = 'settings.ui.aiBubbleColor';
@@ -122,6 +129,12 @@ class SettingsController extends ChangeNotifier {
     final quickActionsRaw = _prefs.getString(_kQuickActions);
     final enableTts = _prefs.getBool(_kEnableTts) ?? false;
     final enableStt = _prefs.getBool(_kEnableStt) ?? false;
+    final ttsViaBackendDevice = _prefs.getBool(_kTtsViaBackendDevice) ?? false;
+    final ttsBackendDeviceIndex = _prefs.getInt(_kTtsBackendDeviceIndex);
+    final sttViaBackendLoopback = _prefs.getBool(_kSttViaBackendLoopback) ?? false;
+    final sttLoopbackDeviceIndex = _prefs.getInt(_kSttLoopbackDeviceIndex);
+    final sttLoopbackDurationSeconds =
+        _prefs.getInt(_kSttLoopbackDurationSeconds) ?? 5;
     final logMaxErrors = _prefs.getInt(_kLogMaxErrors) ?? 5;
     final userBubbleColor = _prefs.getInt(_kUserBubbleColor);
     final aiBubbleColor = _prefs.getInt(_kAiBubbleColor);
@@ -153,6 +166,8 @@ class SettingsController extends ChangeNotifier {
     final enableSearchRetry = _prefs.getBool(_kAgentEnableSearchRetry) ?? true;
     final enableNoteAccess = _prefs.getBool(_kEnableNoteAccess) ?? false;
     final showAgentThoughts = _prefs.getBool(_kAgentShowThoughts) ?? false;
+    final suppressInnerMonologue =
+        _prefs.getBool(_kSuppressInnerMonologue) ?? false;
     final userNickname = _prefs.getString(_kUserNickname) ?? '';
     final learningProbability = _prefs.getDouble(_kLearningProbability) ?? 1.0;
     List<String> quickActions = ['attach_image', 'compress', 'new_chat'];
@@ -499,6 +514,7 @@ class SettingsController extends ChangeNotifier {
       enableSearchRetry: enableSearchRetry,
       enableNoteAccess: enableNoteAccess,
       showAgentThoughts: showAgentThoughts,
+      suppressInnerMonologue: suppressInnerMonologue,
       mcpServers: mcpServers,
       agents: agents,
       deepResearch: deepResearch,
@@ -526,6 +542,11 @@ class SettingsController extends ChangeNotifier {
       isFirstRun: isFirstRun,
       enableTts: enableTts,
       enableStt: enableStt,
+      ttsViaBackendDevice: ttsViaBackendDevice,
+      ttsBackendDeviceIndex: ttsBackendDeviceIndex,
+      sttViaBackendLoopback: sttViaBackendLoopback,
+      sttLoopbackDeviceIndex: sttLoopbackDeviceIndex,
+      sttLoopbackDurationSeconds: sttLoopbackDurationSeconds,
       logMaxErrors: logMaxErrors,
       userBubbleColor: userBubbleColor,
       aiBubbleColor: aiBubbleColor,
@@ -699,6 +720,45 @@ class SettingsController extends ChangeNotifier {
   Future<void> setEnableStt(bool v) async {
     _settings = _settings.copyWith(enableStt: v);
     await _prefs.setBool(_kEnableStt, v);
+    notifyListeners();
+  }
+
+  Future<void> setTtsViaBackendDevice(bool v) async {
+    _settings = _settings.copyWith(ttsViaBackendDevice: v);
+    await _prefs.setBool(_kTtsViaBackendDevice, v);
+    notifyListeners();
+  }
+
+  Future<void> setTtsBackendDeviceIndex(int? v) async {
+    _settings = _settings.copyWith(ttsBackendDeviceIndex: v);
+    if (v == null) {
+      await _prefs.remove(_kTtsBackendDeviceIndex);
+    } else {
+      await _prefs.setInt(_kTtsBackendDeviceIndex, v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSttViaBackendLoopback(bool v) async {
+    _settings = _settings.copyWith(sttViaBackendLoopback: v);
+    await _prefs.setBool(_kSttViaBackendLoopback, v);
+    notifyListeners();
+  }
+
+  Future<void> setSttLoopbackDeviceIndex(int? v) async {
+    _settings = _settings.copyWith(sttLoopbackDeviceIndex: v);
+    if (v == null) {
+      await _prefs.remove(_kSttLoopbackDeviceIndex);
+    } else {
+      await _prefs.setInt(_kSttLoopbackDeviceIndex, v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSttLoopbackDurationSeconds(int v) async {
+    if (v <= 0) return;
+    _settings = _settings.copyWith(sttLoopbackDurationSeconds: v);
+    await _prefs.setInt(_kSttLoopbackDurationSeconds, v);
     notifyListeners();
   }
 
@@ -919,6 +979,12 @@ class SettingsController extends ChangeNotifier {
   Future<void> setAgentShowThoughts(bool enabled) async {
     await _prefs.setBool(_kAgentShowThoughts, enabled);
     _settings = _settings.copyWith(showAgentThoughts: enabled);
+    notifyListeners();
+  }
+
+  Future<void> setSuppressInnerMonologue(bool enabled) async {
+    await _prefs.setBool(_kSuppressInnerMonologue, enabled);
+    _settings = _settings.copyWith(suppressInnerMonologue: enabled);
     notifyListeners();
   }
 

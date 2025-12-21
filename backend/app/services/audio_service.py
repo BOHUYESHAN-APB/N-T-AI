@@ -241,3 +241,120 @@ class AudioService:
                 print(f"[AudioService] Delete Voice Error: {response.status_code} - {response.text}")
             response.raise_for_status()
             return response.json()
+
+    def _require_sounddevice(self):
+        try:
+            import sounddevice as sd
+            return sd
+        except Exception as e:
+            raise RuntimeError("sounddevice_not_available") from e
+
+    def list_audio_devices(self) -> Dict[str, Any]:
+        import platform
+
+        if platform.system() != "Windows":
+            raise RuntimeError("platform_not_supported")
+
+        sd = self._require_sounddevice()
+
+        def to_jsonable(v):
+            if isinstance(v, (str, bool)) or v is None:
+                return v
+            if isinstance(v, (int, float)):
+                return v
+            if isinstance(v, dict):
+                return {str(k): to_jsonable(val) for k, val in v.items()}
+            if isinstance(v, (list, tuple)):
+                return [to_jsonable(x) for x in v]
+            return str(v)
+
+        devices = [to_jsonable(dict(d)) for d in sd.query_devices()]
+        hostapis = [to_jsonable(dict(h)) for h in sd.query_hostapis()]
+        default_in, default_out = sd.default.device
+
+        return {
+            "default": {"input": default_in, "output": default_out},
+            "hostapis": hostapis,
+            "devices": devices,
+        }
+
+    def capture_loopback_wav_bytes(
+        self,
+        duration_seconds: float,
+        device_index: Optional[int] = None,
+        samplerate: int = 48000,
+        channels: int = 2,
+        dtype: str = "int16",
+    ) -> bytes:
+        import io
+        import wave
+
+        sd = self._require_sounddevice()
+
+        if duration_seconds <= 0:
+            raise ValueError("duration_seconds must be > 0")
+        if duration_seconds > 30:
+            raise ValueError("duration_seconds too large")
+
+        if channels <= 0 or channels > 8:
+            raise ValueError("invalid channels")
+
+        if dtype != "int16":
+            raise ValueError("only int16 is supported")
+
+        extra = sd.WasapiSettings(loopback=True)
+        chunks: List[bytes] = []
+
+        def callback(indata, frames, time, status):
+            if indata:
+                chunks.append(bytes(indata))
+
+        with sd.RawInputStream(
+            samplerate=samplerate,
+            channels=channels,
+            dtype=dtype,
+            device=device_index,
+            extra_settings=extra,
+            callback=callback,
+        ):
+            sd.sleep(int(duration_seconds * 1000))
+
+        raw_audio = b"".join(chunks)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)
+            wf.setframerate(samplerate)
+            wf.writeframes(raw_audio)
+        return buf.getvalue()
+
+    def play_wav_bytes(self, wav_bytes: bytes, device_index: Optional[int] = None) -> Dict[str, Any]:
+        import io
+        import wave
+
+        sd = self._require_sounddevice()
+
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            channels = wf.getnchannels()
+            samplerate = wf.getframerate()
+            sampwidth = wf.getsampwidth()
+            frame_count = wf.getnframes()
+            audio_data = wf.readframes(frame_count)
+
+        if sampwidth != 2:
+            raise ValueError("only 16-bit PCM wav is supported")
+
+        with sd.RawOutputStream(
+            samplerate=samplerate,
+            channels=channels,
+            dtype="int16",
+            device=device_index,
+        ) as stream:
+            stream.write(audio_data)
+
+        return {
+            "samplerate": samplerate,
+            "channels": channels,
+            "frames": frame_count,
+            "bytes": len(audio_data),
+        }

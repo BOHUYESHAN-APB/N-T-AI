@@ -187,6 +187,13 @@ class _SystemScreenState extends State<SystemScreen> {
             value: controller.settings.showAgentThoughts,
             onChanged: controller.settings.agentEnabled ? (v) => controller.setAgentShowThoughts(v) : null,
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.voice_over_off),
+            title: const Text('禁用心里描写'),
+            subtitle: const Text('不显示括号内旁白/动作，并提示主脑不要输出'),
+            value: controller.settings.suppressInnerMonologue,
+            onChanged: (v) => controller.setSuppressInnerMonologue(v),
+          ),
           
           const Divider(),
           // Vision configuration

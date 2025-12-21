@@ -79,35 +79,27 @@ class BrainService {
 
   AudioPlayer? _audioPlayer;
 
-  Future<void> _playTtsBytes(Uint8List bytes) async {
-    _ttsController.add(bytes);
+  bool _looksLikeWav(Uint8List bytes) {
+    if (bytes.length < 12) return false;
+    return bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x41 &&
+        bytes[10] == 0x56 &&
+        bytes[11] == 0x45;
+  }
 
-    final tempDir = await getTemporaryDirectory();
-    final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
-    await tempFile.writeAsBytes(bytes);
-    try {
-      _audioPlayer ??= AudioPlayer();
-      final completer = Completer<void>();
-      StreamSubscription<void>? sub;
-      sub = _audioPlayer!.onPlayerComplete.listen((_) {
-        sub?.cancel();
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      });
-
-      await _audioPlayer!.play(DeviceFileSource(tempFile.path));
-      await completer.future;
-    } catch (e) {
-      debugPrint('AudioPlayer error (ignored): $e');
-    }
-
+  Future<void> _broadcastTtsBytes(Uint8List bytes) async {
     unawaited(() async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
-        final urlStr = backendUrl.endsWith('/') ? backendUrl.substring(0, backendUrl.length - 1) : backendUrl;
-        print('[BrainService] Broadcasting audio to Live2D via Backend: $urlStr/api/live2d/broadcast/audio');
+        final backendUrl =
+            prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+        final urlStr = backendUrl.endsWith('/')
+            ? backendUrl.substring(0, backendUrl.length - 1)
+            : backendUrl;
         final response = await http.post(
           Uri.parse('$urlStr/api/live2d/broadcast/audio'),
           headers: {'Content-Type': 'application/json'},
@@ -130,6 +122,32 @@ class BrainService {
     }());
   }
 
+  Future<void> _playTtsBytes(Uint8List bytes) async {
+    _ttsController.add(bytes);
+
+    final tempDir = await getTemporaryDirectory();
+    final ext = _looksLikeWav(bytes) ? 'wav' : 'mp3';
+    final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.$ext');
+    await tempFile.writeAsBytes(bytes);
+    try {
+      _audioPlayer ??= AudioPlayer();
+      final completer = Completer<void>();
+      StreamSubscription<void>? sub;
+      sub = _audioPlayer!.onPlayerComplete.listen((_) {
+        sub?.cancel();
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      });
+
+      await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+      await completer.future;
+    } catch (e) {
+      debugPrint('AudioPlayer error (ignored): $e');
+    }
+    await _broadcastTtsBytes(bytes);
+  }
+
   Future<void> speak(String text, AiProviderConfig ttsProvider) async {
     // CRITICAL: TTS MUST BE PERFORMED IN THE FRONTEND.
     // Do NOT move this logic to the backend. 
@@ -143,13 +161,46 @@ class BrainService {
     _ttsStopped = false;
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final ttsViaBackendDevice =
+          prefs.getBool('settings.audio.ttsViaBackendDevice') ?? false;
+      final ttsBackendDeviceIndex =
+          prefs.getInt('settings.audio.ttsBackendDeviceIndex');
+      final enablePythonBackend =
+          prefs.getBool('settings.backend.enabled') ?? false;
+      final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+      final backendBase = backendUrl.endsWith('/')
+          ? backendUrl.substring(0, backendUrl.length - 1)
+          : backendUrl;
+
       final bytes = await AiClient.generateSpeech(
         config: ttsProvider,
         text: cleanText,
         voice: ttsProvider.meta['voice'] as String?,
+        responseFormat: ttsViaBackendDevice ? 'wav' : 'mp3',
       );
 
       if (_ttsStopped || _ttsSessionId != sessionId) {
+        return;
+      }
+
+      if (ttsViaBackendDevice && enablePythonBackend) {
+        try {
+          await http
+              .post(
+                Uri.parse('$backendBase/api/audio/play'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'audio_b64': base64Encode(bytes),
+                  'format': 'wav',
+                  if (ttsBackendDeviceIndex != null)
+                    'device_index': ttsBackendDeviceIndex,
+                }),
+              )
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {}
+        _ttsController.add(bytes);
+        await _broadcastTtsBytes(bytes);
         return;
       }
 
@@ -173,12 +224,25 @@ class BrainService {
     _ttsStopped = false;
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final ttsViaBackendDevice =
+          prefs.getBool('settings.audio.ttsViaBackendDevice') ?? false;
+      final ttsBackendDeviceIndex =
+          prefs.getInt('settings.audio.ttsBackendDeviceIndex');
+      final enablePythonBackend =
+          prefs.getBool('settings.backend.enabled') ?? false;
+      final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+      final backendBase = backendUrl.endsWith('/')
+          ? backendUrl.substring(0, backendUrl.length - 1)
+          : backendUrl;
+
       final tasks = <Future<Uint8List>>[];
       for (final part in cleanedParts) {
         tasks.add(AiClient.generateSpeech(
           config: ttsProvider,
           text: part,
           voice: ttsProvider.meta['voice'] as String?,
+          responseFormat: ttsViaBackendDevice ? 'wav' : 'mp3',
         ));
       }
 
@@ -191,6 +255,25 @@ class BrainService {
       for (final bytes in results) {
         if (_ttsStopped || _ttsSessionId != sessionId) {
           break;
+        }
+        if (ttsViaBackendDevice && enablePythonBackend) {
+          try {
+            await http
+                .post(
+                  Uri.parse('$backendBase/api/audio/play'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({
+                    'audio_b64': base64Encode(bytes),
+                    'format': 'wav',
+                    if (ttsBackendDeviceIndex != null)
+                      'device_index': ttsBackendDeviceIndex,
+                  }),
+                )
+                .timeout(const Duration(seconds: 5));
+          } catch (_) {}
+          _ttsController.add(bytes);
+          await _broadcastTtsBytes(bytes);
+          continue;
         }
         await _playTtsBytes(bytes);
       }
@@ -215,6 +298,54 @@ class BrainService {
     // CRITICAL: STT MUST BE PERFORMED IN THE FRONTEND.
     // Audio recording and initial processing happens locally.
     return await AiClient.transcribe(config: sttProvider, filePath: filePath);
+  }
+
+  Future<String> captureSystemLoopbackToFile({
+    double durationSeconds = 5.0,
+    int? deviceIndex,
+    int samplerate = 48000,
+    int channels = 2,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
+    if (!enablePythonBackend) {
+      throw Exception('未启用 Python 后端');
+    }
+
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+    final backendBase = backendUrl.endsWith('/')
+        ? backendUrl.substring(0, backendUrl.length - 1)
+        : backendUrl;
+
+    final resp = await http
+        .post(
+          Uri.parse('$backendBase/api/audio/loopback/capture'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'duration_seconds': durationSeconds,
+            if (deviceIndex != null) 'device_index': deviceIndex,
+            'samplerate': samplerate,
+            'channels': channels,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('回环采集失败: HTTP ${resp.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(resp.bodyBytes));
+    final b64 = (data is Map ? data['audio_b64'] : null)?.toString();
+    if (b64 == null || b64.isEmpty) {
+      throw Exception('回环采集失败: 无音频数据');
+    }
+    final bytes = base64Decode(b64);
+
+    final tempDir = await getTemporaryDirectory();
+    final path =
+        '${tempDir.path}/loopback_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final file = File(path);
+    await file.writeAsBytes(bytes, flush: true);
+    return path;
   }
 
   // Helper to determine temperature based on user intent
@@ -299,6 +430,23 @@ class BrainService {
         .replaceAll(RegExp(r'[ \t]+\n'), '\n')
         .replaceAll(RegExp(r'\n{3,}'), '\n\n')
         .trimRight();
+  }
+
+  String _stripInnerMonologue(String text) {
+    var out = text.replaceAll(RegExp(r'（[^）]*）', dotAll: true), '');
+    out = out.replaceAllMapped(
+      RegExp(r'(?<!\])\(([^)]*)\)', dotAll: true),
+      (m) {
+        final inner = m.group(1) ?? '';
+        final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(inner);
+        if (hasCjk && inner.trim().length <= 40) return '';
+        return m.group(0) ?? '';
+      },
+    );
+    return out
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
   }
 
   Future<void> _runInitiativeCheck() async {
@@ -388,8 +536,8 @@ Based on these comments, do you want to proactively say something to the audienc
   }) async {
     _statusController.add("Thinking...");
     
-    String finalResponse = ""; // Defined here to be accessible throughout the method
-    AiResponse? serverResponse; // Capture full response
+    String finalResponse = "";
+    late final AiResponse serverResponse;
     
     // Determine dynamic temperature
     final dynamicTemperature = _determineTemperature(userMessage);
@@ -399,6 +547,8 @@ Based on these comments, do you want to proactively say something to the audienc
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
     final prefs = await SharedPreferences.getInstance();
     final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
+    final suppressInnerMonologue =
+        prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
     final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
     final isServerMode = backendEnabled;
 
@@ -453,12 +603,15 @@ Based on these comments, do you want to proactively say something to the audienc
         messages,
         usageType: 'main',
         temperature: dynamicTemperature,
-        providerOverride: providerOverride,
+        providerOverride: providerConfig,
         sessionId: sessionId,
       );
       String response = aiResponse.content;
       if (!allowEmojis) {
         response = _stripEmojis(response);
+      }
+      if (suppressInnerMonologue) {
+        response = _stripInnerMonologue(response);
       }
 
       if (aiResponse.reasoningContent != null) {
@@ -736,11 +889,6 @@ Based on these comments, do you want to proactively say something to the audienc
     }
     
     // 7. Auto-Compression Check
-    // Simple heuristic: if context has > 15 messages, try to compress
-    if (_context.length > 15) {
-      _compressContext();
-    }
-
     _statusController.add(""); // Clear status
     
     // Construct AiResponse including reasoning/tool calls if available
@@ -757,13 +905,11 @@ Based on these comments, do you want to proactively say something to the audienc
     
     // We know serverResponse is not null here because if it failed, we returned in catch block.
     return AiResponse(
-        content: finalResponse,
-        emotion: serverResponse.emotion,
-        reasoningContent: serverResponse.reasoningContent,
-        toolCalls: serverResponse.toolCalls
+      content: finalResponse,
+      emotion: serverResponse.emotion,
+      reasoningContent: serverResponse.reasoningContent,
+      toolCalls: serverResponse.toolCalls,
     );
-    
-    return AiResponse(content: finalResponse);
   }
 
   // Remove fenced/inlined expression payloads from a string

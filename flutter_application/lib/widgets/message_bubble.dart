@@ -159,7 +159,14 @@ class MessageBubble extends StatelessWidget {
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
 
     // Parse content into blocks (Text or Image)
-    final blocks = _parseMessageBlocks(message.text, isMine: isMine);
+    final suppressInnerMonologue = !isMine && settings.suppressInnerMonologue;
+    final enableThoughtParsing = !isMine && !settings.suppressInnerMonologue;
+    final blocks = _parseMessageBlocks(
+      message.text,
+      isMine: isMine,
+      enableThoughtParsing: enableThoughtParsing,
+      suppressInnerMonologue: suppressInnerMonologue,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -463,7 +470,12 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  List<Map<String, dynamic>> _parseMessageBlocks(String text, {required bool isMine}) {
+  List<Map<String, dynamic>> _parseMessageBlocks(
+    String text, {
+    required bool isMine,
+    required bool enableThoughtParsing,
+    required bool suppressInnerMonologue,
+  }) {
     // 1. Split by [IMAGE: ...] tags
     final regex = RegExp(r'\[IMAGE(?:_\d+)?:?\s*(.*?)\]', dotAll: true);
     final matches = regex.allMatches(text);
@@ -472,12 +484,15 @@ class MessageBubble extends StatelessWidget {
 
     void addTextBlock(String t) {
       if (t.trim().isEmpty) return;
-      final normalized = isMine ? t : t.replaceAll('[SPLIT]', '\n\n');
+      var normalized = isMine ? t : t.replaceAll('[SPLIT]', '\n\n');
+      if (suppressInnerMonologue) {
+        normalized = _stripInnerMonologueText(normalized);
+      }
       if (normalized.trim().isEmpty) return;
       blocks.add({
         'type': 'text',
         'content': normalized,
-        'segments': _parseTextSegments(normalized, enableThoughtParsing: !isMine),
+        'segments': _parseTextSegments(normalized, enableThoughtParsing: enableThoughtParsing),
       });
     }
 
@@ -508,6 +523,24 @@ class MessageBubble extends StatelessWidget {
     }
     
     return blocks;
+  }
+
+  String _stripInnerMonologueText(String text) {
+    var out = text.replaceAll(RegExp(r'（[^）]*）', dotAll: true), '');
+    out = out.replaceAllMapped(
+      RegExp(r'(?<!\])\(([^)]*)\)', dotAll: true),
+      (m) {
+        final inner = m.group(1) ?? '';
+        final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(inner);
+        if (hasCjk && inner.trim().length <= 40) return '';
+        return m.group(0) ?? '';
+      },
+    );
+    out = out
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
+    return out;
   }
 
   List<Map<String, dynamic>> _parseTextSegments(String text, {required bool enableThoughtParsing}) {
