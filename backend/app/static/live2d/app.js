@@ -537,6 +537,10 @@ function init_app(){
         chatContentWrapper.scrollTop = chatContentWrapper.scrollHeight;
     }
 
+    try {
+        window.appendMessage = appendMessage;
+    } catch (_) {}
+
     // Helper to update status bar
     function updateStatus(text, type = 'normal') {
         const processIndicator = document.getElementById('process-indicator');

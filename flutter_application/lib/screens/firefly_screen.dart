@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -28,6 +29,7 @@ import '../services/floating_window_factory.dart'; // Import FloatingWindowServi
 import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
 import '../core/services/websocket_service.dart'; // Import WebSocketService
 import '../plugins/plugin_manager.dart'; // Import PluginManager
+import '../services/logger_service.dart';
 
 class FireflyScreen extends StatefulWidget {
   const FireflyScreen({Key? key}) : super(key: key);
@@ -480,7 +482,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
     final enableAnyLive2D = settings.enableFloatingWindow || settings.showLive2D || settings.showLive2DMiniWindow;
     if (!enableAnyLive2D) return;
     final b64 = base64Encode(bytes);
-    final js = "if (window.playAudioBase64) window.playAudioBase64('$b64');";
+    final js =
+        "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; if (window.stopExternalAudio) window.stopExternalAudio(); if (window.playAudioBase64) window.playAudioBase64('$b64');";
     try {
       await _live2dController.executeJs(js);
     } catch (_) {}
@@ -562,7 +565,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       _messages
           .map(
             (m) => {
-              'role': m['role'].toString(),
+              'role': (m['role'] == 'stt_heard' ? 'user' : m['role']).toString(),
               'content': m['content'].toString(),
             },
           )
@@ -623,34 +626,66 @@ class _FireflyScreenState extends State<FireflyScreen> {
     );
     if (explicit.id.isNotEmpty) return explicit;
 
+    if (category == AiProviderCategory.stt) {
+      final local = providers.firstWhere(
+        (p) =>
+            p.category == category &&
+            p.enabled &&
+            p.kind == AiProvider.local &&
+            (p.meta['local_stt']?.toString() == 'windows_speech'),
+        orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+      );
+      if (local.id.isNotEmpty) return local;
+    }
+
     return null;
   }
 
   Future<void> _handleVoiceInput(String path, {bool fromLoopback = false}) async {
     if (!mounted) return;
     setState(() => _isLoading = true);
+    var keepFile = false;
     try {
       final sttProvider = _resolveAudioProvider(AiProviderCategory.stt);
-
       if (sttProvider == null) {
-        throw Exception('未配置 STT 服务 (No STT Provider)');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未配置 STT 服务')),
+        );
+        return;
       }
 
-      final text = await _brain.transcribe(path, sttProvider);
+      logger.info(
+        '语音转写开始: fromLoopback=$fromLoopback provider=${sttProvider.name} kind=${sttProvider.kind} file=$path',
+      );
+      final text = (await _brain.transcribe(path, sttProvider)).trim();
       if (text.isNotEmpty) {
+        logger.info(
+          '语音转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
+        );
         _controller.text = text;
         _sendMessage(uiRole: fromLoopback ? 'stt_heard' : 'user');
+      } else {
+        keepFile = true;
+        logger.error(
+          '语音转写结果为空（已保留音频文件）：fromLoopback=$fromLoopback provider=${sttProvider.name} file=$path',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('未识别到文字（转写结果为空，已保留音频文件）：$path')),
+        );
       }
     } catch (e) {
+      logger.error('语音输入失败', e);
       if (mounted)
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
     } finally {
       try {
-        final f = File(path);
-        if (await f.exists()) {
-          await f.delete();
+        if (!keepFile) {
+          final f = File(path);
+          if (await f.exists()) {
+            await f.delete();
+          }
         }
       } catch (_) {}
       if (mounted) setState(() => _isLoading = false);
@@ -661,15 +696,61 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (!mounted) return;
     if (_isLoading || _isLoopbackCapturing) return;
     setState(() => _isLoopbackCapturing = true);
+    String? path;
+    var keepFile = false;
     try {
       final settings = SettingsScope.of(context).settings;
-      final path = await _brain.captureSystemLoopbackToFile(
-        durationSeconds: settings.sttLoopbackDurationSeconds.toDouble(),
-        deviceIndex: settings.sttLoopbackDeviceIndex,
+      final sttProvider = _resolveAudioProvider(AiProviderCategory.stt);
+      if (sttProvider == null) {
+        throw Exception('未配置 STT 服务');
+      }
+      if (!settings.enablePythonBackend) {
+        throw Exception('未启用 Python 后端');
+      }
+
+      String text = '';
+      try {
+        path = await _brain.captureSystemLoopbackToFile(
+          durationSeconds: settings.sttLoopbackDurationSeconds.toDouble(),
+          deviceIndex: settings.sttLoopbackDeviceIndex,
+          samplerate: 16000,
+          channels: 1,
+        );
+        logger.info(
+          '系统回环转写开始: provider=${sttProvider.name} kind=${sttProvider.kind} device=${settings.sttLoopbackDeviceIndex ?? 'default'} file=$path',
+        );
+        text = (await _brain.transcribe(path, sttProvider)).trim();
+      } finally {
+        try {
+          if (path != null && !keepFile) {
+            final f = File(path);
+            if (await f.exists()) {
+              await f.delete();
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (text.isEmpty) {
+        if (!mounted) return;
+        keepFile = true;
+        logger.error(
+          '系统回环转写结果为空（已保留音频文件）：provider=${sttProvider.name} device=${settings.sttLoopbackDeviceIndex ?? 'default'} file=$path',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('未识别到文字（转写结果为空，已保留音频文件）：$path')),
+        );
+        return;
+      }
+
+      logger.info(
+        '系统回环转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
       );
-      await _handleVoiceInput(path, fromLoopback: true);
+      _controller.text = text;
+      _sendMessage(uiRole: 'stt_heard');
     } catch (e) {
       if (!mounted) return;
+      logger.error('系统回环监听失败', e);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('系统回环监听失败: $e')));
     } finally {
@@ -700,7 +781,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     // Save user message
     await _chatHistory.addMessage(
       _currentSessionId!,
-      'user',
+      uiRole,
       text.isEmpty ? '[图片]' : text,
     );
 
@@ -715,6 +796,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
     try {
       final settings = SettingsScope.of(context).settings;
       String response;
+      logger.info(
+        '发送到AI: uiRole=$uiRole session=${_currentSessionId ?? ''} textLen=${text.length} hasImage=${_pendingImageBytes != null}',
+      );
 
       // Define the generation task
       Future<AiResponse> generationTask() async {
@@ -767,7 +851,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
               final visionMessages = _messages
                   .map(
                     (m) => {
-                      'role': m['role'].toString(),
+                      'role':
+                          (m['role'] == 'stt_heard' ? 'user' : m['role']).toString(),
                       'content': m['content'].toString(),
                     },
                   )
@@ -833,6 +918,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
             context,
           ).selectProviderForNextCall(category: AiProviderCategory.llm);
 
+          logger.info(
+            'LLM provider选择: ${provider?.name ?? 'null'} (${provider?.id ?? ''})',
+          );
           final result = await _brain.processMessage(
             text,
             agentEnabled: settings.agentEnabled,
@@ -865,6 +953,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
       final aiResponse = result as AiResponse;
       response = aiResponse.content;
+      if (response.trim().isEmpty) {
+        logger.error(
+          'AI 回复为空: uiRole=$uiRole session=${_currentSessionId ?? ''} textLen=${text.length}',
+        );
+        throw Exception('AI 回复为空');
+      }
 
       if (mounted) {
         var cleanedResponse = _stripExpressionBlocks(response);
@@ -955,6 +1049,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         }
       }
     } catch (e) {
+      logger.error('AI 生成失败', e);
       if (mounted && _isLoading) {
         // Only show error if not interrupted/cleared
         setState(() {
@@ -1064,7 +1159,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   void _editMessage(int index) async {
     if (_currentSessionId == null) return;
     final msg = _messages[index];
-    if (msg['role'] != 'user') return;
+    if (msg['role'] != 'user' && msg['role'] != 'stt_heard') return;
 
     final content = msg['content'] as String;
     final createdAt = msg['created_at'] as DateTime;
@@ -1849,7 +1944,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
       cacheExtent: 500,
       itemBuilder: (context, index) {
         final msg = _messages[index];
-        final isUser = msg['role'] == 'user';
+        final role = msg['role']?.toString() ?? '';
+        final isUser = role == 'user' || role == 'stt_heard';
         final time = msg['created_at'] as DateTime?;
         final timeStr = time != null ? _formatMessageTimestamp(time) : '';
 

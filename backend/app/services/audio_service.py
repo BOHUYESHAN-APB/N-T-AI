@@ -278,15 +278,110 @@ class AudioService:
             "devices": devices,
         }
 
-    def capture_loopback_wav_bytes(
+    def _wasapi_loopback_supported(self, sd) -> bool:
+        try:
+            import inspect
+
+            sig = inspect.signature(sd.WasapiSettings)
+            return "loopback" in sig.parameters
+        except Exception:
+            return False
+
+    def resolve_input_device_index_for_output(self, device_index: Optional[int]) -> Optional[int]:
+        if device_index is None:
+            return None
+
+        import re
+        from difflib import SequenceMatcher
+
+        sd = self._require_sounddevice()
+        devices = sd.query_devices()
+        if device_index < 0 or device_index >= len(devices):
+            return None
+
+        src = dict(devices[device_index])
+        src_max_in = int(src.get("max_input_channels") or 0)
+        if src_max_in > 0:
+            return device_index
+
+        src_name = str(src.get("name") or "").strip()
+        if not src_name:
+            return None
+
+        src_hostapi = src.get("hostapi")
+        src_lower = src_name.lower()
+
+        def _expected_input_name(s: str) -> str:
+            s = s.lower()
+            s = s.replace("cable in", "cable out")
+            s = s.replace("cable input", "cable output")
+            s = s.replace("voicemeeter input", "voicemeeter output")
+            s = s.replace("input", "output")
+            s = s.replace("播放", "录音")
+            return s
+
+        def _base_norm(s: str) -> str:
+            s = s.lower()
+            s = re.sub(r"\(.*?\)", "", s)
+            s = s.replace("cable in", "cable")
+            s = s.replace("cable out", "cable")
+            s = s.replace("cable input", "cable")
+            s = s.replace("cable output", "cable")
+            s = s.replace("voicemeeter input", "voicemeeter")
+            s = s.replace("voicemeeter output", "voicemeeter")
+            s = s.replace("input", "")
+            s = s.replace("output", "")
+            s = s.replace("播放", "")
+            s = s.replace("录音", "")
+            s = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", s)
+            return s
+
+        expected = _expected_input_name(src_lower)
+        expected_base = _base_norm(expected)
+
+        best_idx: Optional[int] = None
+        best_score = 0.0
+
+        for idx, dev in enumerate(devices):
+            d = dict(dev)
+            max_in = int(d.get("max_input_channels") or 0)
+            if max_in <= 0:
+                continue
+            name = str(d.get("name") or "").strip()
+            if not name:
+                continue
+            lower = name.lower()
+
+            score = 0.0
+            if expected and expected in lower:
+                score += 2.0
+
+            score += SequenceMatcher(None, expected, lower).ratio()
+            score += 1.5 * SequenceMatcher(None, expected_base, _base_norm(lower)).ratio()
+
+            if src_hostapi is not None and d.get("hostapi") == src_hostapi:
+                score += 0.3
+
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        if best_idx is None:
+            return None
+        if best_score < 1.2:
+            return None
+        return best_idx
+
+    def capture_loopback_wav_bytes_with_info(
         self,
         duration_seconds: float,
         device_index: Optional[int] = None,
         samplerate: int = 48000,
         channels: int = 2,
         dtype: str = "int16",
-    ) -> bytes:
+    ) -> Dict[str, Any]:
         import io
+        import time
         import wave
 
         sd = self._require_sounddevice()
@@ -295,42 +390,329 @@ class AudioService:
             raise ValueError("duration_seconds must be > 0")
         if duration_seconds > 30:
             raise ValueError("duration_seconds too large")
-
         if channels <= 0 or channels > 8:
             raise ValueError("invalid channels")
-
         if dtype != "int16":
             raise ValueError("only int16 is supported")
 
-        extra = sd.WasapiSettings(loopback=True)
+        requested_device_index = device_index
+        if requested_device_index is None:
+            try:
+                _, default_out = sd.default.device
+                if isinstance(default_out, (int, float)) and int(default_out) >= 0:
+                    requested_device_index = int(default_out)
+            except Exception:
+                requested_device_index = None
+
+        devices = None
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            devices = None
+
+        def _device_default_sr(idx: Optional[int]) -> Optional[int]:
+            if idx is None:
+                return None
+            try:
+                if devices is None:
+                    return None
+                if idx < 0 or idx >= len(devices):
+                    return None
+                d = dict(devices[idx])
+                sr = d.get("default_samplerate")
+                sr = int(sr) if isinstance(sr, (int, float)) else None
+                return sr if sr and sr > 0 else None
+            except Exception:
+                return None
+
+        extra_settings = None
+        capture_mode = None
+        capture_device_index = None
+
+        if self._wasapi_loopback_supported(sd):
+            if requested_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            extra_settings = sd.WasapiSettings(loopback=True)
+            capture_mode = "wasapi_loopback"
+            capture_device_index = requested_device_index
+        else:
+            if requested_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            capture_device_index = self.resolve_input_device_index_for_output(requested_device_index)
+            if capture_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            capture_mode = "input_device"
+
         chunks: List[bytes] = []
 
-        def callback(indata, frames, time, status):
+        def callback(indata, frames, time_info, status):
             if indata:
                 chunks.append(bytes(indata))
 
-        with sd.RawInputStream(
-            samplerate=samplerate,
-            channels=channels,
-            dtype=dtype,
-            device=device_index,
-            extra_settings=extra,
-            callback=callback,
-        ):
-            sd.sleep(int(duration_seconds * 1000))
+        used_samplerate = int(samplerate)
+        try:
+            stream_kwargs = {
+                "samplerate": used_samplerate,
+                "channels": channels,
+                "dtype": dtype,
+                "device": capture_device_index,
+                "callback": callback,
+            }
+            if extra_settings is not None:
+                stream_kwargs["extra_settings"] = extra_settings
+            with sd.RawInputStream(**stream_kwargs):
+                sd.sleep(int(duration_seconds * 1000))
+        except Exception:
+            fallback_sr = _device_default_sr(capture_device_index)
+            if fallback_sr and fallback_sr != used_samplerate:
+                used_samplerate = int(fallback_sr)
+                chunks = []
+                stream_kwargs = {
+                    "samplerate": used_samplerate,
+                    "channels": channels,
+                    "dtype": dtype,
+                    "device": capture_device_index,
+                    "callback": callback,
+                }
+                if extra_settings is not None:
+                    stream_kwargs["extra_settings"] = extra_settings
+                with sd.RawInputStream(**stream_kwargs):
+                    sd.sleep(int(duration_seconds * 1000))
+            else:
+                raise
 
         raw_audio = b"".join(chunks)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(channels)
             wf.setsampwidth(2)
-            wf.setframerate(samplerate)
+            wf.setframerate(used_samplerate)
             wf.writeframes(raw_audio)
+
+        capture_device_name = None
+        try:
+            if devices is not None and 0 <= int(capture_device_index) < len(devices):
+                capture_device_name = str(dict(devices[int(capture_device_index)]).get("name") or "")
+        except Exception:
+            capture_device_name = None
+
+        return {
+            "wav_bytes": buf.getvalue(),
+            "requested": {"device_index": requested_device_index},
+            "used": {
+                "device_index": capture_device_index,
+                "samplerate": used_samplerate,
+                "channels": channels,
+                "dtype": dtype,
+                "mode": capture_mode,
+                "device_name": capture_device_name,
+            },
+        }
+
+    def capture_loopback_wav_bytes(
+        self,
+        duration_seconds: float,
+        device_index: Optional[int] = None,
+        samplerate: int = 48000,
+        channels: int = 2,
+        dtype: str = "int16",
+    ) -> bytes:
+        result = self.capture_loopback_wav_bytes_with_info(
+            duration_seconds=duration_seconds,
+            device_index=device_index,
+            samplerate=samplerate,
+            channels=channels,
+            dtype=dtype,
+        )
+        return result["wav_bytes"]
+
+    def measure_loopback_level(
+        self,
+        duration_seconds: float,
+        device_index: Optional[int] = None,
+        samplerate: int = 48000,
+        channels: int = 2,
+        dtype: str = "int16",
+    ) -> Dict[str, Any]:
+        import audioop
+        import time
+
+        sd = self._require_sounddevice()
+        requested_device_index = device_index
+        if requested_device_index is None:
+            try:
+                _, default_out = sd.default.device
+                if isinstance(default_out, (int, float)) and int(default_out) >= 0:
+                    requested_device_index = int(default_out)
+            except Exception:
+                requested_device_index = None
+
+        devices = sd.query_devices()
+        hostapis = sd.query_hostapis()
+
+        extra_settings = None
+        capture_mode = None
+        capture_device_index = None
+
+        if self._wasapi_loopback_supported(sd):
+            if requested_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            extra_settings = sd.WasapiSettings(loopback=True)
+            capture_mode = "wasapi_loopback"
+            capture_device_index = requested_device_index
+        else:
+            if requested_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            capture_device_index = self.resolve_input_device_index_for_output(requested_device_index)
+            if capture_device_index is None:
+                raise RuntimeError("loopback_not_supported")
+            capture_mode = "input_device"
+
+        dev_info = None
+        if capture_device_index is not None and 0 <= int(capture_device_index) < len(devices):
+            dev_info = dict(devices[int(capture_device_index)])
+
+        def _device_default_sr(idx: Optional[int]) -> Optional[int]:
+            if idx is None:
+                return None
+            try:
+                if idx < 0 or idx >= len(devices):
+                    return None
+                d = dict(devices[idx])
+                sr = d.get("default_samplerate")
+                sr = int(sr) if isinstance(sr, (int, float)) else None
+                return sr if sr and sr > 0 else None
+            except Exception:
+                return None
+
+        chunks: List[bytes] = []
+
+        def callback(indata, frames, time_info, status):
+            if indata:
+                chunks.append(bytes(indata))
+
+        used_samplerate = int(samplerate)
+        started_at = time.time()
+        try:
+            stream_kwargs = {
+                "samplerate": used_samplerate,
+                "channels": channels,
+                "dtype": dtype,
+                "device": capture_device_index,
+                "callback": callback,
+            }
+            if extra_settings is not None:
+                stream_kwargs["extra_settings"] = extra_settings
+            with sd.RawInputStream(**stream_kwargs):
+                sd.sleep(int(duration_seconds * 1000))
+        except Exception:
+            fallback_sr = _device_default_sr(int(capture_device_index) if capture_device_index is not None else None)
+            if fallback_sr and fallback_sr != used_samplerate:
+                used_samplerate = int(fallback_sr)
+                chunks = []
+                stream_kwargs = {
+                    "samplerate": used_samplerate,
+                    "channels": channels,
+                    "dtype": dtype,
+                    "device": capture_device_index,
+                    "callback": callback,
+                }
+                if extra_settings is not None:
+                    stream_kwargs["extra_settings"] = extra_settings
+                with sd.RawInputStream(**stream_kwargs):
+                    sd.sleep(int(duration_seconds * 1000))
+            else:
+                raise
+
+        raw_audio = b"".join(chunks)
+        elapsed_ms = int((time.time() - started_at) * 1000)
+
+        rms = audioop.rms(raw_audio, 2) if raw_audio else 0
+        peak = audioop.max(raw_audio, 2) if raw_audio else 0
+
+        hostapi_name = None
+        try:
+            if dev_info and dev_info.get("hostapi") is not None:
+                hi = int(dev_info.get("hostapi"))
+                if 0 <= hi < len(hostapis):
+                    hostapi_name = str(dict(hostapis[hi]).get("name") or "")
+        except Exception:
+            hostapi_name = None
+
+        return {
+            "requested": {"device_index": requested_device_index},
+            "used": {
+                "device_index": int(capture_device_index) if capture_device_index is not None else None,
+                "samplerate": used_samplerate,
+                "channels": channels,
+                "dtype": dtype,
+                "elapsed_ms": elapsed_ms,
+                "mode": capture_mode,
+            },
+            "level": {
+                "rms": int(rms),
+                "peak": int(peak),
+                "is_silent": bool(peak == 0 and rms == 0),
+                "bytes": len(raw_audio),
+            },
+            "device": {
+                "name": (str(dev_info.get("name")) if dev_info else None),
+                "hostapi": (int(dev_info.get("hostapi")) if dev_info and dev_info.get("hostapi") is not None else None),
+                "hostapi_name": hostapi_name,
+                "default_samplerate": (int(dev_info.get("default_samplerate")) if dev_info and isinstance(dev_info.get("default_samplerate"), (int, float)) else None),
+                "max_input_channels": (int(dev_info.get("max_input_channels")) if dev_info and isinstance(dev_info.get("max_input_channels"), (int, float)) else None),
+                "max_output_channels": (int(dev_info.get("max_output_channels")) if dev_info and isinstance(dev_info.get("max_output_channels"), (int, float)) else None),
+            },
+        }
+
+    def generate_test_tone_wav_bytes(
+        self,
+        frequency_hz: float = 880.0,
+        duration_seconds: float = 0.6,
+        samplerate: int = 48000,
+        channels: int = 2,
+        amplitude: float = 0.15,
+    ) -> bytes:
+        import io
+        import math
+        import struct
+        import wave
+
+        sr = int(samplerate)
+        ch = int(channels)
+        if sr <= 0:
+            raise ValueError("invalid samplerate")
+        if ch <= 0 or ch > 8:
+            raise ValueError("invalid channels")
+        if duration_seconds <= 0 or duration_seconds > 5:
+            raise ValueError("invalid duration_seconds")
+
+        amp = float(amplitude)
+        if amp <= 0:
+            amp = 0.05
+        if amp > 0.95:
+            amp = 0.95
+
+        total_frames = int(sr * float(duration_seconds))
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(ch)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            frames = bytearray()
+            for i in range(total_frames):
+                t = i / sr
+                v = math.sin(2.0 * math.pi * float(frequency_hz) * t)
+                s = int(max(-1.0, min(1.0, v * amp)) * 32767)
+                packed = struct.pack("<h", s)
+                frames.extend(packed * ch)
+            wf.writeframes(bytes(frames))
         return buf.getvalue()
 
     def play_wav_bytes(self, wav_bytes: bytes, device_index: Optional[int] = None) -> Dict[str, Any]:
         import io
         import wave
+        import audioop
 
         sd = self._require_sounddevice()
 
@@ -341,22 +723,73 @@ class AudioService:
             frame_count = wf.getnframes()
             audio_data = wf.readframes(frame_count)
 
-        if sampwidth != 2:
-            raise ValueError("only 16-bit PCM wav is supported")
+        def _try_play(raw_bytes: bytes, sr: int, ch: int) -> None:
+            with sd.RawOutputStream(
+                samplerate=sr,
+                channels=ch,
+                dtype="int16",
+                device=device_index,
+            ) as stream:
+                stream.write(raw_bytes)
 
-        with sd.RawOutputStream(
-            samplerate=samplerate,
-            channels=channels,
-            dtype="int16",
-            device=device_index,
-        ) as stream:
-            stream.write(audio_data)
+        try:
+            if sampwidth != 2:
+                raise ValueError("only 16-bit PCM wav is supported")
+            _try_play(audio_data, samplerate, channels)
+            used_sr = samplerate
+            used_ch = channels
+            converted = False
+            target_sr = samplerate
+            target_ch = channels
+        except Exception:
+            data16 = audio_data
+            width = int(sampwidth)
+            if width != 2:
+                data16 = audioop.lin2lin(data16, width, 2)
+
+            target_sr = int(samplerate)
+            target_ch = int(channels)
+            try:
+                if device_index is not None:
+                    dev = sd.query_devices(device_index)
+                    dev_sr = dev.get("default_samplerate")
+                    dev_sr = int(dev_sr) if isinstance(dev_sr, (int, float)) else 0
+                    if dev_sr > 0:
+                        target_sr = dev_sr
+                    max_out = int(dev.get("max_output_channels") or 0)
+                    if max_out > 0:
+                        target_ch = min(max_out, 2)
+                        if target_ch <= 0:
+                            target_ch = channels
+            except Exception:
+                target_sr = int(samplerate)
+                target_ch = int(channels)
+
+            if channels != target_ch:
+                if channels == 1 and target_ch == 2:
+                    data16 = audioop.tostereo(data16, 2, 1.0, 1.0)
+                elif channels == 2 and target_ch == 1:
+                    data16 = audioop.tomono(data16, 2, 0.5, 0.5)
+                else:
+                    target_ch = int(channels)
+
+            if samplerate != target_sr:
+                data16, _ = audioop.ratecv(data16, 2, target_ch, int(samplerate), int(target_sr), None)
+
+            _try_play(data16, int(target_sr), int(target_ch))
+            used_sr = int(target_sr)
+            used_ch = int(target_ch)
+            converted = True
 
         return {
-            "samplerate": samplerate,
-            "channels": channels,
+            "device_index": device_index,
+            "samplerate": used_sr,
+            "channels": used_ch,
             "frames": frame_count,
             "bytes": len(audio_data),
+            "source": {"samplerate": samplerate, "channels": channels, "sampwidth": sampwidth},
+            "target": {"samplerate": int(target_sr), "channels": int(target_ch)},
+            "converted": converted,
         }
 
     def resolve_output_device_index(self, device_index: Optional[int]) -> Optional[int]:

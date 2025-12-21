@@ -762,7 +762,59 @@ class _SystemScreenState extends State<SystemScreen> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.4)),
                   ),
-                  child: const Text('Aa 这是一段预览文本 Preview • 预览 • プレビュー • 미리보기 0123456789\n标题示例 Title Sample\n聊天示例：你好，这是一个聊天气泡。'),
+                  child: Builder(
+                    builder: (context) {
+                      final baseFam = (s.baseFontMode == BaseFontModeOption.miSansPreferred) ? 'MiSansVF' : null;
+                      final decoFam = (s.decoFamily == DecorativeFontFamily.fzg)
+                          ? 'FZG'
+                          : (s.decoFamily == DecorativeFontFamily.nfdcs)
+                              ? 'nfdcs'
+                              : null;
+                      final fallback = const ['MiSansVF', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Roboto'];
+                      final titleFam = (s.decoUseTitles && decoFam != null) ? decoFam : baseFam;
+                      final bubbleFam = (s.decoUseBubbles && decoFam != null) ? decoFam : baseFam;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Aa 这是一段预览文本 Preview • 预览 • プレビュー • 미리보기 0123456789',
+                            style: TextStyle(
+                              fontSize: 13 * s.textScale,
+                              fontFamily: baseFam,
+                              fontFamilyFallback: fallback,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '标题示例 Title Sample',
+                            style: TextStyle(
+                              fontSize: 18 * s.textScale,
+                              fontWeight: FontWeight.w700,
+                              fontFamily: titleFam,
+                              fontFamilyFallback: fallback,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '聊天示例：你好，这是一个聊天气泡。',
+                              style: TextStyle(
+                                fontSize: 14 * s.textScale,
+                                fontFamily: bubbleFam,
+                                fontFamilyFallback: fallback,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 8),

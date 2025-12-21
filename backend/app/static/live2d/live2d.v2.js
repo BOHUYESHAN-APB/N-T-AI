@@ -99,6 +99,7 @@ class Live2DManager {
             idleFromBackendEnabled: true,
             randomEyesEnabled: true,
             neuroBehaviorEnabled: true,
+            gazeEnabled: true,
         };
         try {
             const raw = localStorage.getItem('live2dAutonomyConfig');
@@ -138,66 +139,348 @@ class Live2DManager {
         this.audioSwayParams = params;
     }
 
+    _pickFirstSupportedParamId(core, candidates) {
+        if (!core || !candidates || candidates.length === 0) return null;
+        for (const id of candidates) {
+            try {
+                if (typeof core.getParameterIndex === 'function') {
+                    if (core.getParameterIndex(id) !== -1) return id;
+                }
+                if (core._parameterIds && Array.isArray(core._parameterIds)) {
+                    if (core._parameterIds.indexOf(id) !== -1) return id;
+                }
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    _readParamById(core, id) {
+        if (!core || !id) return null;
+        let idx = -1;
+        try {
+            if (typeof core.getParameterIndex === 'function') {
+                idx = core.getParameterIndex(id);
+            }
+            if (idx < 0 && core._parameterIds && Array.isArray(core._parameterIds)) {
+                idx = core._parameterIds.indexOf(id);
+            }
+        } catch (_) {
+            idx = -1;
+        }
+        if (idx < 0) return null;
+        try {
+            if (typeof core.getParameterValueByIndex === 'function') return core.getParameterValueByIndex(idx);
+            if (typeof core.getParamFloat === 'function') return core.getParamFloat(idx);
+        } catch (_) {}
+        return null;
+    }
+
+    _ensureEyeRig() {
+        if (this._eyeRig) return this._eyeRig;
+        const core = this.currentModel && this.currentModel.internalModel && this.currentModel.internalModel.coreModel;
+        if (!core) return null;
+
+        const x = this._pickFirstSupportedParamId(core, ['ParamEyeBallX', 'PARAM_EYE_BALL_X']);
+        const y = this._pickFirstSupportedParamId(core, ['ParamEyeBallY', 'PARAM_EYE_BALL_Y']);
+        const xL = this._pickFirstSupportedParamId(core, ['ParamEyeBallX_L', 'PARAM_EYE_BALL_X_L']);
+        const xR = this._pickFirstSupportedParamId(core, ['ParamEyeBallX_R', 'PARAM_EYE_BALL_X_R']);
+        const yL = this._pickFirstSupportedParamId(core, ['ParamEyeBallY_L', 'PARAM_EYE_BALL_Y_L']);
+        const yR = this._pickFirstSupportedParamId(core, ['ParamEyeBallY_R', 'PARAM_EYE_BALL_Y_R']);
+
+        this._eyeRig = { x, y, xL, xR, yL, yR };
+        if (!this._eyeAxisSign) {
+            this._eyeAxisSign = { xL: 1, xR: 1, yL: 1, yR: 1 };
+        }
+        return this._eyeRig;
+    }
+
+    _setEyeTarget(x, y) {
+        const rig = this._ensureEyeRig();
+        if (!rig) return;
+        if (!this.eyeParams) this.eyeParams = {};
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const xx = clamp(Number(x) || 0, -0.75, 0.75);
+        const yy = clamp(Number(y) || 0, -0.55, 0.55);
+
+        if (rig.x) this.eyeParams[rig.x] = xx;
+        if (rig.y) this.eyeParams[rig.y] = yy;
+
+        const sxL = (this._eyeAxisSign && typeof this._eyeAxisSign.xL === 'number') ? this._eyeAxisSign.xL : 1;
+        const sxR = (this._eyeAxisSign && typeof this._eyeAxisSign.xR === 'number') ? this._eyeAxisSign.xR : 1;
+        const syL = (this._eyeAxisSign && typeof this._eyeAxisSign.yL === 'number') ? this._eyeAxisSign.yL : 1;
+        const syR = (this._eyeAxisSign && typeof this._eyeAxisSign.yR === 'number') ? this._eyeAxisSign.yR : 1;
+
+        if (rig.xL) this.eyeParams[rig.xL] = xx * sxL;
+        if (rig.xR) this.eyeParams[rig.xR] = xx * sxR;
+        if (rig.yL) this.eyeParams[rig.yL] = yy * syL;
+        if (rig.yR) this.eyeParams[rig.yR] = yy * syR;
+
+        this._eyeTarget = { x: xx, y: yy };
+    }
+
+    _getGazeConfig() {
+        const cfg = (this.autonomyConfig && typeof this.autonomyConfig === 'object') ? this.autonomyConfig : {};
+        const toNum = (v, d) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : d;
+        };
+        return {
+            enabled: cfg.gazeEnabled !== false,
+            saccadeMsMin: Math.max(60, Math.min(420, toNum(cfg.gazeSaccadeMsMin, 120))),
+            saccadeMsMax: Math.max(80, Math.min(520, toNum(cfg.gazeSaccadeMsMax, 240))),
+            holdMsMin: Math.max(160, Math.min(6000, toNum(cfg.gazeHoldMsMin, 550))),
+            holdMsMax: Math.max(220, Math.min(8000, toNum(cfg.gazeHoldMsMax, 1800))),
+            returnMsMin: Math.max(80, Math.min(600, toNum(cfg.gazeReturnMsMin, 140))),
+            returnMsMax: Math.max(100, Math.min(900, toNum(cfg.gazeReturnMsMax, 260))),
+            restMsMin: Math.max(0, Math.min(3000, toNum(cfg.gazeRestMsMin, 180))),
+            restMsMax: Math.max(0, Math.min(5000, toNum(cfg.gazeRestMsMax, 900))),
+            xRange: Math.max(0.05, Math.min(0.95, toNum(cfg.gazeXRange, 0.75))),
+            yRange: Math.max(0.02, Math.min(0.65, toNum(cfg.gazeYRange, 0.40))),
+            headFollowEnabled: cfg.gazeHeadFollowEnabled !== false,
+            headFollowX: Math.max(0, Math.min(20, toNum(cfg.gazeHeadFollowX, 8.0))),
+            headFollowY: Math.max(0, Math.min(20, toNum(cfg.gazeHeadFollowY, 5.0))),
+            headFollowZ: Math.max(0, Math.min(10, toNum(cfg.gazeHeadFollowZ, 2.0))),
+        };
+    }
+
+    _randomBetween(min, max) {
+        const a = Number(min);
+        const b = Number(max);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+        if (b <= a) return a;
+        return a + Math.random() * (b - a);
+    }
+
+    _pickGazeTarget(cfg) {
+        const bias = () => {
+            const u = Math.random();
+            const v = Math.random();
+            const n = Math.min(u, v);
+            return (Math.random() < 0.5 ? -1 : 1) * n;
+        };
+        const x = bias() * cfg.xRange;
+        const y = bias() * cfg.yRange * 0.85;
+        return { x, y };
+    }
+
+    _applyGazeHeadFollow(x, y) {
+        const cfg = this._getGazeConfig();
+        if (!cfg.headFollowEnabled) return;
+        if (!this.currentModel) return;
+        if (this.mouseTrackingEnabled) return;
+        if (this.motionTimer || this.isIdleMotionPlaying || this.isEmotionChanging || this._proceduralMotionBusy) return;
+        if (this._agentBusyUntil && Date.now() < this._agentBusyUntil) return;
+        if (!this._gazeToken) this._gazeToken = this._ensureChannelToken('gaze');
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const xx = clamp(Number(x) || 0, -1, 1);
+        const yy = clamp(Number(y) || 0, -1, 1);
+        const params = {
+            ParamAngleX: clamp(-xx * cfg.headFollowX, -30, 30),
+            ParamAngleY: clamp(-yy * cfg.headFollowY, -30, 30),
+            ParamAngleZ: clamp(-xx * cfg.headFollowZ, -30, 30),
+        };
+        this.applyParameters(params, true, 'gaze', { token: this._gazeToken, lockMs: 120, expiresMs: 260, immediate: !this._coreOverrideInstalled });
+    }
+
+    _releaseGazeHeadFollow() {
+        if (!this._gazeToken) this._gazeToken = this._ensureChannelToken('gaze');
+        this.applyParameters({ ParamAngleX: null, ParamAngleY: null, ParamAngleZ: null }, true, 'gaze', { token: this._gazeToken, lockMs: 0, expiresMs: 0, immediate: !this._coreOverrideInstalled });
+    }
+
+    _startGazeStateMachine() {
+        const cfg = this._getGazeConfig();
+        if (!cfg.enabled) return;
+        if (this._gazeRAF) return;
+
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const start = (this._eyeTarget && Number.isFinite(this._eyeTarget.x) && Number.isFinite(this._eyeTarget.y)) ? this._eyeTarget : { x: 0, y: 0 };
+
+        this._gazeState = 'SACCADE';
+        this._gazeFrom = { x: start.x, y: start.y };
+        this._gazeTo = this._pickGazeTarget(cfg);
+        this._gazeStateStart = now;
+        this._gazeStateDur = this._randomBetween(cfg.saccadeMsMin, cfg.saccadeMsMax);
+        this._gazeNextAt = 0;
+
+        const step = (tNow) => {
+            const cfg2 = this._getGazeConfig();
+            if (!cfg2.enabled) {
+                this._gazeRAF = 0;
+                return;
+            }
+            if (this.mouseTrackingEnabled) {
+                this._releaseGazeHeadFollow();
+                this._gazeRAF = requestAnimationFrame(step);
+                return;
+            }
+
+            const busy = !this.currentModel || this.isSpeaking || this._proceduralMotionBusy || this.isEmotionChanging || this.motionTimer || this.isIdleMotionPlaying || (this._agentBusyUntil && Date.now() < this._agentBusyUntil);
+            if (busy) {
+                const a = (this._eyeTarget && Number.isFinite(this._eyeTarget.x) && Number.isFinite(this._eyeTarget.y)) ? this._eyeTarget : { x: 0, y: 0 };
+                const k = 0.18;
+                const x = a.x + (0 - a.x) * k;
+                const y = a.y + (0 - a.y) * k;
+                this._setEyeTarget(x, y);
+                this._releaseGazeHeadFollow();
+                this._gazeState = 'SACCADE';
+                this._gazeFrom = { x: x, y: y };
+                this._gazeTo = this._pickGazeTarget(cfg2);
+                this._gazeStateStart = tNow;
+                this._gazeStateDur = this._randomBetween(cfg2.saccadeMsMin, cfg2.saccadeMsMax);
+                this._gazeNextAt = tNow + 900;
+                this._gazeRAF = requestAnimationFrame(step);
+                return;
+            }
+
+            const elapsed = Math.max(0, tNow - (this._gazeStateStart || tNow));
+            const dur = Math.max(1, Number(this._gazeStateDur) || 1);
+            const p = Math.min(1, elapsed / dur);
+            const ease = 1 - (1 - p) * (1 - p);
+
+            if (this._gazeState === 'SACCADE' || this._gazeState === 'RETURN') {
+                const from = this._gazeFrom || { x: 0, y: 0 };
+                const to = this._gazeTo || { x: 0, y: 0 };
+                const x = from.x + (to.x - from.x) * ease;
+                const y = from.y + (to.y - from.y) * ease;
+                this._setEyeTarget(x, y);
+                this._applyGazeHeadFollow(x, y);
+                if (p >= 1) {
+                    if (this._gazeState === 'SACCADE') {
+                        this._gazeState = 'HOLD';
+                        this._gazeNextAt = tNow + this._randomBetween(cfg2.holdMsMin, cfg2.holdMsMax);
+                    } else {
+                        this._gazeState = 'REST';
+                        this._gazeNextAt = tNow + this._randomBetween(cfg2.restMsMin, cfg2.restMsMax);
+                    }
+                }
+            } else if (this._gazeState === 'HOLD') {
+                const to = this._gazeTo || { x: 0, y: 0 };
+                const micro = Math.sin((tNow / 1000) * 6.5) * 0.01;
+                const x = to.x + micro;
+                const y = to.y + micro * 0.7;
+                this._setEyeTarget(x, y);
+                this._applyGazeHeadFollow(x, y);
+                if (this._gazeNextAt && tNow >= this._gazeNextAt) {
+                    const cur = (this._eyeTarget && Number.isFinite(this._eyeTarget.x) && Number.isFinite(this._eyeTarget.y)) ? this._eyeTarget : to;
+                    this._gazeState = 'RETURN';
+                    this._gazeFrom = { x: cur.x, y: cur.y };
+                    this._gazeTo = { x: 0, y: 0 };
+                    this._gazeStateStart = tNow;
+                    this._gazeStateDur = this._randomBetween(cfg2.returnMsMin, cfg2.returnMsMax);
+                    this._gazeNextAt = 0;
+                }
+            } else {
+                if (this._gazeNextAt && tNow >= this._gazeNextAt) {
+                    const cur = (this._eyeTarget && Number.isFinite(this._eyeTarget.x) && Number.isFinite(this._eyeTarget.y)) ? this._eyeTarget : { x: 0, y: 0 };
+                    this._gazeState = 'SACCADE';
+                    this._gazeFrom = { x: cur.x, y: cur.y };
+                    this._gazeTo = this._pickGazeTarget(cfg2);
+                    this._gazeStateStart = tNow;
+                    this._gazeStateDur = this._randomBetween(cfg2.saccadeMsMin, cfg2.saccadeMsMax);
+                    this._gazeNextAt = 0;
+                }
+            }
+
+            this._gazeRAF = requestAnimationFrame(step);
+        };
+
+        this._gazeRAF = requestAnimationFrame(step);
+    }
+
+    _stopGazeStateMachine() {
+        if (this._gazeRAF) {
+            cancelAnimationFrame(this._gazeRAF);
+            this._gazeRAF = 0;
+        }
+        this._gazeState = null;
+        this._gazeFrom = null;
+        this._gazeTo = null;
+        this._gazeStateStart = 0;
+        this._gazeStateDur = 0;
+        this._gazeNextAt = 0;
+        this._releaseGazeHeadFollow();
+    }
+
+    async calibrateEyeRig() {
+        const model = this.currentModel;
+        const core = model && model.internalModel && model.internalModel.coreModel;
+        if (!model || !core || typeof model.focus !== 'function' || typeof model.getBounds !== 'function') return;
+        const rig = this._ensureEyeRig();
+        if (!rig || (!rig.xL || !rig.xR) && (!rig.yL || !rig.yR)) return;
+
+        const bounds = model.getBounds();
+        if (!bounds || typeof bounds.left !== 'number' || typeof bounds.right !== 'number' || typeof bounds.top !== 'number' || typeof bounds.bottom !== 'number') return;
+        const cx = (bounds.left + bounds.right) * 0.5;
+        const cy = (bounds.top + bounds.bottom) * 0.5;
+
+        const waitFrames = (n) => new Promise((resolve) => {
+            let i = 0;
+            const step = () => {
+                i += 1;
+                if (i >= n) resolve();
+                else requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+        });
+
+        try {
+            model.focus(cx, cy);
+            await waitFrames(4);
+
+            if (rig.xL && rig.xR) {
+                model.focus(bounds.right + 2000, cy);
+                await waitFrames(7);
+                const xL = this._readParamById(core, rig.xL);
+                const xR = this._readParamById(core, rig.xR);
+                if (Number.isFinite(xL) && Number.isFinite(xR) && Math.abs(xR) > 0.001) {
+                    const sR = Math.sign(xR) || 1;
+                    const sL = Math.sign(xL) || sR;
+                    this._eyeAxisSign.xR = sR;
+                    this._eyeAxisSign.xL = sL;
+                }
+            }
+
+            if (rig.yL && rig.yR) {
+                model.focus(cx, bounds.top - 2000);
+                await waitFrames(7);
+                const yL = this._readParamById(core, rig.yL);
+                const yR = this._readParamById(core, rig.yR);
+                if (Number.isFinite(yL) && Number.isFinite(yR) && Math.abs(yR) > 0.001) {
+                    const sR = Math.sign(yR) || 1;
+                    const sL = Math.sign(yL) || sR;
+                    this._eyeAxisSign.yR = sR;
+                    this._eyeAxisSign.yL = sL;
+                }
+            }
+        } catch (_) {}
+
+        try {
+            model.focus(cx, cy);
+            await waitFrames(4);
+        } catch (_) {}
+
+        if (this._eyeTarget) {
+            this._setEyeTarget(this._eyeTarget.x, this._eyeTarget.y);
+        }
+    }
+
     // [Eye Movement System]
     startRandomEyes() {
         if (this.autonomyConfig && this.autonomyConfig.randomEyesEnabled === false) return;
         if (this.eyeTimer) return;
-        console.log('[Live2D] Starting Random Eye Movements (Neuro-style)');
-        
-        const moveEyes = () => {
-            if (!this.currentModel) {
-                 this.eyeTimer = setTimeout(moveEyes, 1000);
-                 return;
-            }
-
-            // Neuro-style: Random quick glances (saccades)
-            // Range: -1 to 1
-            const targetX = (Math.random() - 0.5) * 1.0; // More subtle
-            const targetY = (Math.random() - 0.5) * 0.35; // More subtle
-            
-            // Duration of the glance
-            const duration = 180 + Math.random() * 240; 
-            
-            // Perform the movement using a simple tween simulation
-            const startX = this.eyeParams['ParamEyeBallX'] || 0;
-            const startY = this.eyeParams['ParamEyeBallY'] || 0;
-            const startTime = Date.now();
-            
-            const animate = () => {
-                const now = Date.now();
-                const progress = Math.min(1, (now - startTime) / duration);
-                // EaseOutQuad
-                const ease = 1 - (1 - progress) * (1 - progress);
-                
-                const x = startX + (targetX - startX) * ease;
-                const y = startY + (targetY - startY) * ease;
-                this.eyeParams['ParamEyeBallX'] = x;
-                this.eyeParams['ParamEyeBallY'] = y;
-                this.eyeParams['ParamEyeBallX_L'] = x;
-                this.eyeParams['ParamEyeBallX_R'] = x;
-                this.eyeParams['ParamEyeBallY_L'] = y;
-                this.eyeParams['ParamEyeBallY_R'] = y;
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                }
-            };
-            animate();
-
-            // Next movement in random time (1.5s to 6s)
-            const nextDelay = 1500 + Math.random() * 4500;
-            this.eyeTimer = setTimeout(moveEyes, nextDelay);
-        };
-        
-        moveEyes();
+        console.log('[Live2D] Starting Random Eye Movements (State Machine)');
+        this._startGazeStateMachine();
+        this.eyeTimer = setInterval(() => {}, 60000);
     }
 
     stopRandomEyes() {
         if (this.eyeTimer) {
-            clearTimeout(this.eyeTimer);
+            clearInterval(this.eyeTimer);
             this.eyeTimer = null;
         }
+        this._stopGazeStateMachine();
         this.eyeParams = {};
+        this._eyeTarget = { x: 0, y: 0 };
     }
 
     // [Neuro Behavior System]
@@ -724,6 +1007,42 @@ class Live2DManager {
                         this._microIdleLastApplied = {};
                     }
 
+                    const rig = this._eyeRig;
+                    if (rig) {
+                        const fixAxis = (idL, idR, sL, sR) => {
+                            const idxL = idL ? getParamIndex(idL) : -1;
+                            const idxR = idR ? getParamIndex(idR) : -1;
+                            if (idxL < 0 || idxR < 0) return;
+                            const vL = getDesiredOrCurrent(idxL);
+                            const vR = getDesiredOrCurrent(idxR);
+                            if (!Number.isFinite(vL) || !Number.isFinite(vR)) return;
+                            const aL = Math.abs(vL);
+                            const aR = Math.abs(vR);
+                            const maxA = Math.max(aL, aR);
+                            if (maxA < 0.18) return;
+
+                            const expectOpp = (typeof sL === 'number' && typeof sR === 'number' && sL !== sR);
+                            const sameSign = (Math.sign(vL) || 1) === (Math.sign(vR) || 1);
+                            if (expectOpp && sameSign) {
+                                const mag = Math.min(1, (aL + aR) * 0.5);
+                                const ssL = (typeof sL === 'number' ? sL : -1) || -1;
+                                const ssR = (typeof sR === 'number' ? sR : 1) || 1;
+                                setDesired(idxL, mag * ssL);
+                                setDesired(idxR, mag * ssR);
+                                return;
+                            }
+                            if (!expectOpp && !sameSign) {
+                                const avg = (vL + vR) * 0.5;
+                                setDesired(idxL, avg);
+                                setDesired(idxR, avg);
+                            }
+                        };
+
+                        const s = this._eyeAxisSign || {};
+                        fixAxis(rig.xL, rig.xR, s.xL, s.xR);
+                        fixAxis(rig.yL, rig.yR, s.yL, s.yR);
+                    }
+
                     for (const [idxStr, value] of Object.entries(desiredByIdx)) {
                         const idx = Number(idxStr);
                         if (!Number.isFinite(idx)) continue;
@@ -891,6 +1210,26 @@ class Live2DManager {
         }
         
         this.expressionOverrides[id] = value;
+        if (id === 'ParamEyeBallX' || id === 'PARAM_EYE_BALL_X') {
+            const rig = this._ensureEyeRig();
+            const v = Number(value);
+            if (rig && Number.isFinite(v)) {
+                const sxL = (this._eyeAxisSign && typeof this._eyeAxisSign.xL === 'number') ? this._eyeAxisSign.xL : 1;
+                const sxR = (this._eyeAxisSign && typeof this._eyeAxisSign.xR === 'number') ? this._eyeAxisSign.xR : 1;
+                if (rig.xL && this.expressionOverrides[rig.xL] === undefined) this.expressionOverrides[rig.xL] = v * sxL;
+                if (rig.xR && this.expressionOverrides[rig.xR] === undefined) this.expressionOverrides[rig.xR] = v * sxR;
+            }
+        }
+        if (id === 'ParamEyeBallY' || id === 'PARAM_EYE_BALL_Y') {
+            const rig = this._ensureEyeRig();
+            const v = Number(value);
+            if (rig && Number.isFinite(v)) {
+                const syL = (this._eyeAxisSign && typeof this._eyeAxisSign.yL === 'number') ? this._eyeAxisSign.yL : 1;
+                const syR = (this._eyeAxisSign && typeof this._eyeAxisSign.yR === 'number') ? this._eyeAxisSign.yR : 1;
+                if (rig.yL && this.expressionOverrides[rig.yL] === undefined) this.expressionOverrides[rig.yL] = v * syL;
+                if (rig.yR && this.expressionOverrides[rig.yR] === undefined) this.expressionOverrides[rig.yR] = v * syR;
+            }
+        }
         if (!this._overrideMeta) this._overrideMeta = {};
         const prev = this._overrideMeta[id] || {};
         this._overrideMeta[id] = { ...prev, store: 'expression', expiresAt: null };
@@ -1022,11 +1361,7 @@ class Live2DManager {
                 setParam('ParamCheek', 0.8);
                 setParam('ParamMouthForm', 0.3);
                 setParam('ParamEyeBallX', -0.3);
-                setParam('ParamEyeBallX_L', -0.3);
-                setParam('ParamEyeBallX_R', -0.3);
                 setParam('ParamEyeBallY', -0.2);
-                setParam('ParamEyeBallY_L', -0.2);
-                setParam('ParamEyeBallY_R', -0.2);
                 break;
             case 'thinking':
             case 'thinkingpose':
@@ -1222,8 +1557,10 @@ class Live2DManager {
             if (!Number.isNaN(v)) {
                 const vv = clamp(v, -1, 1);
                 mapped.ParamEyeBallX = vv;
-                mapped.ParamEyeBallX_L = vv;
-                mapped.ParamEyeBallX_R = vv;
+                const sxL = (this._eyeAxisSign && typeof this._eyeAxisSign.xL === 'number') ? this._eyeAxisSign.xL : 1;
+                const sxR = (this._eyeAxisSign && typeof this._eyeAxisSign.xR === 'number') ? this._eyeAxisSign.xR : 1;
+                mapped.ParamEyeBallX_L = vv * sxL;
+                mapped.ParamEyeBallX_R = vv * sxR;
             }
         }
         if (params && params.pupilY !== undefined) {
@@ -1231,8 +1568,10 @@ class Live2DManager {
             if (!Number.isNaN(v)) {
                 const vv = clamp(v, -1, 1);
                 mapped.ParamEyeBallY = vv;
-                mapped.ParamEyeBallY_L = vv;
-                mapped.ParamEyeBallY_R = vv;
+                const syL = (this._eyeAxisSign && typeof this._eyeAxisSign.yL === 'number') ? this._eyeAxisSign.yL : 1;
+                const syR = (this._eyeAxisSign && typeof this._eyeAxisSign.yR === 'number') ? this._eyeAxisSign.yR : 1;
+                mapped.ParamEyeBallY_L = vv * syL;
+                mapped.ParamEyeBallY_R = vv * syR;
             }
         }
         if (params && params.blush !== undefined) {
@@ -2509,6 +2848,9 @@ class Live2DManager {
             } catch (e) {
                 console.warn('安装核心参数覆盖失败:', e);
             }
+            try {
+                await this.calibrateEyeRig();
+            } catch (_) {}
 
             // 加载 FileReferences 与 EmotionMapping
             if (options.loadEmotionMapping !== false) {
@@ -2548,6 +2890,8 @@ class Live2DManager {
 
             // 启动待机动作调度器
             this.startIdleMotionScheduler();
+
+            try { this.reportFeatureCounts(); } catch (_) {}
 
             // 调用回调函数
             if (this.onModelLoaded) {
@@ -3579,6 +3923,77 @@ class Live2DManager {
         return caps;
     }
 
+    reportFeatureCounts() {
+        const proceduralMotions = [
+            'SlightSmile',
+            'Smile',
+            'MicroBodySway',
+            'BreathSigh',
+            'Sigh',
+            'EyeTwitch',
+            'Wink',
+            'CuteWink',
+            'ShyBlush',
+            'HeadTilt',
+            'Giggle',
+            'Curious',
+            'Nod',
+            'HeadShake',
+            'Search',
+            'LookAround',
+            'ThinkingPose',
+            'Surprised',
+            'HappyBounce',
+            'Pout',
+            'Sway',
+            'PuffCheeks',
+            'Sleepy',
+        ];
+
+        const proceduralExpressions = [
+            'Happy',
+            'Smile',
+            'Sad',
+            'Angry',
+            'Surprise',
+            'Surprised',
+            'Shy',
+            'ShyBlush',
+            'Thinking',
+            'ThinkingPose',
+        ];
+
+        const caps = this.getModelCapabilities();
+        const modelMotionKeys = Array.isArray(caps.motions) ? caps.motions : [];
+        const modelExprKeys = Array.isArray(caps.expressions) ? caps.expressions : [];
+
+        const emotionSet = new Set(['neutral', 'idle']);
+        proceduralMotions.forEach(k => emotionSet.add(k));
+        proceduralExpressions.forEach(k => emotionSet.add(k));
+        modelMotionKeys.forEach(k => emotionSet.add(k));
+        modelExprKeys.forEach(k => emotionSet.add(k));
+
+        const msg = [
+            '两期功能统计（当前模型）',
+            `- 第1期：眼轴自校准 + 智能叠加覆盖（解决斗鸡眼/左右眼方向不一致）`,
+            `- 第2期：注视点状态机（SACCADE/HOLD/RETURN）+ 头部联动 + 程序化动作/表情增强`,
+            `动作：程序化 ${proceduralMotions.length} 个；模型映射 ${modelMotionKeys.length} 个`,
+            `表情：程序化 ${proceduralExpressions.length} 个；模型映射 ${modelExprKeys.length} 个`,
+            `情绪/触发键（合并去重）：${emotionSet.size} 个`,
+        ].join('\n');
+
+        try {
+            if (typeof window !== 'undefined' && typeof window.appendMessage === 'function') {
+                window.appendMessage(msg, 'system', true);
+                return;
+            }
+        } catch (_) {}
+        try {
+            if (typeof logToScreen === 'function') logToScreen(msg);
+        } catch (_) {}
+        console.log(msg);
+    }
+
     // 主动控制视线（当眼神跟随关闭时使用）
     lookAt(x, y) {
         if (this.mouseTrackingEnabled) {
@@ -3619,6 +4034,7 @@ class Live2DManager {
             if (k === 'motion') return 3;
             if (k === 'agent') return 3;
             if (k === 'idle_agent') return 1;
+            if (k === 'gaze') return 0;
             if (k === 'expression') return 2;
             if (k === 'realtime_expression') return 1;
             if (k === 'persistent_expression') return 0;
@@ -3656,12 +4072,18 @@ class Live2DManager {
 
         const expandedParams = { ...(params || {}) };
         if (expandedParams.ParamEyeBallX !== undefined) {
-            if (expandedParams.ParamEyeBallX_L === undefined) expandedParams.ParamEyeBallX_L = expandedParams.ParamEyeBallX;
-            if (expandedParams.ParamEyeBallX_R === undefined) expandedParams.ParamEyeBallX_R = expandedParams.ParamEyeBallX;
+            const v = expandedParams.ParamEyeBallX;
+            const sxL = (this._eyeAxisSign && typeof this._eyeAxisSign.xL === 'number') ? this._eyeAxisSign.xL : 1;
+            const sxR = (this._eyeAxisSign && typeof this._eyeAxisSign.xR === 'number') ? this._eyeAxisSign.xR : 1;
+            if (expandedParams.ParamEyeBallX_L === undefined) expandedParams.ParamEyeBallX_L = (typeof v === 'number' ? v * sxL : v);
+            if (expandedParams.ParamEyeBallX_R === undefined) expandedParams.ParamEyeBallX_R = (typeof v === 'number' ? v * sxR : v);
         }
         if (expandedParams.ParamEyeBallY !== undefined) {
-            if (expandedParams.ParamEyeBallY_L === undefined) expandedParams.ParamEyeBallY_L = expandedParams.ParamEyeBallY;
-            if (expandedParams.ParamEyeBallY_R === undefined) expandedParams.ParamEyeBallY_R = expandedParams.ParamEyeBallY;
+            const v = expandedParams.ParamEyeBallY;
+            const syL = (this._eyeAxisSign && typeof this._eyeAxisSign.yL === 'number') ? this._eyeAxisSign.yL : 1;
+            const syR = (this._eyeAxisSign && typeof this._eyeAxisSign.yR === 'number') ? this._eyeAxisSign.yR : 1;
+            if (expandedParams.ParamEyeBallY_L === undefined) expandedParams.ParamEyeBallY_L = (typeof v === 'number' ? v * syL : v);
+            if (expandedParams.ParamEyeBallY_R === undefined) expandedParams.ParamEyeBallY_R = (typeof v === 'number' ? v * syR : v);
         }
 
         // Update overrides

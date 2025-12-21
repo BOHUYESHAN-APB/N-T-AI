@@ -18,6 +18,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
   final TextEditingController _baseCtl = TextEditingController();
   final TextEditingController _keyCtl = TextEditingController();
   final TextEditingController _modelCtl = TextEditingController();
+  final TextEditingController _contextLenCtl = TextEditingController();
   final TextEditingController _dailyLimitCtl = TextEditingController();
   String? _lastForProvider;
   List<String> _fetchedModels = []; // Store models fetched from API
@@ -54,6 +55,15 @@ class _ProvidersTabState extends State<ProvidersTab> {
       'model': 'FunAudioLLM/SenseVoiceSmall',
       'helpUrl': 'https://cloud.siliconflow.cn/account/ak',
       'category': AiProviderCategory.stt,
+    },
+    {
+      'name': 'Windows 系统语音识别 (离线)',
+      'kind': AiProvider.local,
+      'baseUrl': '',
+      'model': '',
+      'helpUrl': '',
+      'category': AiProviderCategory.stt,
+      'meta': {'local_stt': 'windows_speech', 'language': 'zh-CN'},
     },
     {
       'name': 'SiliconFlow (Image)',
@@ -126,6 +136,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
     _baseCtl.text = cfg.baseUrl;
     _keyCtl.text = cfg.apiKey;
     _modelCtl.text = cfg.model;
+    _contextLenCtl.text = (cfg.meta['context_length'] ?? 128000).toString();
     _dailyLimitCtl.text = cfg.dailyLimit.toString();
     _lastForProvider = cfg.id;
     _fetchedModels = []; // Reset fetched models when switching provider
@@ -161,14 +172,16 @@ class _ProvidersTabState extends State<ProvidersTab> {
             onPressed: () async {
               Navigator.pop(ctx);
               final id = 'p_${DateTime.now().millisecondsSinceEpoch}';
+              final presetMeta = (preset['meta'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
               final newP = AiProviderConfig(
                 id: id,
                 name: preset['name'] as String,
                 kind: preset['kind'] as AiProvider,
-                baseUrl: preset['baseUrl'] as String,
-                model: preset['model'] as String,
+                baseUrl: (preset['baseUrl'] as String?) ?? '',
+                model: (preset['model'] as String?) ?? '',
                 enabled: true,
                 category: preset['category'] as AiProviderCategory? ?? AiProviderCategory.llm,
+                meta: presetMeta,
               );
               await controller.addOrUpdateProvider(newP);
               if (!mounted) return;
@@ -632,6 +645,30 @@ class _ProvidersTabState extends State<ProvidersTab> {
           onSubmitted: (v) => controller.setProviderField(cfg.id, model: v),
         ),
         const SizedBox(height: 16),
+        if (cfg.category == AiProviderCategory.llm) ...[
+          TextField(
+            controller: _contextLenCtl,
+            decoration: const InputDecoration(
+              labelText: '上下文长度 (Tokens)',
+              border: OutlineInputBorder(),
+              helperText: '用于80%阈值触发上下文压缩的粗略判断',
+            ),
+            keyboardType: TextInputType.number,
+            onSubmitted: (v) async {
+              final n = int.tryParse(v.trim());
+              final meta = Map<String, dynamic>.from(cfg.meta);
+              if (n != null && n > 0) {
+                meta['context_length'] = n;
+              } else {
+                meta.remove('context_length');
+              }
+              await controller.addOrUpdateProvider(cfg.copyWith(meta: meta));
+              if (!mounted) return;
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
         TextField(
           controller: _dailyLimitCtl,
           decoration: const InputDecoration(
@@ -661,12 +698,22 @@ class _ProvidersTabState extends State<ProvidersTab> {
             FilledButton(
               onPressed: () async {
                 final messenger = ScaffoldMessenger.of(context);
+                final meta = Map<String, dynamic>.from(cfg.meta);
+                if (cfg.category == AiProviderCategory.llm) {
+                  final n = int.tryParse(_contextLenCtl.text.trim());
+                  if (n != null && n > 0) {
+                    meta['context_length'] = n;
+                  } else {
+                    meta.remove('context_length');
+                  }
+                }
                 await controller.addOrUpdateProvider(cfg.copyWith(
                   name: _nameCtl.text.trim(),
                   baseUrl: _baseCtl.text.trim(),
                   apiKey: _keyCtl.text.trim(),
                   model: _modelCtl.text.trim(),
                   dailyLimit: int.tryParse(_dailyLimitCtl.text) ?? 0,
+                  meta: meta,
                 ));
                 if (!mounted) return;
                 messenger.showSnackBar(const SnackBar(content: Text('已保存')));

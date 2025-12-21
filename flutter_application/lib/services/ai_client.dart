@@ -350,8 +350,12 @@ class AiClient {
   }) async {
     var base = config.baseUrl;
     if (base.endsWith('/')) base = base.substring(0, base.length - 1);
-    // Auto-fix SiliconFlow URL if missing /v1
     if (base == 'https://api.siliconflow.cn') base += '/v1';
+    if (base.contains('siliconflow') &&
+        !base.endsWith('/v1') &&
+        !base.contains('/v1/')) {
+      base += '/v1';
+    }
     
     // OpenAI compatible endpoint
     final url = Uri.parse('$base/audio/transcriptions');
@@ -362,8 +366,10 @@ class AiClient {
     request.fields['model'] = config.model.isNotEmpty ? config.model : 'FunAudioLLM/SenseVoiceSmall';
     request.files.add(await http.MultipartFile.fromPath('file', filePath));
     
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
+    final streamedResponse =
+        await request.send().timeout(const Duration(seconds: 60));
+    final response = await http.Response.fromStream(streamedResponse)
+        .timeout(const Duration(seconds: 60));
     
     if (response.statusCode == 200) {
       final json = jsonDecode(utf8.decode(response.bodyBytes));
@@ -378,57 +384,163 @@ class AiClient {
     required AiProviderConfig config,
     required String text,
     String? voice,
-    String responseFormat = 'mp3',
+    String responseFormat = 'wav',
+    int? sampleRate,
   }) async {
     var base = config.baseUrl;
     if (base.endsWith('/')) base = base.substring(0, base.length - 1);
-    // Auto-fix SiliconFlow URL if missing /v1
     if (base == 'https://api.siliconflow.cn') base += '/v1';
+    if (base.contains('siliconflow') &&
+        !base.endsWith('/v1') &&
+        !base.contains('/v1/')) {
+      base += '/v1';
+    }
     
     // OpenAI compatible endpoint
     final url = Uri.parse('$base/audio/speech');
     
-    // Determine effective voice
-    String effectiveVoice = voice ?? 'alex';
-    
-    // Fallback for SiliconFlow if no voice provided or needs adjustment
+    String effectiveVoice = (voice == null || voice.isEmpty) ? 'alex' : voice;
+    String effectiveModel = config.model.isNotEmpty
+        ? config.model
+        : 'FunAudioLLM/CosyVoice2-0.5B';
+    effectiveVoice = effectiveVoice.trim();
+    effectiveModel = effectiveModel.trim();
+
     if (base.contains('siliconflow')) {
-       // Check model to decide fallback
-       // if (config.model.contains('CosyVoice')) {
-       //   // CosyVoice requires 'model:voice' format usually.
-       //   // If voice is simple 'alex' or 'benjamin', prepend model.
-       //   if (effectiveVoice == 'alex' || !effectiveVoice.contains(':')) {
-       //      effectiveVoice = '${config.model}:$effectiveVoice';
-       //   }
-       // } else 
-       if (config.model.contains('MOSS') || config.model.contains('moss')) {
-         // MOSS-TTSD-v0.5 defaults
-         if (effectiveVoice == 'alex' || !effectiveVoice.contains(':')) {
-             effectiveVoice = 'fnlp/MOSS-TTSD-v0.5:anna';
-         }
-       }
+      final adjustedModelLower = effectiveModel.toLowerCase();
+      if (adjustedModelLower.contains('cosyvoice')) {
+        if (!effectiveVoice.startsWith('voice:') && !effectiveVoice.contains(':')) {
+          effectiveVoice = '$effectiveModel:$effectiveVoice';
+        }
+      } else if (adjustedModelLower.contains('moss')) {
+        if (!effectiveVoice.startsWith('voice:') &&
+            (effectiveVoice == 'alex' || !effectiveVoice.contains(':'))) {
+          effectiveVoice = 'fnlp/MOSS-TTSD-v0.5:anna';
+        }
+      }
     }
 
-    final body = jsonEncode({
-      'model': config.model.isNotEmpty ? config.model : 'FunAudioLLM/CosyVoice2-0.5B',
-      'input': text,
-      'voice': effectiveVoice, 
-      'response_format': responseFormat,
-    });
-    
-    final response = await http.post(
-      url,
-      headers: {
-        'Authorization': 'Bearer ${config.apiKey}',
-        'Content-Type': 'application/json',
-      },
-      body: body,
-    );
-    
-    if (response.statusCode == 200) {
-      return response.bodyBytes;
-    } else {
-      throw Exception('TTS failed: ${response.statusCode} ${response.body}');
+    int? effectiveSampleRate = sampleRate;
+    final fmtLower = responseFormat.toLowerCase();
+    if (effectiveSampleRate == null) {
+      if (fmtLower == 'opus') {
+        effectiveSampleRate = 48000;
+      } else if (fmtLower == 'wav' || fmtLower == 'pcm') {
+        effectiveSampleRate = 44100;
+      }
     }
+
+    Future<http.Response> send({
+      required String model,
+      required String voice,
+      required String fmt,
+      int? sr,
+      bool includeSampleRate = true,
+    }) {
+      int? reqSampleRate = sr;
+      final fmtLower = fmt.toLowerCase();
+      if (reqSampleRate == null) {
+        if (fmtLower == 'opus') {
+          reqSampleRate = 48000;
+        } else if (fmtLower == 'wav' || fmtLower == 'pcm') {
+          reqSampleRate = effectiveSampleRate;
+        }
+      }
+      final reqBody = jsonEncode({
+        'model': model,
+        'input': text,
+        'voice': voice,
+        'response_format': fmt,
+        if (includeSampleRate && reqSampleRate != null) 'sample_rate': reqSampleRate,
+      });
+      return http.post(
+        url,
+        headers: {
+          'Authorization': 'Bearer ${config.apiKey}',
+          'Content-Type': 'application/json',
+          'Accept': 'audio/*',
+        },
+        body: reqBody,
+      );
+    }
+
+    int? _tryParseErrorCode(String bodyText) {
+      try {
+        final decoded = jsonDecode(bodyText);
+        if (decoded is Map && decoded['code'] is num) {
+          return (decoded['code'] as num).toInt();
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    final first = await send(
+      model: effectiveModel,
+      voice: effectiveVoice,
+      fmt: responseFormat,
+      sr: effectiveSampleRate,
+    );
+    if (first.statusCode == 200) return first.bodyBytes;
+
+    final code = _tryParseErrorCode(first.body);
+    if ((fmtLower == 'wav' || fmtLower == 'pcm' || fmtLower == 'opus') &&
+        code != 50507) {
+      final retryNoSr = await send(
+        model: effectiveModel,
+        voice: effectiveVoice,
+        fmt: responseFormat,
+        sr: effectiveSampleRate,
+        includeSampleRate: false,
+      );
+      if (retryNoSr.statusCode == 200) return retryNoSr.bodyBytes;
+    }
+    if (code == 50507) {
+      final retryCandidates = <({String model, String voice, String fmt})>[];
+
+      if (effectiveVoice.startsWith('voice:')) {
+        retryCandidates.add((model: effectiveModel, voice: effectiveVoice, fmt: responseFormat));
+        if (responseFormat != 'wav') retryCandidates.add((model: effectiveModel, voice: effectiveVoice, fmt: 'wav'));
+      }
+
+      if (effectiveModel.toLowerCase().contains('cosyvoice') &&
+          !effectiveVoice.startsWith('voice:') &&
+          effectiveVoice.contains(':')) {
+        final stripped = effectiveVoice.split(':').last;
+        if (stripped.isNotEmpty && stripped != effectiveVoice) {
+          retryCandidates.add((model: effectiveModel, voice: stripped, fmt: responseFormat));
+        }
+      }
+
+      for (final c in retryCandidates) {
+        final respNoSr = await send(
+          model: c.model,
+          voice: c.voice,
+          fmt: c.fmt,
+          sr: effectiveSampleRate,
+          includeSampleRate: false,
+        );
+        if (respNoSr.statusCode == 200) return respNoSr.bodyBytes;
+
+        final respWithSr = await send(
+          model: c.model,
+          voice: c.voice,
+          fmt: c.fmt,
+          sr: effectiveSampleRate,
+          includeSampleRate: true,
+        );
+        if (respWithSr.statusCode == 200) return respWithSr.bodyBytes;
+
+        final respAltSr = await send(
+          model: c.model,
+          voice: c.voice,
+          fmt: c.fmt,
+          sr: 24000,
+          includeSampleRate: true,
+        );
+        if (respAltSr.statusCode == 200) return respAltSr.bodyBytes;
+      }
+    }
+
+    throw Exception('TTS failed: ${first.statusCode} ${first.body}');
   }
 }

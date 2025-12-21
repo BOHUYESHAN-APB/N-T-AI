@@ -58,6 +58,18 @@ flutter:
     - assets/
     - assets/excalidraw/
     - assets/images/
+  fonts:
+    - family: MiSansVF
+      fonts:
+        - asset: assets/fonts/MiSans VF.ttf
+    - family: FZG
+      fonts:
+        - asset: assets/fonts/FZG_CN.ttf
+        - asset: assets/fonts/FZG_HAX.ttf
+    - family: nfdcs
+      fonts:
+        - asset: assets/fonts/nfdcsCN16.ttf
+        - asset: assets/fonts/nfdcsCN24.ttf
 
 msix_config:
   display_name: N-T-AI

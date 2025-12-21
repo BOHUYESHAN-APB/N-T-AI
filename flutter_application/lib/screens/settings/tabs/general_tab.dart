@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
+import '../../../services/logger_service.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../first_run_dialog.dart';
@@ -25,12 +27,120 @@ class _GeneralTabState extends State<GeneralTab> {
   int? _defaultInputDeviceIndex;
   int? _defaultOutputDeviceIndex;
   Map<int, String> _hostApiNames = const {};
+  bool _testingAudio = false;
+
+  String _findDeviceNameByIndex(int? idx, List<Map<String, dynamic>> devices) {
+    if (idx == null) return '未指定';
+    for (final d in devices) {
+      final di = d['_index'];
+      if (di is int && di == idx) {
+        final name = (d['name'] ?? '').toString().trim();
+        return name.isEmpty ? '设备#$idx' : name;
+      }
+    }
+    return '设备#$idx';
+  }
+
+  Future<void> _showRecentErrorsDialog() async {
+    final items = logger.getRecentErrors();
+    String formatTs(dynamic ts) {
+      try {
+        final v = (ts is num) ? ts.toDouble() : double.tryParse(ts.toString()) ?? 0.0;
+        final dt = DateTime.fromMillisecondsSinceEpoch((v * 1000).round());
+        final mm = dt.month.toString().padLeft(2, '0');
+        final dd = dt.day.toString().padLeft(2, '0');
+        final hh = dt.hour.toString().padLeft(2, '0');
+        final mi = dt.minute.toString().padLeft(2, '0');
+        final ss = dt.second.toString().padLeft(2, '0');
+        return '${dt.year}-$mm-$dd $hh:$mi:$ss';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('最近错误（本机）'),
+        content: SizedBox(
+          width: 560,
+          child: items.isEmpty
+              ? const Text('暂无错误记录')
+              : SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final it in items)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: SelectableText(
+                            '${formatTs(it['timestamp'])}  ${it['level'] ?? ''}\n'
+                            '${it['message'] ?? ''}'
+                            '${(it['exception'] ?? '').toString().trim().isEmpty ? '' : '\n${it['exception']}'}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await logger.clearRecentErrors();
+              if (!context.mounted) return;
+              Navigator.pop(context);
+              if (!mounted) return;
+              setState(() {});
+            },
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  AiProviderConfig? _resolveAudioProvider(AiProviderCategory category) {
+    final providers = SettingsScope.of(context).providers;
+
+    final explicit = providers.firstWhere(
+      (p) =>
+          p.category == category &&
+          p.enabled &&
+          p.baseUrl.isNotEmpty &&
+          p.apiKey.isNotEmpty,
+      orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+    );
+    if (explicit.id.isNotEmpty) return explicit;
+
+    if (category == AiProviderCategory.stt) {
+      final local = providers.firstWhere(
+        (p) =>
+            p.category == category &&
+            p.enabled &&
+            p.kind == AiProvider.local &&
+            (p.meta['local_stt']?.toString() == 'windows_speech'),
+        orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+      );
+      if (local.id.isNotEmpty) return local;
+    }
+
+    return null;
+  }
 
   List<DropdownMenuItem<int?>> _buildInputDeviceItems(String defaultLabel) {
     final items = <DropdownMenuItem<int?>>[
       DropdownMenuItem<int?>(
         value: null,
-        child: Text(defaultLabel),
+        child: Text(
+          defaultLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+        ),
       ),
     ];
     final seen = <int>{};
@@ -42,7 +152,12 @@ class _GeneralTabState extends State<GeneralTab> {
       items.add(
         DropdownMenuItem<int?>(
           value: idx,
-          child: Text(_formatInputDeviceLabel(d)),
+          child: Text(
+            _formatInputDeviceLabel(d),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+          ),
         ),
       );
     }
@@ -53,7 +168,12 @@ class _GeneralTabState extends State<GeneralTab> {
     final items = <DropdownMenuItem<int?>>[
       DropdownMenuItem<int?>(
         value: null,
-        child: Text(defaultLabel),
+        child: Text(
+          defaultLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+        ),
       ),
     ];
     final seen = <int>{};
@@ -65,7 +185,12 @@ class _GeneralTabState extends State<GeneralTab> {
       items.add(
         DropdownMenuItem<int?>(
           value: idx,
-          child: Text(_formatOutputDeviceLabel(d)),
+          child: Text(
+            _formatOutputDeviceLabel(d),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+          ),
         ),
       );
     }
@@ -270,6 +395,234 @@ class _GeneralTabState extends State<GeneralTab> {
     }
   }
 
+  String _formatHttpFailure(http.Response resp, {String prefix = ''}) {
+    String body = '';
+    try {
+      body = utf8.decode(resp.bodyBytes).trim();
+    } catch (_) {
+      body = (resp.body).toString().trim();
+    }
+    if (body.length > 1200) body = body.substring(0, 1200);
+    final p = prefix.isEmpty ? '' : '$prefix: ';
+    return body.isEmpty ? '${p}HTTP ${resp.statusCode}' : '${p}HTTP ${resp.statusCode} - $body';
+  }
+
+  Future<void> _testLoopbackLevel() async {
+    final controller = SettingsScope.of(context);
+    final s = controller.settings;
+    if (!s.enablePythonBackend) return;
+    if (_testingAudio) return;
+    setState(() => _testingAudio = true);
+    try {
+      final backendBase = s.pythonBackendUrl.endsWith('/')
+          ? s.pythonBackendUrl.substring(0, s.pythonBackendUrl.length - 1)
+          : s.pythonBackendUrl;
+
+      final resp = await http
+          .post(
+            Uri.parse('$backendBase/api/audio/loopback/measure'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'duration_seconds': 1.0,
+              if (s.sttLoopbackDeviceIndex != null)
+                'device_index': s.sttLoopbackDeviceIndex,
+              'samplerate': 48000,
+              'channels': 2,
+            }),
+          )
+          .timeout(const Duration(seconds: 6));
+
+      if (!mounted) return;
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        final msg = _formatHttpFailure(resp, prefix: '回环检测失败');
+        logger.error('$msg（backend=$backendBase, device=${s.sttLoopbackDeviceIndex ?? 'default'}）');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+        return;
+      }
+
+      final data = jsonDecode(utf8.decode(resp.bodyBytes));
+      final stats = (data is Map ? data['stats'] : null) as Map?;
+      final used = (stats?['used'] as Map?) ?? const {};
+      final level = (stats?['level'] as Map?) ?? const {};
+      final dev = (stats?['device'] as Map?) ?? const {};
+
+      final rms = (level['rms'] ?? 0).toString();
+      final peak = (level['peak'] ?? 0).toString();
+      final silent = (level['is_silent'] == true);
+      final usedSr = (used['samplerate'] ?? '').toString();
+      final devName = (dev['name'] ?? '未知设备').toString();
+      logger.info(
+        '回环电平结果: silent=$silent rms=$rms peak=$peak sr=$usedSr device="$devName" idx=${s.sttLoopbackDeviceIndex ?? 'default'}',
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            silent
+                ? '回环电平：静音（RMS=$rms, Peak=$peak, SR=$usedSr）\n$devName'
+                : '回环电平：RMS=$rms, Peak=$peak, SR=$usedSr\n$devName',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      logger.error(
+        '回环检测失败（backend=${s.pythonBackendUrl}, device=${s.sttLoopbackDeviceIndex ?? 'default'}）',
+        e,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('回环检测失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _testingAudio = false);
+    }
+  }
+
+  Future<void> _testLoopbackTranscribe() async {
+    final controller = SettingsScope.of(context);
+    final s = controller.settings;
+    if (!s.enablePythonBackend) return;
+    if (_testingAudio) return;
+    setState(() => _testingAudio = true);
+    String? path;
+    var keepFile = false;
+    try {
+      final sttProvider = _resolveAudioProvider(AiProviderCategory.stt);
+      if (sttProvider == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未配置 STT 服务')),
+        );
+        return;
+      }
+
+      path = await BrainService().captureSystemLoopbackToFile(
+        durationSeconds: s.sttLoopbackDurationSeconds.toDouble(),
+        deviceIndex: s.sttLoopbackDeviceIndex,
+        samplerate: 16000,
+        channels: 1,
+      );
+      logger.info(
+        '回环转写开始: provider=${sttProvider.name} kind=${sttProvider.kind} device=${s.sttLoopbackDeviceIndex ?? 'default'} file=$path',
+      );
+      final text = (await BrainService().transcribe(path, sttProvider)).trim();
+
+      if (!mounted) return;
+      if (text.isEmpty) {
+        keepFile = true;
+        logger.error(
+          '回环转写结果为空（已保留音频文件）：provider=${sttProvider.name} device=${s.sttLoopbackDeviceIndex ?? 'default'} file=$path',
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('转写结果为空（已保留音频文件用于排查）：$path'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+
+      logger.info('回环转写结果: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('转写结果：$text'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      logger.error(
+        '回环转写失败（backend=${s.pythonBackendUrl}, device=${s.sttLoopbackDeviceIndex ?? 'default'}）',
+        e,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('回环转写失败: $e')),
+      );
+    } finally {
+      try {
+        if (!keepFile && path != null) {
+          final f = File(path);
+          if (await f.exists()) {
+            await f.delete();
+          }
+        }
+      } catch (_) {}
+      if (mounted) setState(() => _testingAudio = false);
+    }
+  }
+
+  Future<void> _testTtsInjectionTone() async {
+    final controller = SettingsScope.of(context);
+    final s = controller.settings;
+    if (!s.enablePythonBackend) return;
+    if (_testingAudio) return;
+    setState(() => _testingAudio = true);
+    try {
+      final backendBase = s.pythonBackendUrl.endsWith('/')
+          ? s.pythonBackendUrl.substring(0, s.pythonBackendUrl.length - 1)
+          : s.pythonBackendUrl;
+
+      final resp = await http
+          .post(
+            Uri.parse('$backendBase/api/audio/debug/play-tone'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'device_role': 'input',
+              if (s.ttsBackendDeviceIndex != null)
+                'device_index': s.ttsBackendDeviceIndex,
+              'frequency_hz': 880.0,
+              'duration_seconds': 0.6,
+              'samplerate': 48000,
+              'channels': 2,
+            }),
+          )
+          .timeout(const Duration(seconds: 6));
+
+      if (!mounted) return;
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        final msg = _formatHttpFailure(resp, prefix: '测试音播放失败');
+        logger.error('$msg（backend=$backendBase, device=${s.ttsBackendDeviceIndex ?? 'default'}）');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+        return;
+      }
+
+      final data = jsonDecode(utf8.decode(resp.bodyBytes));
+      final used = (data is Map ? data['used'] : null) as Map?;
+      final outIdx = (used?['output_device_index'] as num?)?.toInt();
+      final outName = _findDeviceNameByIndex(outIdx, _outputDevices);
+      final play = (data is Map ? data['play'] : null) as Map?;
+      final usedSr = (play?['samplerate'] ?? '').toString();
+      final usedCh = (play?['channels'] ?? '').toString();
+      logger.info(
+        '测试音播放成功: backend=$backendBase inputDevice=${s.ttsBackendDeviceIndex ?? 'default'} -> outputDevice=$outIdx "$outName" sr=$usedSr ch=$usedCh',
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已播放测试音（注入路径）\n输出设备=$outIdx $outName（SR=$usedSr, CH=$usedCh）',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      logger.error(
+        '测试音播放失败（backend=${s.pythonBackendUrl}, device=${s.ttsBackendDeviceIndex ?? 'default'}）',
+        e,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('测试音播放失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _testingAudio = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = SettingsScope.of(context);
@@ -380,6 +733,12 @@ class _GeneralTabState extends State<GeneralTab> {
           },
         ),
         ListTile(
+          leading: const Icon(Icons.bug_report_outlined),
+          title: const Text('查看最近错误（本机）'),
+          subtitle: const Text('用于排查 TTS 注入/回环/网络等失败原因'),
+          onTap: _showRecentErrorsDialog,
+        ),
+        ListTile(
           leading: const Icon(Icons.face),
           title: Text(l10n.generalUserNickname),
           subtitle: Text(
@@ -479,7 +838,11 @@ class _GeneralTabState extends State<GeneralTab> {
               SwitchListTile(
                 secondary: const Icon(Icons.volume_up),
                 title: const Text('TTS 注入到虚拟麦克风（后端播放）'),
-                subtitle: const Text('选择“虚拟麦克风（输入设备）”，后端自动匹配对应的播放端进行注入'),
+                subtitle: const Text(
+                  '选择“虚拟麦克风（输入设备）”，后端自动匹配对应的播放端进行注入',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 value: s.ttsViaBackendDevice,
                 onChanged: (s.enableTts && s.enablePythonBackend)
                     ? (v) async {
@@ -518,6 +881,16 @@ class _GeneralTabState extends State<GeneralTab> {
                       ),
                     ],
                   ),
+                ),
+              if (s.ttsViaBackendDevice)
+                ListTile(
+                  leading: const Icon(Icons.music_note),
+                  title: const Text('测试 TTS 注入（播放测试音）'),
+                  subtitle: const Text('用于确认虚拟麦克风注入链路是否通畅'),
+                  enabled: s.enablePythonBackend && !_testingAudio,
+                  onTap: (s.enablePythonBackend && !_testingAudio)
+                      ? _testTtsInjectionTone
+                      : null,
                 ),
               if (s.ttsViaBackendDevice || s.sttViaBackendLoopback)
                 Padding(
@@ -586,6 +959,26 @@ class _GeneralTabState extends State<GeneralTab> {
                       ),
                     ],
                   ),
+                ),
+              if (s.sttViaBackendLoopback)
+                ListTile(
+                  leading: const Icon(Icons.equalizer),
+                  title: const Text('测试回环监听（检测电平）'),
+                  subtitle: const Text('用于确认能否采集到语音软件的输出声音'),
+                  enabled: s.enablePythonBackend && !_testingAudio,
+                  onTap: (s.enablePythonBackend && !_testingAudio)
+                      ? _testLoopbackLevel
+                      : null,
+                ),
+              if (s.sttViaBackendLoopback)
+                ListTile(
+                  leading: const Icon(Icons.text_snippet),
+                  title: const Text('测试回环监听（转写）'),
+                  subtitle: const Text('用于确认 STT 能否把回环音频转成文字'),
+                  enabled: s.enablePythonBackend && !_testingAudio,
+                  onTap: (s.enablePythonBackend && !_testingAudio)
+                      ? _testLoopbackTranscribe
+                      : null,
                 ),
               if (s.sttViaBackendLoopback)
                 ListTile(
@@ -922,7 +1315,7 @@ class _GeneralTabState extends State<GeneralTab> {
                               s.decoFamily != DecorativeFontFamily.none
                           ? (s.decoFamily == DecorativeFontFamily.fzg
                                 ? 'FZG'
-                                : 'NFDCS')
+                                : 'nfdcs')
                           : null,
                     ),
                   ),
@@ -950,7 +1343,7 @@ class _GeneralTabState extends State<GeneralTab> {
                                 s.decoFamily != DecorativeFontFamily.none
                             ? (s.decoFamily == DecorativeFontFamily.fzg
                                   ? 'FZG'
-                                  : 'NFDCS')
+                                  : 'nfdcs')
                             : null,
                       ),
                     ),

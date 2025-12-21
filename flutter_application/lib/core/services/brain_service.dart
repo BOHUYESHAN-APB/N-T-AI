@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:math';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -21,6 +22,7 @@ import 'expression_inference_agent_service.dart';
 import 'expression_state_bus.dart';
 import '../../settings/settings.dart';
 import '../../services/ai_client.dart';
+import '../../services/logger_service.dart';
 
 class BrainService {
   static final RegExp _emojiRegex = RegExp(
@@ -91,6 +93,53 @@ class BrainService {
         bytes[11] == 0x45;
   }
 
+  bool _looksLikeMp3(Uint8List bytes) {
+    if (bytes.length < 3) return false;
+    if (bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33) return true;
+    if (bytes.length >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+      return true;
+    }
+    return false;
+  }
+
+  Uint8List _wrapPcm16LeToWav(
+    Uint8List pcmBytes, {
+    int sampleRate = 44100,
+    int channels = 1,
+  }) {
+    final byteRate = sampleRate * channels * 2;
+    final blockAlign = channels * 2;
+    final dataSize = pcmBytes.length;
+    final fileSize = 36 + dataSize;
+
+    final header = BytesBuilder(copy: false);
+    header.add(utf8.encode('RIFF'));
+    header.add(_u32le(fileSize));
+    header.add(utf8.encode('WAVE'));
+    header.add(utf8.encode('fmt '));
+    header.add(_u32le(16));
+    header.add(_u16le(1));
+    header.add(_u16le(channels));
+    header.add(_u32le(sampleRate));
+    header.add(_u32le(byteRate));
+    header.add(_u16le(blockAlign));
+    header.add(_u16le(16));
+    header.add(utf8.encode('data'));
+    header.add(_u32le(dataSize));
+    header.add(pcmBytes);
+    return header.takeBytes();
+  }
+
+  Uint8List _u16le(int v) => Uint8List(2)
+    ..[0] = (v & 0xFF)
+    ..[1] = ((v >> 8) & 0xFF);
+
+  Uint8List _u32le(int v) => Uint8List(4)
+    ..[0] = (v & 0xFF)
+    ..[1] = ((v >> 8) & 0xFF)
+    ..[2] = ((v >> 16) & 0xFF)
+    ..[3] = ((v >> 24) & 0xFF);
+
   Future<void> _broadcastTtsBytes(Uint8List bytes) async {
     unawaited(() async {
       try {
@@ -122,8 +171,117 @@ class BrainService {
     }());
   }
 
-  Future<void> _playTtsBytes(Uint8List bytes) async {
-    _ttsController.add(bytes);
+  Future<String?> _injectWavToBackend({
+    required String backendBase,
+    required Uint8List wavBytes,
+    required int? deviceIndex,
+  }) async {
+    if (!_looksLikeWav(wavBytes)) {
+      return '音频不是 WAV（无法注入）';
+    }
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('$backendBase/api/audio/play'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'audio_b64': base64Encode(wavBytes),
+              'format': 'wav',
+              'device_role': 'input',
+              if (deviceIndex != null) 'device_index': deviceIndex,
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return null;
+      }
+      return _formatHttpFailure(resp);
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  Future<Uint8List?> _getInjectionWavBytes({
+    required String text,
+    required AiProviderConfig ttsProvider,
+  }) async {
+    final voice = ttsProvider.meta['voice'] as String?;
+    const preferredSampleRates = <int>[44100, 24000];
+
+    for (final sr in preferredSampleRates) {
+      try {
+        final wav = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: text,
+          voice: voice,
+          responseFormat: 'wav',
+          sampleRate: sr,
+        );
+        if (_looksLikeWav(wav)) return wav;
+        if (wav.isNotEmpty && !_looksLikeMp3(wav) && wav.length % 2 == 0) {
+          final wrapped = _wrapPcm16LeToWav(wav, sampleRate: sr);
+          if (_looksLikeWav(wrapped)) return wrapped;
+        }
+      } catch (_) {}
+    }
+
+    for (final sr in preferredSampleRates) {
+      try {
+        final pcm = await AiClient.generateSpeech(
+          config: ttsProvider,
+          text: text,
+          voice: voice,
+          responseFormat: 'pcm',
+          sampleRate: sr,
+        );
+        if (pcm.isEmpty) continue;
+        if (_looksLikeWav(pcm)) return pcm;
+        if (_looksLikeMp3(pcm)) continue;
+        if (pcm.length % 2 != 0) continue;
+        final wrapped = _wrapPcm16LeToWav(pcm, sampleRate: sr);
+        if (_looksLikeWav(wrapped)) return wrapped;
+      } catch (_) {}
+    }
+
+    return null;
+  }
+
+  Future<Uint8List> _generateSpeechBytesForPlayback({
+    required AiProviderConfig ttsProvider,
+    required String text,
+  }) async {
+    final wav = await _getInjectionWavBytes(text: text, ttsProvider: ttsProvider);
+    if (wav != null) return wav;
+
+    return AiClient.generateSpeech(
+      config: ttsProvider,
+      text: text,
+      voice: ttsProvider.meta['voice'] as String?,
+      responseFormat: 'mp3',
+    );
+  }
+
+  Duration? _estimateWavDuration(Uint8List bytes) {
+    if (!_looksLikeWav(bytes) || bytes.length < 44) return null;
+    try {
+      final bd = bytes.buffer.asByteData(bytes.offsetInBytes, bytes.length);
+      final channels = bd.getUint16(22, Endian.little);
+      final sampleRate = bd.getUint32(24, Endian.little);
+      final bitsPerSample = bd.getUint16(34, Endian.little);
+      final dataSize = bd.getUint32(40, Endian.little);
+      final bytesPerSec = sampleRate * channels * (bitsPerSample ~/ 8);
+      if (bytesPerSec <= 0 || dataSize <= 0) return null;
+      final ms = (dataSize * 1000) ~/ bytesPerSec;
+      if (ms <= 0) return null;
+      return Duration(milliseconds: ms);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _playTtsBytes(Uint8List bytes, {Uint8List? lipsyncBytes}) async {
+    final signal = lipsyncBytes ?? bytes;
+    _ttsController.add(signal);
 
     final tempDir = await getTemporaryDirectory();
     final ext = _looksLikeWav(bytes) ? 'wav' : 'mp3';
@@ -131,21 +289,53 @@ class BrainService {
     await tempFile.writeAsBytes(bytes);
     try {
       _audioPlayer ??= AudioPlayer();
-      final completer = Completer<void>();
-      StreamSubscription<void>? sub;
-      sub = _audioPlayer!.onPlayerComplete.listen((_) {
-        sub?.cancel();
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      });
+      await _audioPlayer!.setReleaseMode(ReleaseMode.stop);
 
-      await _audioPlayer!.play(DeviceFileSource(tempFile.path));
-      await completer.future;
+      try {
+        await _audioPlayer!.stop();
+      } catch (_) {}
+
+      try {
+        await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+        var wait = _estimateWavDuration(bytes);
+        if (wait == null) {
+          for (var i = 0; i < 20; i++) {
+            wait = await _audioPlayer!.getDuration();
+            if (wait != null && wait.inMilliseconds > 0) break;
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+        }
+        await Future.delayed((wait ?? const Duration(seconds: 30)) + const Duration(milliseconds: 150));
+      } catch (e) {
+        try {
+          await _audioPlayer!.stop();
+        } catch (_) {}
+        try {
+          await _audioPlayer!.play(BytesSource(bytes));
+          var wait = _estimateWavDuration(bytes);
+          if (wait == null) {
+            for (var i = 0; i < 20; i++) {
+              wait = await _audioPlayer!.getDuration();
+              if (wait != null && wait.inMilliseconds > 0) break;
+              await Future.delayed(const Duration(milliseconds: 100));
+            }
+          }
+          await Future.delayed((wait ?? const Duration(seconds: 30)) + const Duration(milliseconds: 150));
+        } catch (e2) {
+          logger.error('本机播放 TTS 失败', e2);
+          logger.error('本机播放 TTS 失败（原始错误）', e);
+        }
+      }
     } catch (e) {
-      debugPrint('AudioPlayer error (ignored): $e');
+      logger.error('AudioPlayer 失败', e);
+    } finally {
+      try {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      } catch (_) {}
     }
-    await _broadcastTtsBytes(bytes);
+    await _broadcastTtsBytes(signal);
   }
 
   Future<void> speak(String text, AiProviderConfig ttsProvider) async {
@@ -173,41 +363,49 @@ class BrainService {
           ? backendUrl.substring(0, backendUrl.length - 1)
           : backendUrl;
 
-      final bytes = await AiClient.generateSpeech(
-        config: ttsProvider,
-        text: cleanText,
-        voice: ttsProvider.meta['voice'] as String?,
-        responseFormat: ttsViaBackendDevice ? 'wav' : 'mp3',
-      );
+      final injectToBackend = ttsViaBackendDevice && enablePythonBackend;
+      Uint8List? injWav;
+      Uint8List bytes;
 
-      if (_ttsStopped || _ttsSessionId != sessionId) {
-        return;
+      if (injectToBackend) {
+        injWav = await _getInjectionWavBytes(
+          text: cleanText,
+          ttsProvider: ttsProvider,
+        );
+        bytes = injWav ?? await _generateSpeechBytesForPlayback(
+          ttsProvider: ttsProvider,
+          text: cleanText,
+        );
+      } else {
+        bytes = await _generateSpeechBytesForPlayback(
+          ttsProvider: ttsProvider,
+          text: cleanText,
+        );
       }
 
-      if (ttsViaBackendDevice && enablePythonBackend) {
-        try {
-          await http
-              .post(
-                Uri.parse('$backendBase/api/audio/play'),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({
-                  'audio_b64': base64Encode(bytes),
-                  'format': 'wav',
-                  'device_role': 'input',
-                  if (ttsBackendDeviceIndex != null)
-                    'device_index': ttsBackendDeviceIndex,
-                }),
-              )
-              .timeout(const Duration(seconds: 5));
-        } catch (_) {}
-        _ttsController.add(bytes);
-        await _broadcastTtsBytes(bytes);
-        return;
+      if (_ttsStopped || _ttsSessionId != sessionId) return;
+
+      if (injectToBackend) {
+        if (injWav == null && _looksLikeWav(bytes)) {
+          injWav = bytes;
+        }
+        if (injWav == null) {
+          logger.error('TTS 注入失败：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
+        } else {
+          final failInfo = await _injectWavToBackend(
+            backendBase: backendBase,
+            wavBytes: injWav,
+            deviceIndex: ttsBackendDeviceIndex,
+          );
+          if (failInfo != null && failInfo.isNotEmpty) {
+            logger.error('TTS 注入失败：$failInfo');
+          }
+        }
       }
 
-      await _playTtsBytes(bytes);
+      await _playTtsBytes(bytes, lipsyncBytes: injWav);
     } catch (e) {
-      print('TTS Error: $e');
+      logger.error('TTS 失败', e);
     }
   }
 
@@ -237,50 +435,54 @@ class BrainService {
           ? backendUrl.substring(0, backendUrl.length - 1)
           : backendUrl;
 
-      final tasks = <Future<Uint8List>>[];
-      for (final part in cleanedParts) {
-        tasks.add(AiClient.generateSpeech(
-          config: ttsProvider,
-          text: part,
-          voice: ttsProvider.meta['voice'] as String?,
-          responseFormat: ttsViaBackendDevice ? 'wav' : 'mp3',
-        ));
-      }
+      final injectToBackend = ttsViaBackendDevice && enablePythonBackend;
 
-      final results = await Future.wait(tasks);
-
-      if (_ttsStopped || _ttsSessionId != sessionId) {
-        return;
-      }
-
-      for (final bytes in results) {
+      for (final partText in cleanedParts) {
         if (_ttsStopped || _ttsSessionId != sessionId) {
           break;
         }
-        if (ttsViaBackendDevice && enablePythonBackend) {
-          try {
-            await http
-                .post(
-                  Uri.parse('$backendBase/api/audio/play'),
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({
-                    'audio_b64': base64Encode(bytes),
-                    'format': 'wav',
-                    'device_role': 'input',
-                    if (ttsBackendDeviceIndex != null)
-                      'device_index': ttsBackendDeviceIndex,
-                  }),
-                )
-                .timeout(const Duration(seconds: 5));
-          } catch (_) {}
-          _ttsController.add(bytes);
-          await _broadcastTtsBytes(bytes);
-          continue;
+        Uint8List? injWav;
+        Uint8List bytes;
+
+        if (injectToBackend) {
+          injWav = await _getInjectionWavBytes(
+            text: partText,
+            ttsProvider: ttsProvider,
+          );
+          bytes = injWav ?? await _generateSpeechBytesForPlayback(
+            ttsProvider: ttsProvider,
+            text: partText,
+          );
+        } else {
+          bytes = await _generateSpeechBytesForPlayback(
+            ttsProvider: ttsProvider,
+            text: partText,
+          );
         }
-        await _playTtsBytes(bytes);
+
+        if (_ttsStopped || _ttsSessionId != sessionId) break;
+
+        if (injectToBackend) {
+          if (injWav == null && _looksLikeWav(bytes)) {
+            injWav = bytes;
+          }
+          if (injWav == null) {
+            logger.error('TTS 注入失败（分段）：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
+          } else {
+            final failInfo = await _injectWavToBackend(
+              backendBase: backendBase,
+              wavBytes: injWav,
+              deviceIndex: ttsBackendDeviceIndex,
+            );
+            if (failInfo != null && failInfo.isNotEmpty) {
+              logger.error('TTS 注入失败（分段）：$failInfo');
+            }
+          }
+        }
+        await _playTtsBytes(bytes, lipsyncBytes: injWav);
       }
     } catch (e) {
-      print('TTS Error: $e');
+      logger.error('TTS 失败（分段）', e);
     }
   }
 
@@ -299,7 +501,69 @@ class BrainService {
   Future<String> transcribe(String filePath, AiProviderConfig sttProvider) async {
     // CRITICAL: STT MUST BE PERFORMED IN THE FRONTEND.
     // Audio recording and initial processing happens locally.
+    if (sttProvider.kind == AiProvider.local) {
+      final engine = (sttProvider.meta['local_stt'] ?? sttProvider.meta['engine'])
+          ?.toString()
+          .trim();
+      if (Platform.isWindows && engine == 'windows_speech') {
+        final lang = (sttProvider.meta['language'] ?? '').toString().trim();
+        return await _transcribeWithWindowsSpeech(filePath, language: lang);
+      }
+      throw Exception('本地 STT 未支持：${engine ?? 'unknown'}');
+    }
     return await AiClient.transcribe(config: sttProvider, filePath: filePath);
+  }
+
+  String _toPwshEncodedCommand(String script) {
+    final codeUnits = script.codeUnits;
+    final bytes = <int>[];
+    for (final u in codeUnits) {
+      bytes.add(u & 0xFF);
+      bytes.add((u >> 8) & 0xFF);
+    }
+    return base64Encode(bytes);
+  }
+
+  Future<String> _transcribeWithWindowsSpeech(
+    String wavPath, {
+    String language = '',
+  }) async {
+    final script = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Speech
+$path = $env:NTAI_WAV_PATH
+$langs = @()
+if ($env:NTAI_STT_LANG -and $env:NTAI_STT_LANG.Trim().Length -gt 0) { $langs += $env:NTAI_STT_LANG.Trim() }
+$langs += @('zh-CN', 'zh-Hans', 'en-US')
+foreach ($lang in $langs) {
+  try {
+    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine([System.Globalization.CultureInfo]$lang)
+    $engine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+    $engine.SetInputToWaveFile($path)
+    $result = $engine.Recognize()
+    if ($null -ne $result -and $result.Text -and $result.Text.Trim().Length -gt 0) {
+      Write-Output $result.Text
+      exit 0
+    }
+  } catch {}
+}
+exit 0
+''';
+
+    final encoded = _toPwshEncodedCommand(script);
+    final res = await Process.run(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      runInShell: true,
+      environment: {
+        'NTAI_WAV_PATH': wavPath,
+        'NTAI_STT_LANG': language,
+      },
+    );
+
+    final out = (res.stdout ?? '').toString().trim();
+    if (out.isNotEmpty) return out;
+    return '';
   }
 
   Future<String> captureSystemLoopbackToFile({
@@ -330,10 +594,14 @@ class BrainService {
             'channels': channels,
           }),
         )
-        .timeout(const Duration(seconds: 10));
+        .timeout(
+          Duration(
+            seconds: (durationSeconds.ceil() + 12).clamp(10, 60),
+          ),
+        );
 
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
-      throw Exception('回环采集失败: HTTP ${resp.statusCode}');
+      throw Exception(_formatHttpFailure(resp, prefix: '回环采集失败'));
     }
     final data = jsonDecode(utf8.decode(resp.bodyBytes));
     final b64 = (data is Map ? data['audio_b64'] : null)?.toString();
@@ -348,6 +616,18 @@ class BrainService {
     final file = File(path);
     await file.writeAsBytes(bytes, flush: true);
     return path;
+  }
+
+  String _formatHttpFailure(http.Response resp, {String prefix = ''}) {
+    String body = '';
+    try {
+      body = utf8.decode(resp.bodyBytes).trim();
+    } catch (_) {
+      body = (resp.body).toString().trim();
+    }
+    if (body.length > 1200) body = body.substring(0, 1200);
+    final p = prefix.isEmpty ? '' : '$prefix: ';
+    return body.isEmpty ? '${p}HTTP ${resp.statusCode}' : '${p}HTTP ${resp.statusCode} - $body';
   }
 
   // Helper to determine temperature based on user intent
@@ -376,6 +656,60 @@ class BrainService {
     
     // 3. Default (0.6) - Balanced
     return 0.6;
+  }
+
+  int _estimateTokens(String text) {
+    if (text.isEmpty) return 0;
+    var ascii = 0;
+    var nonAscii = 0;
+    for (final unit in text.codeUnits) {
+      if (unit <= 0x7F) {
+        ascii++;
+      } else {
+        nonAscii++;
+      }
+    }
+    final t = (ascii / 4.0) + (nonAscii / 1.6);
+    return t.ceil();
+  }
+
+  int _estimateTokensForContext(List<Map<String, String>> ctx) {
+    var sum = 0;
+    for (final m in ctx) {
+      sum += 4;
+      sum += _estimateTokens((m['role'] ?? '') + ':');
+      sum += _estimateTokens(m['content'] ?? '');
+    }
+    return sum;
+  }
+
+  int _resolveContextLengthTokens(AiProviderConfig? cfg) {
+    final raw = cfg?.meta['context_length'] ?? cfg?.meta['context_length_tokens'];
+    if (raw is int && raw > 0) return raw;
+    if (raw is String) {
+      final parsed = int.tryParse(raw.trim());
+      if (parsed != null && parsed > 0) return parsed;
+    }
+    return 128000;
+  }
+
+  Future<void> _autoCompressContextIfNeeded(AiProviderConfig? cfg) async {
+    final limit = _resolveContextLengthTokens(cfg);
+    final threshold = (limit * 0.8).floor();
+    final estimated = _estimateTokensForContext(_context);
+    if (estimated < threshold) return;
+
+    await _compressContext();
+
+    final after = _estimateTokensForContext(_context);
+    if (after < limit) return;
+
+    final keep = min(8, _context.length);
+    final tail = keep > 0 ? _context.sublist(_context.length - keep) : <Map<String, String>>[];
+    _context = [
+      {'role': 'system', 'content': '由于上下文过长，已截断部分历史对话。'},
+      ...tail,
+    ];
   }
 
   // Initiative Mode Stream
@@ -582,10 +916,10 @@ Based on these comments, do you want to proactively say something to the audienc
        _context.add({'role': 'user', 'content': userMessage});
     }
     
-    // Limit context size for LLM
-    if (_context.length > 20) {
-      _context = _context.sublist(_context.length - 20);
+    if (_context.length > 200) {
+      _context = _context.sublist(_context.length - 200);
     }
+    await _autoCompressContextIfNeeded(providerConfig);
 
     _statusController.add(isServerMode ? "Connecting to Neural Backend..." : "Connecting to AI Provider...");
     debugPrint("[BRAIN] Entering ${isServerMode ? 'Server' : 'Client'} Mode");
@@ -929,23 +1263,26 @@ Based on these comments, do you want to proactively say something to the audienc
 
     _statusController.add("Compressing context...");
     try {
-      // Keep the last 2 messages (current turn)
-      final recent = _context.sublist(_context.length - 2);
-      final toCompress = _context.sublist(0, _context.length - 2);
+      final keep = min(6, _context.length);
+      final recent = _context.sublist(_context.length - keep);
+      final toCompress = _context.sublist(0, _context.length - keep);
       
       // Convert to string
       final historyText = toCompress.map((m) => "${m['role']}: ${m['content']}").join("\n");
       
       // Ask LLM to summarize
       final summaryResponse = await _llmService.chat([
-        {'role': 'system', 'content': "Summarize the following conversation history into a concise paragraph. Preserve key facts and user preferences."},
+        {
+          'role': 'system',
+          'content': '请把以下对话历史压缩为一段简洁摘要，保留关键事实、用户偏好、未完成事项与重要约束。只输出摘要文本。',
+        },
         {'role': 'user', 'content': historyText}
       ], usageType: 'system');
       final summary = summaryResponse.content;
 
       // Replace context with summary + recent
       _context = [
-        {'role': 'system', 'content': "Previous conversation summary: $summary"},
+        {'role': 'system', 'content': "历史摘要：$summary"},
         ...recent
       ];
       
