@@ -12,7 +12,7 @@ import '../../../core/services/backend_service.dart';
 import '../character_manager_screen.dart';
 
 class GeneralTab extends StatefulWidget {
-  const GeneralTab({Key? key}) : super(key: key);
+  const GeneralTab({super.key});
 
   @override
   State<GeneralTab> createState() => _GeneralTabState();
@@ -112,7 +112,11 @@ class _GeneralTabState extends State<GeneralTab> {
           p.enabled &&
           p.baseUrl.isNotEmpty &&
           p.apiKey.isNotEmpty,
-      orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+      orElse: () => const AiProviderConfig(
+        id: '',
+        name: '',
+        kind: AiProvider.local,
+      ),
     );
     if (explicit.id.isNotEmpty) return explicit;
 
@@ -123,7 +127,11 @@ class _GeneralTabState extends State<GeneralTab> {
             p.enabled &&
             p.kind == AiProvider.local &&
             (p.meta['local_stt']?.toString() == 'windows_speech'),
-        orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+        orElse: () => const AiProviderConfig(
+          id: '',
+          name: '',
+          kind: AiProvider.local,
+        ),
       );
       if (local.id.isNotEmpty) return local;
     }
@@ -642,789 +650,798 @@ class _GeneralTabState extends State<GeneralTab> {
         ? s.sttLoopbackDeviceIndex
         : null;
 
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        _buildSectionHeader(context, l10n.generalBasicSettings),
-        SwitchListTile(
-          secondary: const Icon(Icons.link),
-          title: Text(l10n.generalAutoConnectBackend),
-          subtitle: Text(l10n.generalAutoConnectBackendSubtitle),
-          value: s.autoConnectBackend,
-          onChanged: (v) => controller.setAutoConnectBackend(v),
+    final basicSectionChildren = <Widget>[
+      SwitchListTile(
+        secondary: const Icon(Icons.link),
+        title: Text(l10n.generalAutoConnectBackend),
+        subtitle: Text(l10n.generalAutoConnectBackendSubtitle),
+        value: s.autoConnectBackend,
+        onChanged: (v) => controller.setAutoConnectBackend(v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.play_circle_outline),
+        title: Text(l10n.generalAutoStartBackend),
+        subtitle: Text(l10n.generalAutoStartBackendSubtitle),
+        value: s.autoStartBackend,
+        onChanged: (v) => controller.setAutoStartBackend(v),
+      ),
+      ListTile(
+        leading: const Icon(Icons.cloud_outlined),
+        title: Text(l10n.generalBackendStatus),
+        subtitle: Text(s.pythonBackendUrl),
+        trailing: StreamBuilder<BackendStatus>(
+          stream: BackendService().statusStream,
+          initialData: BackendService().currentStatus,
+          builder: (context, snapshot) {
+            final status = snapshot.data ?? BackendStatus.disconnected;
+            String text;
+            if (!s.enablePythonBackend) {
+              text = l10n.backendStatusBackendDisabled;
+            } else if (!s.autoConnectBackend) {
+              text = l10n.backendStatusAutoConnectOff;
+            } else {
+              text = switch (status) {
+                BackendStatus.connected => l10n.backendStatusConnected,
+                BackendStatus.initializing => l10n.backendStatusInitializing,
+                BackendStatus.incompatible => l10n.backendStatusIncompatible,
+                BackendStatus.disconnected => l10n.backendStatusDisconnected,
+              };
+            }
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(text),
+                const SizedBox(width: 8),
+                const Icon(Icons.edit_outlined, size: 16),
+              ],
+            );
+          },
         ),
-        SwitchListTile(
-          secondary: const Icon(Icons.play_circle_outline),
-          title: Text(l10n.generalAutoStartBackend),
-          subtitle: Text(l10n.generalAutoStartBackendSubtitle),
-          value: s.autoStartBackend,
-          onChanged: (v) => controller.setAutoStartBackend(v),
-        ),
-        ListTile(
-          leading: const Icon(Icons.cloud_outlined),
-          title: Text(l10n.generalBackendStatus),
-          subtitle: Text(s.pythonBackendUrl),
-          trailing: StreamBuilder<BackendStatus>(
-            stream: BackendService().statusStream,
-            initialData: BackendService().currentStatus,
-            builder: (context, snapshot) {
-              final status = snapshot.data ?? BackendStatus.disconnected;
-              String text;
-              if (!s.enablePythonBackend) {
-                text = l10n.backendStatusBackendDisabled;
-              } else if (!s.autoConnectBackend) {
-                text = l10n.backendStatusAutoConnectOff;
-              } else {
-                text = switch (status) {
-                  BackendStatus.connected => l10n.backendStatusConnected,
-                  BackendStatus.initializing => l10n.backendStatusInitializing,
-                  BackendStatus.incompatible => l10n.backendStatusIncompatible,
-                  BackendStatus.disconnected => l10n.backendStatusDisconnected,
-                };
-              }
-              return Row(
+        onTap: () async {
+          final ctl = TextEditingController(text: s.pythonBackendUrl);
+          final newUrl = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(l10n.generalBackendStatus),
+              content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(text),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.edit_outlined, size: 16),
-                ],
-              );
-            },
-          ),
-          onTap: () async {
-            final ctl = TextEditingController(text: s.pythonBackendUrl);
-            final newUrl = await showDialog<String>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: Text(l10n.generalBackendStatus),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: ctl,
-                      decoration: const InputDecoration(
-                        labelText: 'Backend URL',
-                        hintText: 'http://localhost:23456',
-                      ),
+                  TextField(
+                    controller: ctl,
+                    decoration: const InputDecoration(
+                      labelText: 'Backend URL',
+                      hintText: 'http://localhost:23456',
                     ),
-                    const SizedBox(height: 8),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Default: http://localhost:23456\nRemote: http://IP:PORT',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.commonCancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, ctl.text),
+                  child: Text(l10n.commonSave),
+                ),
+              ],
+            ),
+          );
+          if (newUrl != null && newUrl.isNotEmpty) {
+            controller.setPythonBackendUrl(newUrl);
+          }
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.bug_report_outlined),
+        title: const Text('查看最近错误（本机）'),
+        subtitle: const Text('用于排查 TTS 注入/回环/网络等失败原因'),
+        onTap: _showRecentErrorsDialog,
+      ),
+      ListTile(
+        leading: const Icon(Icons.face),
+        title: Text(l10n.generalUserNickname),
+        subtitle: Text(
+          s.userNickname.isEmpty ? l10n.generalNicknameNotSet : s.userNickname,
+        ),
+        trailing: const Icon(Icons.edit_outlined),
+        onTap: () async {
+          final ctl = TextEditingController(text: s.userNickname);
+          final newName = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(l10n.generalSetNickname),
+              content: TextField(
+                controller: ctl,
+                decoration: InputDecoration(
+                  hintText: l10n.generalNicknameHint,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.commonCancel),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, ctl.text),
+                  child: Text(l10n.commonSave),
+                ),
+              ],
+            ),
+          );
+          if (newName != null) {
+            controller.setUserNickname(newName);
+          }
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.person_outline),
+        title: Text(l10n.generalCharacterModel),
+        subtitle: Text(l10n.generalManageModels),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CharacterManagerScreen()),
+          );
+        },
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.animation),
+        title: Text(l10n.generalEnableLive2D),
+        subtitle: Text(l10n.generalShowLive2D),
+        value: s.enableLive2D,
+        onChanged: (v) => controller.setEnableLive2D(v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.visibility),
+        title: Text(l10n.generalShowLive2DHome),
+        subtitle: Text(l10n.generalShowLive2DHomeSubtitle),
+        value: s.showLive2D,
+        onChanged: s.enableLive2D ? (v) => controller.setShowLive2D(v) : null,
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.open_in_new),
+        title: Text(l10n.generalFloatingWindow),
+        subtitle: Text(l10n.generalFloatingWindowSubtitle),
+        value: s.enableFloatingWindow,
+        onChanged:
+            s.enableLive2D ? (v) => controller.setEnableFloatingWindow(v) : null,
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.face_retouching_natural),
+        title: Text(l10n.generalExpressionIsland),
+        subtitle: Text(l10n.generalExpressionIslandSubtitle),
+        value: s.showExpressionFace && s.enableExpressionAgent,
+        onChanged: (v) {
+          controller.setShowExpressionFace(v);
+          controller.setEnableExpressionAgent(v);
+        },
+      ),
+    ];
+
+    final ttsSectionChildren = <Widget>[
+      SwitchListTile(
+        secondary: const Icon(Icons.record_voice_over),
+        title: Text(l10n.generalEnableTts),
+        subtitle: Text(l10n.generalEnableTtsSubtitle),
+        value: s.enableTts,
+        onChanged: (v) => controller.setEnableTts(v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.volume_up),
+        title: const Text('TTS 注入到虚拟麦克风（后端播放）'),
+        subtitle: const Text(
+          '选择“虚拟麦克风（输入设备）”，后端自动匹配对应的播放端进行注入',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        value: s.ttsViaBackendDevice,
+        onChanged: (s.enableTts && s.enablePythonBackend)
+            ? (v) async {
+                await controller.setTtsViaBackendDevice(v);
+                if (v) {
+                  await _refreshAudioDevices();
+                }
+              }
+            : null,
+      ),
+      if (s.ttsViaBackendDevice)
+        ListTile(
+          leading: const Icon(Icons.mic),
+          title: const Text('TTS 虚拟麦克风（输入设备）'),
+          subtitle: _loadingAudioDevices
+              ? const Text('正在获取设备列表…')
+              : (_audioDevicesError != null
+                  ? Text('获取失败：$_audioDevicesError')
+                  : const Text('建议选择虚拟线的“CABLE Output（录音设备）”')),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: '刷新',
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: (s.enablePythonBackend) ? _refreshAudioDevices : null,
+              ),
+              DropdownButton<int?>(
+                value: safeTtsBackendDeviceIndex,
+                underline: const SizedBox(),
+                onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
+                    ? (v) => controller.setTtsBackendDeviceIndex(v)
+                    : null,
+                items: _buildInputDeviceItems('默认（系统默认输入）'),
+              ),
+            ],
+          ),
+        ),
+      if (s.ttsViaBackendDevice)
+        ListTile(
+          leading: const Icon(Icons.music_note),
+          title: const Text('测试 TTS 注入（播放测试音）'),
+          subtitle: const Text('用于确认虚拟麦克风注入链路是否通畅'),
+          enabled: s.enablePythonBackend && !_testingAudio,
+          onTap: (s.enablePythonBackend && !_testingAudio)
+              ? _testTtsInjectionTone
+              : null,
+        ),
+      if (s.ttsViaBackendDevice || s.sttViaBackendLoopback)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Text(
+            'VB-Cable 推荐：\n'
+            '1) 本软件 TTS 虚拟麦克风：选择 CABLE Output（录音设备 / 输入设备）\n'
+            '2) 语音软件麦克风：选择 CABLE Output（录音设备 / 输入设备）\n'
+            '3) STT 回环监听：选择与语音软件“播放设备”一致的输出设备（可以是扬声器/耳机，也可以是 CABLE Input）',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+    ];
+
+    final sttSectionChildren = <Widget>[
+      SwitchListTile(
+        secondary: const Icon(Icons.hearing),
+        title: Text(l10n.generalEnableStt),
+        subtitle: Text(l10n.generalEnableSttSubtitle),
+        value: s.enableStt,
+        onChanged: (v) => controller.setEnableStt(v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.headphones),
+        title: const Text('从系统声音识别（回环采集）'),
+        subtitle: const Text('把 Discord/KOOK 的语音频道声音转成文字发给 AI'),
+        value: s.sttViaBackendLoopback,
+        onChanged: (s.enableStt && s.enablePythonBackend)
+            ? (v) async {
+                await controller.setSttViaBackendLoopback(v);
+                if (v) {
+                  await _refreshAudioDevices();
+                }
+              }
+            : null,
+      ),
+      if (s.sttViaBackendLoopback)
+        ListTile(
+          leading: const Icon(Icons.headphones),
+          title: const Text('回环监听设备（输出设备）'),
+          subtitle: _loadingAudioDevices
+              ? const Text('正在获取设备列表…')
+              : (_audioDevicesError != null
+                  ? Text('获取失败：$_audioDevicesError')
+                  : const Text('应与语音软件的“播放设备”一致')),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: '刷新',
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: (s.enablePythonBackend) ? _refreshAudioDevices : null,
+              ),
+              DropdownButton<int?>(
+                value: safeSttLoopbackDeviceIndex,
+                underline: const SizedBox(),
+                onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
+                    ? (v) => controller.setSttLoopbackDeviceIndex(v)
+                    : null,
+                items: _buildOutputDeviceItems('默认（系统默认输出）'),
+              ),
+            ],
+          ),
+        ),
+      if (s.sttViaBackendLoopback)
+        ListTile(
+          leading: const Icon(Icons.equalizer),
+          title: const Text('测试回环监听（检测电平）'),
+          subtitle: const Text('用于确认能否采集到语音软件的输出声音'),
+          enabled: s.enablePythonBackend && !_testingAudio,
+          onTap: (s.enablePythonBackend && !_testingAudio)
+              ? _testLoopbackLevel
+              : null,
+        ),
+      if (s.sttViaBackendLoopback)
+        ListTile(
+          leading: const Icon(Icons.text_snippet),
+          title: const Text('测试回环监听（转写）'),
+          subtitle: const Text('用于确认 STT 能否把回环音频转成文字'),
+          enabled: s.enablePythonBackend && !_testingAudio,
+          onTap: (s.enablePythonBackend && !_testingAudio)
+              ? _testLoopbackTranscribe
+              : null,
+        ),
+      if (s.sttViaBackendLoopback)
+        ListTile(
+          leading: const Icon(Icons.timer),
+          title: const Text('回环采集时长'),
+          subtitle: const Text('越长越完整，但识别更慢'),
+          trailing: DropdownButton<int>(
+            value: s.sttLoopbackDurationSeconds,
+            underline: const SizedBox(),
+            onChanged: (v) {
+              if (v != null) {
+                controller.setSttLoopbackDurationSeconds(v);
+              }
+            },
+            items: const [
+              DropdownMenuItem(value: 3, child: Text('3 秒')),
+              DropdownMenuItem(value: 5, child: Text('5 秒')),
+              DropdownMenuItem(value: 8, child: Text('8 秒')),
+              DropdownMenuItem(value: 12, child: Text('12 秒')),
+            ],
+          ),
+        ),
+    ];
+
+    final appearanceSectionChildren = <Widget>[
+      ListTile(
+        title: Text(l10n.generalLanguage),
+        trailing: DropdownButton<LocaleOption>(
+          value: s.locale,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setLocale(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: LocaleOption.system,
+              child: Text(l10n.generalThemeSystem),
+            ),
+            const DropdownMenuItem(
+              value: LocaleOption.zh,
+              child: Text('简体中文'),
+            ),
+            const DropdownMenuItem(
+              value: LocaleOption.en,
+              child: Text('English'),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: Text(l10n.generalTheme),
+        trailing: DropdownButton<ThemeModeOption>(
+          value: s.themeMode,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setThemeMode(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: ThemeModeOption.system,
+              child: Text(l10n.generalThemeSystem),
+            ),
+            DropdownMenuItem(
+              value: ThemeModeOption.light,
+              child: Text(l10n.generalThemeLight),
+            ),
+            DropdownMenuItem(
+              value: ThemeModeOption.dark,
+              child: Text(l10n.generalThemeDark),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: Text(l10n.generalPalette),
+        trailing: DropdownButton<PaletteOption>(
+          value: s.palette,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setPalette(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: PaletteOption.neutral,
+              child: Text(l10n.generalPaletteNeutral),
+            ),
+            DropdownMenuItem(
+              value: PaletteOption.green,
+              child: Text(l10n.generalPaletteGreen),
+            ),
+            DropdownMenuItem(
+              value: PaletteOption.blue,
+              child: Text(l10n.generalPaletteBlue),
+            ),
+            DropdownMenuItem(
+              value: PaletteOption.orange,
+              child: Text(l10n.generalPaletteOrange),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: Text(l10n.generalUiMode),
+        trailing: DropdownButton<UIModeOption>(
+          value: s.uiMode,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setUiMode(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: UIModeOption.auto,
+              child: Text(l10n.generalUiModeAuto),
+            ),
+            DropdownMenuItem(
+              value: UIModeOption.bubble,
+              child: Text(l10n.generalUiModeBubble),
+            ),
+            DropdownMenuItem(
+              value: UIModeOption.simple,
+              child: Text(l10n.generalUiModeSimple),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: const Text('聊天模式 (Chat Mode)'),
+        subtitle: Text(
+          s.chatMode == ChatModeOption.persona
+              ? '拟人 (Persona) - 分段气泡，自然对话'
+              : '标准 (Standard) - 严格Markdown，生产力',
+        ),
+        trailing: DropdownButton<ChatModeOption>(
+          value: s.chatMode,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setChatMode(v);
+          },
+          items: const [
+            DropdownMenuItem(
+              value: ChatModeOption.persona,
+              child: Text('拟人 (Persona)'),
+            ),
+            DropdownMenuItem(
+              value: ChatModeOption.standard,
+              child: Text('标准 (Standard)'),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: const Text('人格深度 (Persona Level)'),
+        subtitle: Text(
+          s.personaLevel == PersonaLevelOption.basic
+              ? '基础 (Basic) - 仅设定身份'
+              : s.personaLevel == PersonaLevelOption.advanced
+                  ? '进阶 (Advanced) - 包含性格与记忆'
+                  : '完整 (Full) - 包含完整数字生命设定与交互',
+        ),
+        trailing: DropdownButton<PersonaLevelOption>(
+          value: s.personaLevel,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setPersonaLevel(v);
+          },
+          items: const [
+            DropdownMenuItem(
+              value: PersonaLevelOption.basic,
+              child: Text('基础 (Basic)'),
+            ),
+            DropdownMenuItem(
+              value: PersonaLevelOption.advanced,
+              child: Text('进阶 (Advanced)'),
+            ),
+            DropdownMenuItem(
+              value: PersonaLevelOption.full,
+              child: Text('完整 (Full)'),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: Text(l10n.generalChatBg),
+        trailing: DropdownButton<ChatBgOption>(
+          value: s.chatBg,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setChatBg(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: ChatBgOption.none,
+              child: Text(l10n.generalChatBgNone),
+            ),
+            DropdownMenuItem(
+              value: ChatBgOption.lavender,
+              child: Text(l10n.generalChatBgLavender),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: const Text('用户气泡颜色 (User Bubble)'),
+        trailing: _ColorCircle(
+          color: s.userBubbleColor != null
+              ? Color(s.userBubbleColor!)
+              : Theme.of(context).colorScheme.primary,
+          onTap: () => _showColorPicker(
+            context,
+            s.userBubbleColor,
+            (c) => controller.setUserBubbleColor(c?.toARGB32()),
+          ),
+        ),
+      ),
+      ListTile(
+        title: const Text('AI 气泡颜色 (AI Bubble)'),
+        trailing: _ColorCircle(
+          color: s.aiBubbleColor != null
+              ? Color(s.aiBubbleColor!)
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          onTap: () => _showColorPicker(
+            context,
+            s.aiBubbleColor,
+            (c) => controller.setAiBubbleColor(c?.toARGB32()),
+          ),
+        ),
+      ),
+    ];
+
+    final fontSectionChildren = <Widget>[
+      ListTile(
+        title: Text(l10n.generalBaseFont),
+        trailing: DropdownButton<BaseFontModeOption>(
+          value: s.baseFontMode,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setBaseFontMode(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: BaseFontModeOption.system,
+              child: Text(l10n.generalBaseFontSystem),
+            ),
+            DropdownMenuItem(
+              value: BaseFontModeOption.miSansPreferred,
+              child: Text(l10n.generalBaseFontMiSans),
+            ),
+          ],
+        ),
+      ),
+      ListTile(
+        title: Text(l10n.generalDecoFont),
+        trailing: DropdownButton<DecorativeFontFamily>(
+          value: s.decoFamily,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setDecoFamily(v);
+          },
+          items: [
+            DropdownMenuItem(
+              value: DecorativeFontFamily.none,
+              child: Text(l10n.generalDecoFontNone),
+            ),
+            const DropdownMenuItem(
+              value: DecorativeFontFamily.fzg,
+              child: Text('FZG'),
+            ),
+            const DropdownMenuItem(
+              value: DecorativeFontFamily.nfdcs,
+              child: Text('nfdcs'),
+            ),
+          ],
+        ),
+      ),
+      SwitchListTile(
+        title: Text(l10n.generalDecoUseTitles),
+        value: s.decoUseTitles,
+        onChanged: (v) => controller.setDecoUseTitles(v),
+      ),
+      SwitchListTile(
+        title: Text(l10n.generalDecoUseBubbles),
+        value: s.decoUseBubbles,
+        onChanged: (v) => controller.setDecoUseBubbles(v),
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Card(
+          elevation: 0,
+          color: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest
+              .withValues(alpha: 0.3),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.preview,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
                     Text(
-                      'Default: http://localhost:23456\nRemote: http://IP:PORT',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      l10n.generalFontPreview,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                     ),
                   ],
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(l10n.commonCancel),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, ctl.text),
-                    child: Text(l10n.commonSave),
-                  ),
-                ],
-              ),
-            );
-            if (newUrl != null && newUrl.isNotEmpty) {
-              controller.setPythonBackendUrl(newUrl);
-            }
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.bug_report_outlined),
-          title: const Text('查看最近错误（本机）'),
-          subtitle: const Text('用于排查 TTS 注入/回环/网络等失败原因'),
-          onTap: _showRecentErrorsDialog,
-        ),
-        ListTile(
-          leading: const Icon(Icons.face),
-          title: Text(l10n.generalUserNickname),
-          subtitle: Text(
-            s.userNickname.isEmpty
-                ? l10n.generalNicknameNotSet
-                : s.userNickname,
-          ),
-          trailing: const Icon(Icons.edit_outlined),
-          onTap: () async {
-            final ctl = TextEditingController(text: s.userNickname);
-            final newName = await showDialog<String>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: Text(l10n.generalSetNickname),
-                content: TextField(
-                  controller: ctl,
-                  decoration: InputDecoration(
-                    hintText: l10n.generalNicknameHint,
+                const SizedBox(height: 12),
+                Text(
+                  l10n.generalFontPreviewTitle,
+                  style: TextStyle(
+                    fontSize: 20 * s.textScale,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: s.decoUseTitles &&
+                            s.decoFamily != DecorativeFontFamily.none
+                        ? (s.decoFamily == DecorativeFontFamily.fzg
+                            ? 'FZG'
+                            : 'nfdcs')
+                        : null,
                   ),
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(l10n.commonCancel),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, ctl.text),
-                    child: Text(l10n.commonSave),
-                  ),
-                ],
-              ),
-            );
-            if (newName != null) {
-              controller.setUserNickname(newName);
-            }
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: Text(l10n.generalCharacterModel),
-          subtitle: Text(l10n.generalManageModels),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CharacterManagerScreen()),
-            );
-          },
-        ),
-        SwitchListTile(
-          secondary: const Icon(Icons.animation),
-          title: Text(l10n.generalEnableLive2D),
-          subtitle: Text(l10n.generalShowLive2D),
-          value: s.enableLive2D,
-          onChanged: (v) => controller.setEnableLive2D(v),
-        ),
-        SwitchListTile(
-          secondary: const Icon(Icons.visibility),
-          title: Text(l10n.generalShowLive2DHome),
-          subtitle: Text(l10n.generalShowLive2DHomeSubtitle),
-          value: s.showLive2D,
-          onChanged: s.enableLive2D ? (v) => controller.setShowLive2D(v) : null,
-        ),
-        SwitchListTile(
-          secondary: const Icon(Icons.open_in_new),
-          title: Text(l10n.generalFloatingWindow),
-          subtitle: Text(l10n.generalFloatingWindowSubtitle),
-          value: s.enableFloatingWindow,
-          onChanged: s.enableLive2D
-              ? (v) => controller.setEnableFloatingWindow(v)
-              : null,
-        ),
-        // Live2D Debug removed as requested
-        SwitchListTile(
-          secondary: const Icon(Icons.face_retouching_natural),
-          title: Text(l10n.generalExpressionIsland),
-          subtitle: Text(l10n.generalExpressionIslandSubtitle),
-          value: s.showExpressionFace && s.enableExpressionAgent,
-          onChanged: (v) {
-            controller.setShowExpressionFace(v);
-            controller.setEnableExpressionAgent(v);
-          },
-        ),
-
-        const SizedBox(height: 24),
-        _buildSectionHeader(context, l10n.generalVoiceInteraction),
-        Card(
-          child: Column(
-            children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.record_voice_over),
-                title: Text(l10n.generalEnableTts),
-                subtitle: Text(l10n.generalEnableTtsSubtitle),
-                value: s.enableTts,
-                onChanged: (v) => controller.setEnableTts(v),
-              ),
-              SwitchListTile(
-                secondary: const Icon(Icons.volume_up),
-                title: const Text('TTS 注入到虚拟麦克风（后端播放）'),
-                subtitle: const Text(
-                  '选择“虚拟麦克风（输入设备）”，后端自动匹配对应的播放端进行注入',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                value: s.ttsViaBackendDevice,
-                onChanged: (s.enableTts && s.enablePythonBackend)
-                    ? (v) async {
-                        await controller.setTtsViaBackendDevice(v);
-                        if (v) {
-                          await _refreshAudioDevices();
-                        }
-                      }
-                    : null,
-              ),
-              if (s.ttsViaBackendDevice)
-                ListTile(
-                  leading: const Icon(Icons.mic),
-                  title: const Text('TTS 虚拟麦克风（输入设备）'),
-                  subtitle: _loadingAudioDevices
-                      ? const Text('正在获取设备列表…')
-                      : (_audioDevicesError != null
-                          ? Text('获取失败：$_audioDevicesError')
-                          : const Text('建议选择虚拟线的“CABLE Output（录音设备）”')),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: '刷新',
-                        icon: const Icon(Icons.refresh, size: 18),
-                        onPressed:
-                            (s.enablePythonBackend) ? _refreshAudioDevices : null,
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(12),
+                      topRight: const Radius.circular(12),
+                      bottomRight: const Radius.circular(12),
+                      bottomLeft: Radius.circular(
+                        s.uiMode == UIModeOption.bubble ? 2 : 12,
                       ),
-                      DropdownButton<int?>(
-                        value: safeTtsBackendDeviceIndex,
-                        underline: const SizedBox(),
-                        onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
-                            ? (v) => controller.setTtsBackendDeviceIndex(v)
-                            : null,
-                        items: _buildInputDeviceItems('默认（系统默认输入）'),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              if (s.ttsViaBackendDevice)
-                ListTile(
-                  leading: const Icon(Icons.music_note),
-                  title: const Text('测试 TTS 注入（播放测试音）'),
-                  subtitle: const Text('用于确认虚拟麦克风注入链路是否通畅'),
-                  enabled: s.enablePythonBackend && !_testingAudio,
-                  onTap: (s.enablePythonBackend && !_testingAudio)
-                      ? _testTtsInjectionTone
-                      : null,
-                ),
-              if (s.ttsViaBackendDevice || s.sttViaBackendLoopback)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Text(
-                    'VB-Cable 推荐：\n'
-                    '1) 本软件 TTS 虚拟麦克风：选择 CABLE Output（录音设备 / 输入设备）\n'
-                    '2) 语音软件麦克风：选择 CABLE Output（录音设备 / 输入设备）\n'
-                    '3) STT 回环监听：选择与语音软件“播放设备”一致的输出设备（可以是扬声器/耳机，也可以是 CABLE Input）',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Column(
-            children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.hearing),
-                title: Text(l10n.generalEnableStt),
-                subtitle: Text(l10n.generalEnableSttSubtitle),
-                value: s.enableStt,
-                onChanged: (v) => controller.setEnableStt(v),
-              ),
-              SwitchListTile(
-                secondary: const Icon(Icons.headphones),
-                title: const Text('从系统声音识别（回环采集）'),
-                subtitle: const Text('把 Discord/KOOK 的语音频道声音转成文字发给 AI'),
-                value: s.sttViaBackendLoopback,
-                onChanged: (s.enableStt && s.enablePythonBackend)
-                    ? (v) async {
-                        await controller.setSttViaBackendLoopback(v);
-                        if (v) {
-                          await _refreshAudioDevices();
-                        }
-                      }
-                    : null,
-              ),
-              if (s.sttViaBackendLoopback)
-                ListTile(
-                  leading: const Icon(Icons.headphones),
-                  title: const Text('回环监听设备（输出设备）'),
-                  subtitle: _loadingAudioDevices
-                      ? const Text('正在获取设备列表…')
-                      : (_audioDevicesError != null
-                          ? Text('获取失败：$_audioDevicesError')
-                          : const Text('应与语音软件的“播放设备”一致')),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: '刷新',
-                        icon: const Icon(Icons.refresh, size: 18),
-                        onPressed:
-                            (s.enablePythonBackend) ? _refreshAudioDevices : null,
-                      ),
-                      DropdownButton<int?>(
-                        value: safeSttLoopbackDeviceIndex,
-                        underline: const SizedBox(),
-                        onChanged: (s.enablePythonBackend && !_loadingAudioDevices)
-                            ? (v) => controller.setSttLoopbackDeviceIndex(v)
-                            : null,
-                        items: _buildOutputDeviceItems('默认（系统默认输出）'),
-                      ),
-                    ],
-                  ),
-                ),
-              if (s.sttViaBackendLoopback)
-                ListTile(
-                  leading: const Icon(Icons.equalizer),
-                  title: const Text('测试回环监听（检测电平）'),
-                  subtitle: const Text('用于确认能否采集到语音软件的输出声音'),
-                  enabled: s.enablePythonBackend && !_testingAudio,
-                  onTap: (s.enablePythonBackend && !_testingAudio)
-                      ? _testLoopbackLevel
-                      : null,
-                ),
-              if (s.sttViaBackendLoopback)
-                ListTile(
-                  leading: const Icon(Icons.text_snippet),
-                  title: const Text('测试回环监听（转写）'),
-                  subtitle: const Text('用于确认 STT 能否把回环音频转成文字'),
-                  enabled: s.enablePythonBackend && !_testingAudio,
-                  onTap: (s.enablePythonBackend && !_testingAudio)
-                      ? _testLoopbackTranscribe
-                      : null,
-                ),
-              if (s.sttViaBackendLoopback)
-                ListTile(
-                  leading: const Icon(Icons.timer),
-                  title: const Text('回环采集时长'),
-                  subtitle: const Text('越长越完整，但识别更慢'),
-                  trailing: DropdownButton<int>(
-                    value: s.sttLoopbackDurationSeconds,
-                    underline: const SizedBox(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        controller.setSttLoopbackDurationSeconds(v);
-                      }
-                    },
-                    items: const [
-                      DropdownMenuItem(value: 3, child: Text('3 秒')),
-                      DropdownMenuItem(value: 5, child: Text('5 秒')),
-                      DropdownMenuItem(value: 8, child: Text('8 秒')),
-                      DropdownMenuItem(value: 12, child: Text('12 秒')),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        _buildSectionHeader(context, l10n.generalAppearance),
-        ListTile(
-          title: Text(l10n.generalLanguage),
-          trailing: DropdownButton<LocaleOption>(
-            value: s.locale,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setLocale(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: LocaleOption.system,
-                child: Text(l10n.generalThemeSystem),
-              ),
-              const DropdownMenuItem(
-                value: LocaleOption.zh,
-                child: Text('简体中文'),
-              ),
-              const DropdownMenuItem(
-                value: LocaleOption.en,
-                child: Text('English'),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-          title: Text(l10n.generalTheme),
-          trailing: DropdownButton<ThemeModeOption>(
-            value: s.themeMode,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setThemeMode(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: ThemeModeOption.system,
-                child: Text(l10n.generalThemeSystem),
-              ),
-              DropdownMenuItem(
-                value: ThemeModeOption.light,
-                child: Text(l10n.generalThemeLight),
-              ),
-              DropdownMenuItem(
-                value: ThemeModeOption.dark,
-                child: Text(l10n.generalThemeDark),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-          title: Text(l10n.generalPalette),
-          trailing: DropdownButton<PaletteOption>(
-            value: s.palette,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setPalette(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: PaletteOption.neutral,
-                child: Text(l10n.generalPaletteNeutral),
-              ),
-              DropdownMenuItem(
-                value: PaletteOption.green,
-                child: Text(l10n.generalPaletteGreen),
-              ),
-              DropdownMenuItem(
-                value: PaletteOption.blue,
-                child: Text(l10n.generalPaletteBlue),
-              ),
-              DropdownMenuItem(
-                value: PaletteOption.orange,
-                child: Text(l10n.generalPaletteOrange),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-          title: Text(l10n.generalUiMode),
-          trailing: DropdownButton<UIModeOption>(
-            value: s.uiMode,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setUiMode(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: UIModeOption.auto,
-                child: Text(l10n.generalUiModeAuto),
-              ),
-              DropdownMenuItem(
-                value: UIModeOption.bubble,
-                child: Text(l10n.generalUiModeBubble),
-              ),
-              DropdownMenuItem(
-                value: UIModeOption.simple,
-                child: Text(l10n.generalUiModeSimple),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-            title: const Text('聊天模式 (Chat Mode)'),
-            subtitle: Text(
-              s.chatMode == ChatModeOption.persona
-                  ? '拟人 (Persona) - 分段气泡，自然对话'
-                  : '标准 (Standard) - 严格Markdown，生产力',
-            ),
-            trailing: DropdownButton<ChatModeOption>(
-              value: s.chatMode,
-              underline: const SizedBox(),
-              onChanged: (v) {
-                if (v != null) controller.setChatMode(v);
-              },
-              items: const [
-                DropdownMenuItem(
-                  value: ChatModeOption.persona,
-                  child: Text('拟人 (Persona)'),
-                ),
-                DropdownMenuItem(
-                  value: ChatModeOption.standard,
-                  child: Text('标准 (Standard)'),
-                ),
-              ],
-            ),
-          ),
-          ListTile(
-            title: const Text('人格深度 (Persona Level)'),
-            subtitle: Text(
-              s.personaLevel == PersonaLevelOption.basic
-                  ? '基础 (Basic) - 仅设定身份'
-                  : s.personaLevel == PersonaLevelOption.advanced
-                      ? '进阶 (Advanced) - 包含性格与记忆'
-                      : '完整 (Full) - 包含完整数字生命设定与交互',
-            ),
-            trailing: DropdownButton<PersonaLevelOption>(
-              value: s.personaLevel,
-              underline: const SizedBox(),
-              onChanged: (v) {
-                if (v != null) controller.setPersonaLevel(v);
-              },
-              items: const [
-                DropdownMenuItem(
-                  value: PersonaLevelOption.basic,
-                  child: Text('基础 (Basic)'),
-                ),
-                DropdownMenuItem(
-                  value: PersonaLevelOption.advanced,
-                  child: Text('进阶 (Advanced)'),
-                ),
-                DropdownMenuItem(
-                  value: PersonaLevelOption.full,
-                  child: Text('完整 (Full)'),
-                ),
-              ],
-            ),
-          ),
-          ListTile(
-          title: Text(l10n.generalChatBg),
-          trailing: DropdownButton<ChatBgOption>(
-            value: s.chatBg,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setChatBg(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: ChatBgOption.none,
-                child: Text(l10n.generalChatBgNone),
-              ),
-              DropdownMenuItem(
-                value: ChatBgOption.lavender,
-                child: Text(l10n.generalChatBgLavender),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-          title: const Text('用户气泡颜色 (User Bubble)'),
-          trailing: _ColorCircle(
-            color: s.userBubbleColor != null
-                ? Color(s.userBubbleColor!)
-                : Theme.of(context).colorScheme.primary,
-            onTap: () => _showColorPicker(
-              context,
-              s.userBubbleColor,
-              (c) => controller.setUserBubbleColor(c?.value),
-            ),
-          ),
-        ),
-        ListTile(
-          title: const Text('AI 气泡颜色 (AI Bubble)'),
-          trailing: _ColorCircle(
-            color: s.aiBubbleColor != null
-                ? Color(s.aiBubbleColor!)
-                : Theme.of(context).colorScheme.surfaceContainerHighest,
-            onTap: () => _showColorPicker(
-              context,
-              s.aiBubbleColor,
-              (c) => controller.setAiBubbleColor(c?.value),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        _buildSectionHeader(context, l10n.generalFontSettings),
-        ListTile(
-          title: Text(l10n.generalBaseFont),
-          trailing: DropdownButton<BaseFontModeOption>(
-            value: s.baseFontMode,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setBaseFontMode(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: BaseFontModeOption.system,
-                child: Text(l10n.generalBaseFontSystem),
-              ),
-              DropdownMenuItem(
-                value: BaseFontModeOption.miSansPreferred,
-                child: Text(l10n.generalBaseFontMiSans),
-              ),
-            ],
-          ),
-        ),
-        ListTile(
-          title: Text(l10n.generalDecoFont),
-          trailing: DropdownButton<DecorativeFontFamily>(
-            value: s.decoFamily,
-            underline: const SizedBox(),
-            onChanged: (v) {
-              if (v != null) controller.setDecoFamily(v);
-            },
-            items: [
-              DropdownMenuItem(
-                value: DecorativeFontFamily.none,
-                child: Text(l10n.generalDecoFontNone),
-              ),
-              const DropdownMenuItem(
-                value: DecorativeFontFamily.fzg,
-                child: Text('FZG'),
-              ),
-              const DropdownMenuItem(
-                value: DecorativeFontFamily.nfdcs,
-                child: Text('nfdcs'),
-              ),
-            ],
-          ),
-        ),
-        SwitchListTile(
-          title: Text(l10n.generalDecoUseTitles),
-          value: s.decoUseTitles,
-          onChanged: (v) => controller.setDecoUseTitles(v),
-        ),
-        SwitchListTile(
-          title: Text(l10n.generalDecoUseBubbles),
-          value: s.decoUseBubbles,
-          onChanged: (v) => controller.setDecoUseBubbles(v),
-        ),
-
-        // Font Preview Area
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Card(
-            elevation: 0,
-            color: Theme.of(
-              context,
-            ).colorScheme.surfaceVariant.withOpacity(0.3),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color: Theme.of(context).dividerColor.withOpacity(0.1),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.preview,
-                        size: 16,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        l10n.generalFontPreview,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    l10n.generalFontPreviewTitle,
+                    l10n.generalFontPreviewText,
                     style: TextStyle(
-                      fontSize: 20 * s.textScale,
-                      fontWeight: FontWeight.bold,
-                      fontFamily:
-                          s.decoUseTitles &&
+                      fontSize: 16 * s.textScale,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      fontFamily: s.decoUseBubbles &&
                               s.decoFamily != DecorativeFontFamily.none
                           ? (s.decoFamily == DecorativeFontFamily.fzg
-                                ? 'FZG'
-                                : 'nfdcs')
+                              ? 'FZG'
+                              : 'nfdcs')
                           : null,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(12),
-                        topRight: const Radius.circular(12),
-                        bottomRight: const Radius.circular(12),
-                        bottomLeft: Radius.circular(
-                          s.uiMode == UIModeOption.bubble ? 2 : 12,
-                        ),
-                      ),
-                    ),
-                    child: Text(
-                      l10n.generalFontPreviewText,
-                      style: TextStyle(
-                        fontSize: 16 * s.textScale,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        fontFamily:
-                            s.decoUseBubbles &&
-                                s.decoFamily != DecorativeFontFamily.none
-                            ? (s.decoFamily == DecorativeFontFamily.fzg
-                                  ? 'FZG'
-                                  : 'nfdcs')
-                            : null,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
-
-        ListTile(
-          title: Text(l10n.generalTextScale),
-          subtitle: Slider(
-            value: s.textScale,
-            min: 0.9,
-            max: 1.4,
-            divisions: 10,
-            label: s.textScale.toStringAsFixed(2),
-            onChanged: (v) => controller.setTextScale(v),
-          ),
-          trailing: Text(s.textScale.toStringAsFixed(2)),
+      ),
+      ListTile(
+        title: Text(l10n.generalTextScale),
+        subtitle: Slider(
+          value: s.textScale,
+          min: 0.9,
+          max: 1.4,
+          divisions: 10,
+          label: s.textScale.toStringAsFixed(2),
+          onChanged: (v) => controller.setTextScale(v),
         ),
+        trailing: Text(s.textScale.toStringAsFixed(2)),
+      ),
+    ];
 
-        const SizedBox(height: 24),
-        _buildSectionHeader(context, l10n.generalQuickActions),
-        ListTile(
-          title: Text(l10n.generalQuickActionsInput),
-          subtitle: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final id in s.quickActions)
-                Chip(
-                  label: Text(_getQuickActionLabel(id, l10n)),
-                  avatar: Icon(_getQuickActionIcon(id), size: 16),
-                ),
-              if (s.quickActions.isEmpty)
-                Text(
-                  l10n.generalQuickActionsEmpty,
-                  style: const TextStyle(fontSize: 12),
-                ),
-            ],
-          ),
-          trailing: FilledButton.tonal(
-            onPressed: () => _showQuickActionsDialog(context, controller),
-            child: Text(l10n.generalEdit),
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        _buildSectionHeader(context, 'Persona & Onboarding'),
-        ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: const Text('Restart Onboarding Wizard / 重新运行向导'),
-          subtitle: const Text('Reset assistant persona and system prompt'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            showDialog(
-              context: context,
-              builder: (context) => FirstRunDialog(
-                settingsController: controller,
-                brain: BrainService(),
+    final quickActionsChildren = <Widget>[
+      ListTile(
+        title: Text(l10n.generalQuickActionsInput),
+        subtitle: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final id in s.quickActions)
+              Chip(
+                label: Text(_getQuickActionLabel(id, l10n)),
+                avatar: Icon(_getQuickActionIcon(id), size: 16),
               ),
-            );
-          },
+            if (s.quickActions.isEmpty)
+              Text(
+                l10n.generalQuickActionsEmpty,
+                style: const TextStyle(fontSize: 12),
+              ),
+          ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildSectionHeader(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.primary,
+        trailing: FilledButton.tonal(
+          onPressed: () => _showQuickActionsDialog(context, controller),
+          child: Text(l10n.generalEdit),
         ),
       ),
+    ];
+
+    final personaChildren = <Widget>[
+      ListTile(
+        leading: const Icon(Icons.person_outline),
+        title: const Text('Restart Onboarding Wizard / 重新运行向导'),
+        subtitle: const Text('Reset assistant persona and system prompt'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (context) => FirstRunDialog(
+              settingsController: controller,
+              brain: BrainService(),
+            ),
+          );
+        },
+      ),
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _ExpandableSection(
+          title: l10n.generalBasicSettings,
+          icon: Icons.settings_outlined,
+          children: basicSectionChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: '语音合成（TTS）',
+          icon: Icons.record_voice_over,
+          children: ttsSectionChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: '语音识别（STT）',
+          icon: Icons.hearing,
+          children: sttSectionChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: l10n.generalAppearance,
+          icon: Icons.palette_outlined,
+          children: appearanceSectionChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: l10n.generalFontSettings,
+          icon: Icons.font_download_outlined,
+          children: fontSectionChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: l10n.generalQuickActions,
+          icon: Icons.flash_on_outlined,
+          children: quickActionsChildren,
+        ),
+        const SizedBox(height: 12),
+        _ExpandableSection(
+          title: 'Persona & Onboarding',
+          icon: Icons.person_outline,
+          children: personaChildren,
+        ),
+      ],
     );
   }
 
@@ -1512,6 +1529,82 @@ class _GeneralTabState extends State<GeneralTab> {
   }
 }
 
+class _ExpandableSection extends StatefulWidget {
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  const _ExpandableSection({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  @override
+  State<_ExpandableSection> createState() => _ExpandableSectionState();
+}
+
+class _ExpandableSectionState extends State<_ExpandableSection>
+    with SingleTickerProviderStateMixin {
+  late bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bg =
+        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.25);
+    final border = theme.dividerColor.withValues(alpha: 0.12);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: ListTile(
+            leading: Icon(widget.icon),
+            title: Text(
+              widget.title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            trailing: AnimatedRotation(
+              turns: _expanded ? 0.5 : 0.0,
+              duration: const Duration(milliseconds: 180),
+              child: const Icon(Icons.expand_more),
+            ),
+            contentPadding: EdgeInsets.zero,
+            onTap: () => setState(() => _expanded = !_expanded),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Material(
+              color: bg,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: border),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: widget.children,
+              ),
+            ),
+          ),
+          crossFadeState:
+              _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+          firstCurve: Curves.easeOut,
+          secondCurve: Curves.easeIn,
+          sizeCurve: Curves.easeInOut,
+        ),
+      ],
+    );
+  }
+}
+
 class _ColorCircle extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
@@ -1534,7 +1627,7 @@ class _ColorCircle extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -1611,17 +1704,17 @@ Future<void> _showColorPicker(
                     color: c,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Colors.grey.withOpacity(0.3),
+                      color: Colors.grey.withValues(alpha: 0.3),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 2,
                         offset: const Offset(0, 1),
                       ),
                     ],
                   ),
-                  child: currentColorValue == c.value
+                  child: currentColorValue == c.toARGB32()
                       ? const Icon(Icons.check, color: Colors.white)
                       : null,
                 ),
