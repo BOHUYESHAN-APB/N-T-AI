@@ -132,17 +132,37 @@ class AudioService:
 
         return "ffmpeg"
 
-    async def _convert_audio_bytes_to_wav(self, audio_bytes: bytes) -> bytes:
+    async def _convert_audio_bytes_to_wav(
+        self,
+        audio_bytes: bytes,
+        samplerate: Optional[int] = None,
+        channels: Optional[int] = None,
+    ) -> bytes:
         import asyncio
 
-        return await asyncio.to_thread(self._convert_audio_bytes_to_wav_blocking, audio_bytes)
+        return await asyncio.to_thread(
+            self._convert_audio_bytes_to_wav_blocking,
+            audio_bytes,
+            samplerate,
+            channels,
+        )
 
-    async def convert_to_wav(self, audio_bytes: bytes) -> bytes:
-        if self._is_wav_bytes(audio_bytes):
+    async def convert_to_wav(
+        self,
+        audio_bytes: bytes,
+        samplerate: Optional[int] = None,
+        channels: Optional[int] = None,
+    ) -> bytes:
+        if self._is_wav_bytes(audio_bytes) and samplerate is None and channels is None:
             return audio_bytes
-        return await self._convert_audio_bytes_to_wav(audio_bytes)
+        return await self._convert_audio_bytes_to_wav(audio_bytes, samplerate=samplerate, channels=channels)
 
-    def _convert_audio_bytes_to_wav_blocking(self, audio_bytes: bytes) -> bytes:
+    def _convert_audio_bytes_to_wav_blocking(
+        self,
+        audio_bytes: bytes,
+        samplerate: Optional[int] = None,
+        channels: Optional[int] = None,
+    ) -> bytes:
         import subprocess
 
         ffmpeg_path = self._resolve_ffmpeg_path()
@@ -153,6 +173,12 @@ class AudioService:
             "error",
             "-i",
             "pipe:0",
+        ]
+        if isinstance(channels, int) and channels > 0:
+            cmd += ["-ac", str(channels)]
+        if isinstance(samplerate, int) and samplerate > 0:
+            cmd += ["-ar", str(samplerate)]
+        cmd += [
             "-f",
             "wav",
             "-acodec",

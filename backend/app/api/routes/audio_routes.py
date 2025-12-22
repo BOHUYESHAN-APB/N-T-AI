@@ -309,6 +309,8 @@ async def play_audio(
 @router.post("/convert/wav")
 async def convert_to_wav(
     audio_b64: str = Body(..., embed=True),
+    samplerate: Optional[int] = Body(None, embed=True),
+    channels: Optional[int] = Body(None, embed=True),
 ):
     try:
         audio_bytes = base64.b64decode(audio_b64)
@@ -318,7 +320,7 @@ async def convert_to_wav(
 
     try:
         logger.info(f"[AudioRoutes] convert_to_wav request: bytes={len(audio_bytes)}")
-        wav_bytes = await audio_service.convert_to_wav(audio_bytes)
+        wav_bytes = await audio_service.convert_to_wav(audio_bytes, samplerate=samplerate, channels=channels)
         return Response(content=wav_bytes, media_type="audio/wav")
     except RuntimeError as e:
         logger.error(f"[AudioRoutes] convert_to_wav runtime error: {e}", exc_info=True)
