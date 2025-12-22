@@ -304,6 +304,26 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
             user_nickname = unquote(user_nickname)
         except Exception:
             pass
+
+    system_prompt_override = raw_request.headers.get("X-System-Prompt")
+    if system_prompt_override:
+        try:
+            system_prompt_override = unquote(system_prompt_override)
+        except Exception:
+            pass
+
+    assistant_name = raw_request.headers.get("X-Assistant-Name")
+    if assistant_name:
+        try:
+            assistant_name = unquote(assistant_name)
+        except Exception:
+            pass
+
+    learning_probability_header = raw_request.headers.get("X-Learning-Probability")
+    try:
+        learning_probability = float(learning_probability_header) if learning_probability_header else 1.0
+    except Exception:
+        learning_probability = 1.0
     
     # Extract Temperature from Header (if provided by frontend logic) or Body
     # Frontend sends X-Temperature header now.
@@ -342,11 +362,6 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     auth_header = raw_request.headers.get("Authorization")
     if not tts_api_key and auth_header and auth_header.startswith("Bearer "):
         tts_api_key = auth_header.replace("Bearer ", "").strip()
-    # Fallback: use target LLM credentials if TTS not provided
-    if not tts_api_key:
-        tts_api_key = target_api_key
-    if not tts_base_url:
-        tts_base_url = target_base_url
 
     # Debug logging
     logger.info(f"X-Enable-Browser header: '{enable_search_str}' -> enable_search={enable_search}")
@@ -406,7 +421,10 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 chat_mode=chat_mode,
                 deep_research=deep_research,
                 suppress_inner_monologue=suppress_inner_monologue,
-                user_nickname=user_nickname
+                user_nickname=user_nickname,
+                system_prompt_override=system_prompt_override,
+                assistant_name=assistant_name,
+                learning_probability=learning_probability,
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)
         

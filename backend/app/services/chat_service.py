@@ -10,7 +10,17 @@ from app.services.search_service import SearchService
 from app.services.audio_service import AudioService
 from app.services.meme_service import MemeService
 from app.api.routes.live2d_routes import manager as live2d_manager
-from app.core.prompts import FIREFLY_PERSONA, FIREFLY_PERSONA_BASIC, FIREFLY_PERSONA_ADVANCED, FIREFLY_PERSONA_FULL, MEMORY_EXTRACTION_PROMPT, AGENT_INSTRUCTIONS
+from app.core.prompts import (
+    FIREFLY_PERSONA,
+    FIREFLY_PERSONA_BASIC,
+    FIREFLY_PERSONA_ADVANCED,
+    FIREFLY_PERSONA_FULL,
+    MEMORY_EXTRACTION_PROMPT,
+    AGENT_INSTRUCTIONS,
+    PERSONA_STYLE_NEURO,
+    PERSONA_STYLE_TOXIC,
+    PERSONA_STYLE_CUTE,
+)
 from app.core.logger import logger
 from fastapi import BackgroundTasks
 import asyncio
@@ -26,6 +36,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.tools.academic_search import academic_search
 import httpx
+import random
 
 class ChatService:
     def __init__(self):
@@ -187,35 +198,25 @@ class ChatService:
 
         clean_text = self._sanitize_text_for_tts(text)
 
-        tts_api_key = api_key if api_key else settings.TTS_API_KEY
-        tts_base_url = base_url if base_url else settings.TTS_BASE_URL
-        # Use provided voice, or fallback to settings, or default
-        tts_voice = voice if voice else (settings.TTS_VOICE if hasattr(settings, 'TTS_VOICE') else "sys_female_01")
+        tts_api_key = (api_key or "").strip() if api_key else ""
+        tts_base_url = (base_url or "").strip() if base_url else ""
+        tts_voice = (voice or "").strip() if voice else ""
 
-        should_switch_to_settings = False
-        if not tts_api_key:
-            should_switch_to_settings = True
-        elif tts_base_url and "deepseek" in tts_base_url.lower():
-            should_switch_to_settings = True
-
-        if should_switch_to_settings and settings.TTS_API_KEY:
-            print(f"[Backend TTS] Switching to configured TTS provider (SiliconFlow) instead of {tts_base_url}")
-            tts_api_key = settings.TTS_API_KEY
-            tts_base_url = settings.TTS_BASE_URL or "https://api.siliconflow.cn/v1"
+        if not tts_api_key or len(tts_api_key) < 10:
+            logger.warning("[Backend TTS] Missing or invalid TTS API key, skip audio generation")
+            return
 
         if not tts_base_url:
             tts_base_url = "https://api.siliconflow.cn/v1"
-
-        if not tts_api_key or len(str(tts_api_key).strip()) < 10:
-            logger.error("[Backend TTS] Missing or invalid TTS API key. Provide X-SiliconFlow-Api-Key header or set TTS_API_KEY in .env")
-            return
+        if not tts_voice:
+            tts_voice = "sys_female_01"
 
         try:
-            print(f"[Backend TTS] Generating audio for text: {clean_text[:20]}... Voice: {tts_voice}")
+            logger.info(f"[Backend TTS] Generating audio: text_len={len(clean_text)}, voice={tts_voice}")
             
             # Split into chunks for faster response
             chunks = self._split_into_chunks(clean_text)
-            print(f"[Backend TTS] Split response into {len(chunks)} chunks.")
+            logger.info(f"[Backend TTS] Split into {len(chunks)} chunks")
             
             tasks = []
             for sentence in chunks:
@@ -233,7 +234,7 @@ class ChatService:
             
             if not tasks: return
 
-            print(f"[Backend TTS] Starting {len(tasks)} TTS tasks concurrently...")
+            logger.info(f"[Backend TTS] Starting {len(tasks)} TTS tasks concurrently...")
             
             # Schedule all tasks
             running_tasks = [asyncio.create_task(t) for t in tasks]
@@ -248,16 +249,16 @@ class ChatService:
                             "audioData": b64_audio,
                             "text": chunks[i] if i < len(chunks) else ""
                         })
-                        print(f"[Backend TTS] Broadcasted chunk {i+1}/{len(chunks)}")
+                        logger.info(f"[Backend TTS] Broadcasted chunk {i+1}/{len(chunks)}")
                         # Minimal delay to ensure network order
                         await asyncio.sleep(0.05)
                     else:
                         logger.error(f"[Backend TTS] Chunk {i} result invalid")
                 except Exception as e:
-                    logger.error(f"[Backend TTS] Error generating chunk {i}: {e}")
+                    logger.error(f"[Backend TTS] Error generating chunk {i}: {e}", exc_info=True)
 
         except Exception as e:
-            logger.error(f"[Backend TTS] Error generating audio: {e}")
+            logger.error(f"[Backend TTS] Error generating audio: {e}", exc_info=True)
 
 
     async def process_message(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
@@ -279,7 +280,10 @@ class ChatService:
                             chat_mode: str = "persona",
                             deep_research: bool = False,
                             suppress_inner_monologue: bool = False,
-                            user_nickname: Optional[str] = None) -> str:
+                            user_nickname: Optional[str] = None,
+                            system_prompt_override: Optional[str] = None,
+                            assistant_name: Optional[str] = None,
+                            learning_probability: float = 1.0) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
 
@@ -316,16 +320,61 @@ class ChatService:
             logger.warning(f"Mood retrieval failed, using default: {e}")
 
         react_context = ""
+        light_context = None
+        prefetch_timed_out = False
+        latency_fallback_sent = False
         try:
-            react_context = await self.memory_system.retrieve_context(
-                text_content, 
-                user_id, 
-                target_api_key, 
-                target_base_url, 
-                target_model
+            prefetch_task = self.memory_system.start_light_prefetch(
+                user_query=text_content,
+                user_id=user_id,
+                api_key=target_api_key,
+                base_url=target_base_url,
             )
+            if prefetch_task is not None:
+                try:
+                    light_context = await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.9)
+                except asyncio.TimeoutError:
+                    prefetch_timed_out = True
+                    light_context = ""
+                except Exception:
+                    light_context = None
+
+            if prefetch_timed_out:
+                react_context = await self.memory_system.retrieve_context(
+                    text_content,
+                    user_id,
+                    target_api_key,
+                    target_base_url,
+                    target_model,
+                    light_context=light_context,
+                    fast_mode=True,
+                )
+            else:
+                react_context = await self.memory_system.retrieve_context(
+                    text_content,
+                    user_id,
+                    target_api_key,
+                    target_base_url,
+                    target_model,
+                    light_context=light_context,
+                )
         except Exception as e:
             logger.warning(f"Memory context retrieval failed, continuing without it: {e}")
+
+        if prefetch_timed_out and (not enable_search) and (not deep_research):
+            try:
+                filler = random.choice(["嗯…", "等下哈…", "让我想想…", "稍等一下…"])
+                question = "我先确认一下：你更想要我给结论，还是给一步步的做法？"
+                await live2d_manager.broadcast(
+                    {
+                        "type": "gemini_response",
+                        "text": f"{filler}{question}",
+                        "isNewMessage": True,
+                    }
+                )
+                latency_fallback_sent = True
+            except Exception:
+                latency_fallback_sent = False
 
         style_suggestion = ""
         try:
@@ -334,12 +383,23 @@ class ChatService:
             logger.warning(f"Expression style retrieval failed, continuing without it: {e}")
         
         # 4. Build Prompt
-        if persona_mode == "basic":
-            system_prompt = FIREFLY_PERSONA_BASIC
-        elif persona_mode == "advanced":
-            system_prompt = FIREFLY_PERSONA_ADVANCED
+        if system_prompt_override and system_prompt_override.strip():
+            system_prompt = system_prompt_override.strip()
         else:
-            system_prompt = FIREFLY_PERSONA_FULL
+            if persona_mode == "basic":
+                system_prompt = FIREFLY_PERSONA_BASIC
+            elif persona_mode == "advanced":
+                system_prompt = FIREFLY_PERSONA_ADVANCED
+            else:
+                system_prompt = FIREFLY_PERSONA_FULL
+
+        persona_style = (getattr(settings, "PERSONA_STYLE", "") or "neuro").strip().lower()
+        if persona_style == "toxic":
+            system_prompt += "\n\n" + PERSONA_STYLE_TOXIC
+        elif persona_style == "cute":
+            system_prompt += "\n\n" + PERSONA_STYLE_CUTE
+        else:
+            system_prompt += "\n\n" + PERSONA_STYLE_NEURO
         
         # Inject Current Time
         now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M")
@@ -349,6 +409,9 @@ class ChatService:
         
         if react_context:
             system_prompt += f"\n\n[Thinking/Memory Context]:\n{react_context}"
+
+        if prefetch_timed_out and not react_context and (not enable_search) and (not deep_research):
+            system_prompt += "\n\n[Latency Policy]: 如果你需要更多背景/检索才能更好回答，请先用一句口语化填充词，并提出一个澄清问题，保持回复简短。"
         
         if style_suggestion:
             system_prompt += f"\n\n[Style Instruction]: {style_suggestion}"
@@ -576,6 +639,17 @@ class ChatService:
             session.add(ai_msg)
             session.commit()
 
+        try:
+            await live2d_manager.broadcast(
+                {
+                    "type": "gemini_response",
+                    "text": final_response_text,
+                    "isNewMessage": not latency_fallback_sent,
+                }
+            )
+        except Exception:
+            pass
+
         # 6.5 Meme Injection (Proactive)
         # Only in normal chat mode (not Deep Research), try to find a relevant meme
         if not deep_research:
@@ -607,17 +681,35 @@ class ChatService:
 
         # 7. Post-Processing (Learning & Mood Update & Audio Generation)
         if background_tasks:
-            background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
+            try:
+                p = float(learning_probability)
+            except Exception:
+                p = 1.0
+            if p < 0.0:
+                p = 0.0
+            if p > 1.0:
+                p = 1.0
+            if p > 0.0 and random.random() < p:
+                background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
             background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}], target_api_key, target_base_url, target_model)
             if enable_backend_tts:
-                final_tts_key = tts_api_key if tts_api_key else target_api_key
-                final_tts_url = tts_base_url if tts_base_url else target_base_url
+                final_tts_key = tts_api_key
+                final_tts_url = tts_base_url
                 tts_text = self._sanitize_text_for_tts(final_response_text)
                 background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url, tts_voice)
         else:
             # Fallback for when no background_tasks context is provided
             # Note: Awaiting here will block the response, but it's safer than losing the tasks
-            await self._learn_from_interaction(text_content, user_id, target_api_key, target_base_url, target_model)
+            try:
+                p = float(learning_probability)
+            except Exception:
+                p = 1.0
+            if p < 0.0:
+                p = 0.0
+            if p > 1.0:
+                p = 1.0
+            if p > 0.0 and random.random() < p:
+                await self._learn_from_interaction(text_content, user_id, target_api_key, target_base_url, target_model)
             await self.mood_service.update_mood(
                 user_id, 
                 [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}],
@@ -626,8 +718,8 @@ class ChatService:
                 target_model
             )
             if enable_backend_tts:
-                final_tts_key = tts_api_key if tts_api_key else target_api_key
-                final_tts_url = tts_base_url if tts_base_url else target_base_url
+                final_tts_key = tts_api_key
+                final_tts_url = tts_base_url
                 tts_text = self._sanitize_text_for_tts(final_response_text)
                 asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url, tts_voice))
 

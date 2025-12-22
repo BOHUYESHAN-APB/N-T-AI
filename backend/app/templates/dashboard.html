@@ -1,92 +1,233 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Astra-Me Memory Dashboard</title>
+    <title>Astra-Me 记忆控制台</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
-        .stat-label { color: #666; font-size: 14px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
-        th { background-color: #f8f9fa; color: #333; }
-        tr:hover { background-color: #f1f1f1; }
-        .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; background: #e9ecef; color: #495057; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f7; color: #1d1d1f; }
+        .container { max-width: 1280px; margin: 0 auto; background: white; padding: 20px; border-radius: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+        h1 { margin: 0 0 16px 0; font-size: 22px; }
+        h2 { margin: 0 0 12px 0; font-size: 16px; }
+        .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .card { background: #fafafa; border: 1px solid #eee; border-radius: 12px; padding: 14px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .stat { background: white; border: 1px solid #eee; border-radius: 12px; padding: 12px; }
+        .stat .value { font-size: 22px; font-weight: 700; }
+        .stat .label { color: #666; font-size: 12px; margin-top: 2px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #f2f2f2; color: #333; border: 1px solid #e6e6e6; }
+        .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid #e6e6e6; background: #fff; }
+        .pill.ok { color: #16784b; border-color: rgba(22,120,75,0.25); background: rgba(22,120,75,0.06); }
+        .pill.no { color: #8a8a8a; }
+        input, select { height: 36px; border-radius: 10px; border: 1px solid #ddd; padding: 0 12px; outline: none; }
+        input:focus, select:focus { border-color: #007aff; box-shadow: 0 0 0 3px rgba(0,122,255,0.15); }
+        button { height: 36px; border-radius: 10px; border: 1px solid #ddd; background: white; padding: 0 12px; cursor: pointer; }
+        button.primary { background: #007aff; color: white; border-color: #007aff; }
+        button.danger { background: #ff3b30; color: white; border-color: #ff3b30; }
+        button:disabled { opacity: 0.55; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+        th { font-size: 12px; color: #666; font-weight: 600; background: #fafafa; position: sticky; top: 0; }
+        .muted { color: #666; font-size: 12px; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 960px) { .grid2 { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🧠 Astra-Me Memory Dashboard</h1>
+        <h1>🧠 Astra-Me 记忆核心控制台</h1>
         
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-value" id="total-memories">-</div>
-                <div class="stat-label">Total Memories</div>
+        <div class="card">
+            <div class="stats">
+                <div class="stat">
+                    <div class="value" id="stat-total-memories">-</div>
+                    <div class="label">记忆条数</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="stat-total-users">-</div>
+                    <div class="label">用户数</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="stat-with-emb">-</div>
+                    <div class="label">已向量化</div>
+                </div>
+                <div class="stat">
+                    <div class="value" id="stat-without-emb">-</div>
+                    <div class="label">未向量化</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value" id="user-interactions">-</div>
-                <div class="stat-label">User Interactions</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="current-mood">-</div>
-                <div class="stat-label">Current Mood</div>
+            <div class="row" style="margin-top: 12px;">
+                <span class="muted">最新写入：</span><span class="mono muted" id="stat-latest">-</span>
+                <span class="muted" style="margin-left: 8px;">分类：</span><span class="mono muted" id="stat-categories">-</span>
             </div>
         </div>
 
-        <h2>Recent Memories</h2>
-        <table id="memory-table">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Content</th>
-                    <th>Category</th>
-                    <th>Created At</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Data will be populated here -->
-            </tbody>
-        </table>
+        <div class="grid2" style="margin-top: 12px;">
+            <div class="card">
+                <h2>列表</h2>
+                <div class="row">
+                    <input id="filter-user" placeholder="user_id（可选）" style="min-width: 200px;" />
+                    <input id="filter-category" placeholder="category（可选）" style="min-width: 160px;" />
+                    <input id="filter-q" placeholder="内容包含（可选）" style="min-width: 240px;" />
+                    <select id="filter-limit">
+                        <option value="100">100</option>
+                        <option value="300" selected>300</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
+                    </select>
+                    <button class="primary" onclick="refreshAll()">刷新</button>
+                    <button onclick="rebuildEmbeddings()">补全向量</button>
+                    <button class="danger" onclick="resetAll()">清空全部</button>
+                </div>
+                <div class="muted" style="margin-top: 10px;">提示：清空是高危操作，仅用于本地测试/重置。</div>
+            </div>
+            <div class="card">
+                <h2>向量检索测试</h2>
+                <div class="row">
+                    <input id="search-user" placeholder="user_id" style="min-width: 200px;" />
+                    <input id="search-query" placeholder="query" style="min-width: 280px;" />
+                    <button class="primary" onclick="runSearch()">检索</button>
+                </div>
+                <div id="search-result" class="muted" style="margin-top: 10px; white-space: pre-wrap;"></div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 12px;">
+            <h2>记忆碎片</h2>
+            <div style="max-height: 520px; overflow: auto; border: 1px solid #eee; border-radius: 12px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 70px;">ID</th>
+                            <th style="width: 160px;">user_id</th>
+                            <th>内容</th>
+                            <th style="width: 120px;">分类</th>
+                            <th style="width: 90px;">权重</th>
+                            <th style="width: 120px;">向量</th>
+                            <th style="width: 170px;">时间</th>
+                            <th style="width: 80px;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="memory-tbody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <script>
-        async function fetchData() {
-            try {
-                // Fetch Stats (Mock for now, or implement specific endpoint)
-                // For now we just fetch memories
-                const response = await fetch('/v1/memory/all?limit=20');
-                const memories = await response.json();
-                
-                document.getElementById('total-memories').textContent = memories.length;
-                
-                const tbody = document.querySelector('#memory-table tbody');
-                tbody.innerHTML = '';
-                
-                memories.forEach(mem => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${mem.id}</td>
-                        <td>${mem.content}</td>
-                        <td><span class="tag">${mem.category}</span></td>
-                        <td>${new Date(mem.created_at).toLocaleString()}</td>
-                    `;
-                    tbody.appendChild(row);
-                });
+        function esc(s) {
+            return (s ?? '').toString()
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
 
-                // Fetch Mood (Optional)
-                // const moodResp = await fetch('/v1/mood/current');
-                // ...
+        function fmtTime(iso) {
+            try { return iso ? new Date(iso).toLocaleString() : '-'; } catch (_) { return iso ?? '-'; }
+        }
+
+        async function loadStats() {
+            const resp = await fetch('/v1/memory/stats');
+            const s = await resp.json();
+            document.getElementById('stat-total-memories').textContent = s.total_memories ?? '-';
+            document.getElementById('stat-total-users').textContent = s.total_users ?? '-';
+            document.getElementById('stat-with-emb').textContent = s.with_embeddings ?? '-';
+            document.getElementById('stat-without-emb').textContent = s.without_embeddings ?? '-';
+            document.getElementById('stat-latest').textContent = s.latest_created_at ? fmtTime(s.latest_created_at) : '-';
+            document.getElementById('stat-categories').textContent = s.categories ? JSON.stringify(s.categories) : '-';
+        }
+
+        async function loadMemories() {
+            const user = document.getElementById('filter-user').value.trim();
+            const cat = document.getElementById('filter-category').value.trim();
+            const q = document.getElementById('filter-q').value.trim();
+            const limit = document.getElementById('filter-limit').value;
+
+            const params = new URLSearchParams();
+            if (user) params.set('user_id', user);
+            if (cat) params.set('category', cat);
+            if (q) params.set('q', q);
+            params.set('limit', limit);
+
+            const resp = await fetch(`/api/memories?${params.toString()}`);
+            const items = await resp.json();
+
+            const tbody = document.getElementById('memory-tbody');
+            tbody.innerHTML = '';
+            items.forEach(mem => {
+                const short = (mem.content ?? '').toString();
+                const preview = short.length > 200 ? short.slice(0, 200) + '…' : short;
+                const emb = mem.has_embedding ? `<span class="pill ok">✔ 已向量化</span>` : `<span class="pill no">—</span>`;
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="mono">${esc(mem.id)}</td>
+                    <td class="mono">${esc(mem.user_id)}</td>
+                    <td title="${esc(short)}">${esc(preview)}</td>
+                    <td><span class="tag">${esc(mem.category)}</span></td>
+                    <td class="mono">${esc(mem.weight)}</td>
+                    <td>${emb}</td>
+                    <td class="mono muted">${fmtTime(mem.created_at)}</td>
+                    <td><button class="danger" onclick="deleteMemory(${mem.id})">删</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function deleteMemory(id) {
+            if (!confirm(`确定删除记忆 #${id} 吗？`)) return;
+            await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+            await refreshAll();
+        }
+
+        async function resetAll() {
+            if (!confirm('⚠️ 高危操作：确定要清空所有记忆吗？这将无法恢复！')) return;
+            await fetch('/api/memories/reset', { method: 'POST' });
+            await refreshAll();
+        }
+
+        async function rebuildEmbeddings() {
+            const user = document.getElementById('filter-user').value.trim();
+            const limit = parseInt(document.getElementById('filter-limit').value, 10) || 300;
+            const resp = await fetch('/v1/memory/rebuild_embeddings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: user || null, limit: Math.min(limit, 1000), force: false })
+            });
+            const r = await resp.json();
+            alert(`完成：updated=${r.updated} scanned=${r.scanned}`);
+            await refreshAll();
+        }
+
+        async function runSearch() {
+            const user = document.getElementById('search-user').value.trim();
+            const query = document.getElementById('search-query').value.trim();
+            if (!user || !query) {
+                document.getElementById('search-result').textContent = '请填写 user_id 与 query。';
+                return;
+            }
+            const params = new URLSearchParams({ user_id: user, query: query, limit: '8', threshold: '0.72' });
+            const resp = await fetch(`/v1/memory/search?${params.toString()}`);
+            const data = await resp.json();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const lines = items.map(it => {
+                const s = (it.score ?? 0).toFixed ? it.score.toFixed(3) : it.score;
+                return `[${s}] (${it.category ?? 'other'}) ${it.content ?? ''}`;
+            });
+            document.getElementById('search-result').textContent = lines.length ? lines.join('\n') : '无结果。';
+        }
+
+        async function refreshAll() {
+            try {
+                await Promise.all([loadStats(), loadMemories()]);
             } catch (e) {
-                console.error("Error fetching data:", e);
+                console.error(e);
             }
         }
 
-        fetchData();
+        refreshAll();
     </script>
 </body>
 </html>

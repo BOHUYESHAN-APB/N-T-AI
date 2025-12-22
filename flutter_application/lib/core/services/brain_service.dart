@@ -1325,6 +1325,7 @@ Based on these comments, do you want to proactively say something to the audienc
         messages, 
         usageType: 'main',
         providerOverride: providerConfig,
+        systemPromptOverride: systemPromptOverride,
       );
       String response = aiResponse.content;
       

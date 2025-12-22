@@ -104,6 +104,60 @@ function init_app(){
     // 暴露到全局作用域，供 live2d.js 等其他模块访问
     window.proactiveChatEnabled = proactiveChatEnabled;
     window.focusModeEnabled = focusModeEnabled;
+
+    try {
+        const raw = localStorage.getItem('proactiveChatEnabled');
+        if (raw === 'true' || raw === 'false') {
+            proactiveChatEnabled = raw === 'true';
+            window.proactiveChatEnabled = proactiveChatEnabled;
+        }
+    } catch (_) {}
+
+    function stopProactiveChatSchedule() {
+        if (proactiveChatTimer) {
+            clearTimeout(proactiveChatTimer);
+            proactiveChatTimer = null;
+        }
+    }
+
+    function scheduleProactiveChat() {
+        stopProactiveChatSchedule();
+        if (!proactiveChatEnabled) return;
+        if (isRecording) return;
+        const delay = Math.min(PROACTIVE_CHAT_BASE_DELAY * Math.pow(2, proactiveChatBackoffLevel), 8 * 60 * 1000);
+        proactiveChatTimer = setTimeout(() => {
+            if (!proactiveChatEnabled) return;
+            if (isRecording) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            try {
+                socket.send(JSON.stringify({ action: 'proactive_chat' }));
+            } catch (_) {}
+            proactiveChatBackoffLevel = Math.min(proactiveChatBackoffLevel + 1, 6);
+            scheduleProactiveChat();
+        }, delay);
+    }
+
+    function resetProactiveChatBackoff() {
+        proactiveChatBackoffLevel = 0;
+        scheduleProactiveChat();
+    }
+
+    function setProactiveChatEnabled(flag) {
+        proactiveChatEnabled = !!flag;
+        window.proactiveChatEnabled = proactiveChatEnabled;
+        try {
+            localStorage.setItem('proactiveChatEnabled', proactiveChatEnabled ? 'true' : 'false');
+        } catch (_) {}
+        if (proactiveChatEnabled) {
+            resetProactiveChatBackoff();
+        } else {
+            stopProactiveChatSchedule();
+        }
+    }
+
+    window.resetProactiveChatBackoff = resetProactiveChatBackoff;
+    window.stopProactiveChatSchedule = stopProactiveChatSchedule;
+    window.setProactiveChatEnabled = setProactiveChatEnabled;
     
     // WebSocket心跳保活
     let heartbeatInterval = null;
@@ -138,6 +192,10 @@ function init_app(){
                 }
             }, HEARTBEAT_INTERVAL);
             console.log('心跳保活机制已启动');
+
+            if (proactiveChatEnabled) {
+                resetProactiveChatBackoff();
+            }
         };
 
         socket.onmessage = (event) => {
@@ -161,6 +219,19 @@ function init_app(){
                     
                     // Reverted client-side TTS trigger
                     // Backend will broadcast 'audio' events
+
+                } else if (response.type === 'voice_channel_update') {
+                    const channelId = response.channel_id || '';
+                    const isActive = !!response.is_active;
+                    const stateText = isActive ? '开始监听' : '停止监听';
+                    appendMessage(`语音频道 ${channelId} ${stateText}`, 'chat_normal', true);
+
+                } else if (response.type === 'voice_channel_transcript') {
+                    const channelId = response.channel_id || '';
+                    const speaker = response.speaker || '';
+                    const text = response.text || '';
+                    const prefix = speaker ? `【语音频道 ${channelId}】${speaker}: ` : `【语音频道 ${channelId}】`;
+                    appendMessage(`${prefix}${text}`, 'chat_normal', true);
 
                 } else if (response.type === 'chat_message') {
                     // Generic chat message (User, Chat, SC, Agent)
@@ -377,6 +448,85 @@ function init_app(){
 
     // 初始化连接
     connectWebSocket();
+
+    async function startAudioWorklet(mediaStream) {
+        if (!mediaStream) return;
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
+        try {
+            await audioContext.audioWorklet.addModule('/static/live2d/audio-processor.js');
+        } catch (e) {
+            try {
+                await audioContext.audioWorklet.addModule('audio-processor.js');
+            } catch (_) {
+                throw e;
+            }
+        }
+
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        workletNode = new AudioWorkletNode(audioContext, 'audio-processor', {
+            processorOptions: {
+                originalSampleRate: audioContext.sampleRate,
+                targetSampleRate: 16000
+            }
+        });
+
+        const silentGain = audioContext.createGain();
+        silentGain.gain.value = 0;
+
+        source.connect(workletNode);
+        workletNode.connect(silentGain);
+        silentGain.connect(audioContext.destination);
+
+        workletNode.port.onmessage = (event) => {
+            if (!isRecording) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            const pcm = event.data;
+            if (!pcm || !pcm.buffer) return;
+            try {
+                socket.send(pcm.buffer);
+            } catch (_) {}
+        };
+
+        isRecording = true;
+    }
+
+    function stopRecording() {
+        isRecording = false;
+
+        try {
+            if (workletNode) {
+                workletNode.port.onmessage = null;
+                workletNode.disconnect();
+            }
+        } catch (_) {}
+        workletNode = null;
+
+        try {
+            if (audioContext) {
+                audioContext.close();
+            }
+        } catch (_) {}
+        audioContext = null;
+
+        try {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+        } catch (_) {}
+        stream = null;
+
+        try {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ action: 'end_session' }));
+            }
+        } catch (_) {}
+    }
 
     // 添加消息到聊天界面
     function appendMessage(text, sender, isNewMessage = true, reasoning = null, toolCalls = null) {

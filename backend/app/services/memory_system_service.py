@@ -1,26 +1,65 @@
 import json
+import math
+import asyncio
+import os
+import re
+import time
 from sqlmodel import Session, select
+from app.core.config import settings
 from app.models.database import engine, ThinkingBack, MemoryPoint, Person
 from app.services.llm_service import LLMService
 from app.services.person_service import PersonService
 from app.services.jargon_service import JargonService
+
+_LIGHT_PREFETCH_TTL_SEC = 120.0
+_LIGHT_PREFETCH_MAX_USERS = 80
+_LIGHT_PREFETCH_MAX_ENTRIES_PER_USER = 3
+_light_prefetch_cache: dict[str, list[dict]] = {}
 
 class MemorySystemService:
     def __init__(self):
         self.llm = LLMService()
         self.person_service = PersonService()
         self.jargon_service = JargonService()
+        self._vector_backend = (getattr(settings, "VECTOR_MEMORY_BACKEND", "") or "sqlite").strip().lower()
+        self._vector_http_url = (getattr(settings, "VECTOR_MEMORY_HTTP_URL", "") or "").strip()
+        self._knowledge_backend = (getattr(settings, "KNOWLEDGE_BACKEND", "") or "").strip().lower()
+        self._knowledge_http_url = (getattr(settings, "KNOWLEDGE_HTTP_URL", "") or "").strip()
 
-    async def retrieve_context(self, user_query: str, user_id: str, api_key: str = None, base_url: str = None, model: str = None) -> str:
+    async def retrieve_context(
+        self,
+        user_query: str,
+        user_id: str,
+        api_key: str = None,
+        base_url: str = None,
+        model: str = None,
+        light_context: str | None = None,
+        fast_mode: bool = False,
+    ) -> str:
         """
         Main entry point for ReAct memory retrieval.
         """
         context_results = []
 
+        previous_prefetch = self._consume_ready_light_prefetch(user_id=user_id)
+        if previous_prefetch:
+            context_results.append(previous_prefetch)
+
+        if fast_mode:
+            if light_context:
+                context_results.append(light_context)
+            return "\n".join([x for x in context_results if (x or "").strip()]).strip()
+
         # 0. Vector Search (Lightweight RAG) - Always run
-        vector_context = await self.retrieve_relevant_memories(user_query, user_id, api_key, base_url)
-        if vector_context:
-            context_results.append(vector_context)
+        if light_context is None:
+            light_context = await self._build_light_context(
+                user_query=user_query,
+                user_id=user_id,
+                api_key=api_key,
+                base_url=base_url,
+            )
+        if light_context:
+            context_results.append(light_context)
 
         # 1. Thinking Back (Cache Check)
         cached_answer = self._check_thinking_back(user_query)
@@ -53,52 +92,454 @@ class MemorySystemService:
         return ""
 
     async def retrieve_relevant_memories(self, query: str, user_id: str, api_key: str = None, base_url: str = None, limit: int = 5) -> str:
-        # 1. Get query embedding
+        hits = await self.search_relevant_memories(
+            query=query,
+            user_id=user_id,
+            api_key=api_key,
+            base_url=base_url,
+            limit=limit,
+            threshold=0.72,
+        )
+        if not hits:
+            return ""
+        return "Relevant Memories (Vector Search):\n" + "\n".join([f"- {h['content']}" for h in hits])
+
+    async def search_relevant_memories(
+        self,
+        query: str,
+        user_id: str,
+        api_key: str = None,
+        base_url: str = None,
+        limit: int = 5,
+        threshold: float = 0.72,
+    ):
+        query = (query or "").strip()
+        user_id = (user_id or "").strip()
+        if not query or not user_id:
+            return []
+
         query_embedding = await self.llm.get_embedding(query, api_key, base_url)
         if not query_embedding:
-            return ""
+            return []
 
-        # 2. Get all memories for user (Naive approach for small scale)
+        if self._vector_backend == "http" and self._vector_http_url:
+            hits = await self._search_relevant_memories_http(
+                query_embedding=query_embedding,
+                user_id=user_id,
+                limit=limit,
+                threshold=threshold,
+            )
+            if hits:
+                return hits
+
+        keywords = self._extract_keywords(query)
+        now_ts = time.time()
+
         with Session(engine) as session:
-            # Join Person to filter by user_id
-            statement = select(MemoryPoint).join(Person).where(Person.user_id == user_id)
-            memories = session.exec(statement).all()
+            statement = (
+                select(MemoryPoint, Person.user_id)
+                .join(Person)
+                .where(Person.user_id == user_id)
+                .order_by(MemoryPoint.created_at.desc())
+            )
+            results = session.exec(statement).all()
 
-        if not memories:
-            return ""
+        if not results:
+            return []
 
-        # 3. Calculate Cosine Similarity
-        scored_memories = []
-        for mem in memories:
-            if not mem.embedding:
+        filtered = results
+        if len(results) > 600 and keywords:
+            tmp = []
+            for mp, uid in results:
+                text = (mp.content or "")
+                if any(k in text for k in keywords):
+                    tmp.append((mp, uid))
+                if len(tmp) >= 450:
+                    break
+            if tmp:
+                filtered = tmp
+
+        scored = []
+        for mp, uid in filtered:
+            if not mp.embedding:
                 continue
             try:
-                mem_emb = json.loads(mem.embedding)
-                score = self._cosine_similarity(query_embedding, mem_emb)
-                # Threshold to avoid irrelevant memories
-                if score > 0.75:
-                    scored_memories.append((score, mem.content))
-            except:
+                mem_emb = json.loads(mp.embedding)
+                cosine = self._cosine_similarity(query_embedding, mem_emb)
+                if cosine <= 0:
+                    continue
+                age_days = 0.0
+                try:
+                    age_days = max(0.0, (now_ts - mp.created_at.timestamp()) / 86400.0)
+                except Exception:
+                    age_days = 0.0
+                recency = math.exp(-age_days / 35.0)
+                weight = float(getattr(mp, "weight", 1.0) or 1.0)
+                weight_norm = min(max(weight / 3.0, 0.0), 1.0)
+                score = (cosine * 0.88) + (recency * 0.07) + (weight_norm * 0.05)
+                if score >= threshold:
+                    scored.append(
+                        (
+                            score,
+                            {
+                                "id": mp.id,
+                                "user_id": uid,
+                                "content": mp.content,
+                                "category": mp.category,
+                                "weight": mp.weight,
+                                "created_at": mp.created_at.isoformat(),
+                                "score": score,
+                            },
+                        )
+                    )
+            except Exception:
                 continue
-        
-        # 4. Sort and Top K
-        scored_memories.sort(key=lambda x: x[0], reverse=True)
-        top_k = scored_memories[:limit]
-        
-        if not top_k:
-            return ""
 
-        return "Relevant Memories (Vector Search):\n" + "\n".join([f"- {content}" for score, content in top_k])
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_k = [item for _, item in scored[: max(1, int(limit))]]
+        return top_k
+
+    def start_light_prefetch(self, *, user_query: str, user_id: str, api_key: str = None, base_url: str = None):
+        user_query = (user_query or "").strip()
+        user_id = (user_id or "").strip()
+        if not user_query or not user_id:
+            return None
+
+        now = time.time()
+        self._cleanup_light_prefetch(now=now)
+
+        existing_entries = _light_prefetch_cache.get(user_id)
+        if isinstance(existing_entries, list):
+            for entry in existing_entries:
+                if not isinstance(entry, dict):
+                    continue
+                if (entry.get("query") or "") != user_query:
+                    continue
+                task = entry.get("task")
+                if task and not task.done():
+                    return task
+
+        task = asyncio.create_task(
+            self._build_light_context(user_query=user_query, user_id=user_id, api_key=api_key, base_url=base_url)
+        )
+
+        new_entry = {
+            "query": user_query,
+            "task": task,
+            "context": None,
+            "created_at": now,
+            "expires_at": now + _LIGHT_PREFETCH_TTL_SEC,
+        }
+        if not isinstance(existing_entries, list):
+            existing_entries = []
+        existing_entries.append(new_entry)
+        _light_prefetch_cache[user_id] = existing_entries
+
+        if len(existing_entries) > _LIGHT_PREFETCH_MAX_ENTRIES_PER_USER:
+            existing_entries.sort(key=lambda e: float((e or {}).get("created_at") or 0.0))
+            while len(existing_entries) > _LIGHT_PREFETCH_MAX_ENTRIES_PER_USER:
+                drop = existing_entries.pop(0)
+                drop_task = (drop or {}).get("task")
+                if drop_task and not drop_task.done():
+                    try:
+                        drop_task.cancel()
+                    except Exception:
+                        pass
+
+        def _on_done(t: asyncio.Task):
+            entries = _light_prefetch_cache.get(user_id)
+            if not isinstance(entries, list):
+                return
+            entry = None
+            for e in entries:
+                if isinstance(e, dict) and e.get("task") is t:
+                    entry = e
+                    break
+            if entry is None:
+                return
+            try:
+                res = t.result()
+            except Exception:
+                res = ""
+            entry["context"] = (res or "").strip()
+
+        try:
+            task.add_done_callback(_on_done)
+        except Exception:
+            pass
+
+        return task
+
+    def _consume_ready_light_prefetch(self, *, user_id: str) -> str:
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return ""
+        now = time.time()
+        entries = _light_prefetch_cache.get(user_id)
+        if not isinstance(entries, list) or not entries:
+            return ""
+        alive = []
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            if float(e.get("expires_at") or 0.0) < now:
+                continue
+            alive.append(e)
+        if not alive:
+            _light_prefetch_cache.pop(user_id, None)
+            return ""
+        _light_prefetch_cache[user_id] = alive
+
+        ready_entries = []
+        for e in alive:
+            task = e.get("task")
+            if task and task.done():
+                ready_entries.append(e)
+        if not ready_entries:
+            return ""
+        ready_entries.sort(key=lambda e: float((e or {}).get("created_at") or 0.0))
+        picked = ready_entries[-1]
+        ctx = (picked.get("context") or "").strip()
+        try:
+            alive.remove(picked)
+        except Exception:
+            pass
+        if alive:
+            _light_prefetch_cache[user_id] = alive
+        else:
+            _light_prefetch_cache.pop(user_id, None)
+
+        if not ctx:
+            return ""
+        return "Prefetched Context (Previous Turn):\n" + ctx
+
+    def _cleanup_light_prefetch(self, *, now: float) -> None:
+        if not _light_prefetch_cache:
+            return
+        for uid in list(_light_prefetch_cache.keys()):
+            entries = _light_prefetch_cache.get(uid)
+            if not isinstance(entries, list) or not entries:
+                _light_prefetch_cache.pop(uid, None)
+                continue
+            alive = []
+            for e in entries:
+                if not isinstance(e, dict):
+                    continue
+                if float(e.get("expires_at") or 0.0) < now:
+                    continue
+                alive.append(e)
+            if alive:
+                _light_prefetch_cache[uid] = alive
+            else:
+                _light_prefetch_cache.pop(uid, None)
+        if len(_light_prefetch_cache) <= _LIGHT_PREFETCH_MAX_USERS:
+            return
+        items = []
+        for uid, e in _light_prefetch_cache.items():
+            try:
+                created = 0.0
+                if isinstance(e, list) and e:
+                    created = min(float((x or {}).get("created_at") or 0.0) for x in e if isinstance(x, dict))
+                items.append((created, uid))
+            except Exception:
+                items.append((0.0, uid))
+        items.sort(key=lambda x: x[0])
+        for _, uid in items[: max(0, len(items) - _LIGHT_PREFETCH_MAX_USERS)]:
+            _light_prefetch_cache.pop(uid, None)
+
+    async def _build_light_context(self, *, user_query: str, user_id: str, api_key: str = None, base_url: str = None) -> str:
+        out = []
+        vector_context = await self.retrieve_relevant_memories(user_query, user_id, api_key, base_url)
+        if vector_context:
+            out.append(vector_context)
+        external_context = await self.retrieve_external_knowledge(user_query=user_query, user_id=user_id)
+        if external_context:
+            out.append(external_context)
+        return "\n".join([x for x in out if (x or "").strip()]).strip()
+
+    async def retrieve_external_knowledge(self, user_query: str, user_id: str, limit: int = 4) -> str:
+        if self._knowledge_backend == "http" and self._knowledge_http_url:
+            items = await self._retrieve_external_knowledge_http(user_query=user_query, user_id=user_id, limit=limit)
+            if items:
+                out = []
+                for it in items:
+                    title = (it.get("title") or "").strip()
+                    content = (it.get("content") or "").strip()
+                    if title and content:
+                        out.append(f"- {title}: {content}")
+                    elif content:
+                        out.append(f"- {content}")
+                if out:
+                    return "External Knowledge:\n" + "\n".join(out)
+        return ""
+
+    async def upsert_vector_index(
+        self,
+        *,
+        user_id: str,
+        memory_id: int,
+        content: str,
+        category: str,
+        embedding: list,
+        weight: float | None = None,
+        created_at: str | None = None,
+    ) -> None:
+        if self._vector_backend != "http" or not self._vector_http_url:
+            return
+        await self._upsert_vector_http(
+            user_id=user_id,
+            memory_id=memory_id,
+            content=content,
+            category=category,
+            embedding=embedding,
+            weight=weight,
+            created_at=created_at,
+        )
+
+    async def delete_vector_index(self, *, user_id: str, memory_id: int) -> None:
+        if self._vector_backend != "http" or not self._vector_http_url:
+            return
+        await self._delete_vector_http(user_id=user_id, memory_id=memory_id)
+
+    async def _search_relevant_memories_http(
+        self,
+        *,
+        query_embedding: list,
+        user_id: str,
+        limit: int,
+        threshold: float,
+    ):
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                resp = await client.post(
+                    f"{self._vector_http_url.rstrip('/')}/search",
+                    json={
+                        "user_id": user_id,
+                        "query_embedding": query_embedding,
+                        "limit": int(limit),
+                        "threshold": float(threshold),
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("items") if isinstance(data, dict) else None
+                if not isinstance(items, list):
+                    return []
+                out = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    content = (it.get("content") or "").strip()
+                    if not content:
+                        continue
+                    out.append(
+                        {
+                            "id": it.get("id"),
+                            "content": content,
+                            "category": it.get("category") or "other",
+                            "score": float(it.get("score") or 0.0),
+                        }
+                    )
+                return out
+        except Exception:
+            return []
+
+    async def _upsert_vector_http(
+        self,
+        *,
+        user_id: str,
+        memory_id: int,
+        content: str,
+        category: str,
+        embedding: list,
+        weight: float | None,
+        created_at: str | None,
+    ) -> None:
+        try:
+            import httpx
+
+            payload = {
+                "user_id": user_id,
+                "id": memory_id,
+                "content": content,
+                "category": category,
+                "embedding": embedding,
+            }
+            if weight is not None:
+                payload["weight"] = float(weight)
+            if created_at:
+                payload["created_at"] = created_at
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                await client.post(f"{self._vector_http_url.rstrip('/')}/upsert", json=payload)
+        except Exception:
+            return None
+
+    async def _delete_vector_http(self, *, user_id: str, memory_id: int) -> None:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                await client.post(
+                    f"{self._vector_http_url.rstrip('/')}/delete",
+                    json={"user_id": user_id, "id": int(memory_id)},
+                )
+        except Exception:
+            return None
+
+    async def _retrieve_external_knowledge_http(self, *, user_query: str, user_id: str, limit: int):
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                resp = await client.post(
+                    f"{self._knowledge_http_url.rstrip('/')}/query",
+                    json={"user_id": user_id, "query": user_query, "limit": int(limit)},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("items") if isinstance(data, dict) else None
+                if isinstance(items, list):
+                    return [it for it in items if isinstance(it, dict)]
+                return []
+        except Exception:
+            return []
 
     def _cosine_similarity(self, vec_a, vec_b):
-        # Pure Python implementation
-        if len(vec_a) != len(vec_b): return 0.0
-        dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
-        norm_a = sum(a * a for a in vec_a) ** 0.5
-        norm_b = sum(b * b for b in vec_b) ** 0.5
-        if norm_a == 0 or norm_b == 0:
+        if not vec_a or not vec_b:
             return 0.0
-        return dot_product / (norm_a * norm_b)
+        if len(vec_a) != len(vec_b):
+            return 0.0
+        dot_product = 0.0
+        norm_a = 0.0
+        norm_b = 0.0
+        for a, b in zip(vec_a, vec_b):
+            try:
+                fa = float(a)
+                fb = float(b)
+            except Exception:
+                return 0.0
+            dot_product += fa * fb
+            norm_a += fa * fa
+            norm_b += fb * fb
+        if norm_a <= 0.0 or norm_b <= 0.0:
+            return 0.0
+        return dot_product / ((norm_a ** 0.5) * (norm_b ** 0.5))
+
+    def _extract_keywords(self, text: str):
+        parts = re.findall(r"[\u4e00-\u9fffA-Za-z0-9_]{2,}", text or "")
+        out = []
+        seen = set()
+        for p in parts:
+            k = p.strip().lower()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(p.strip())
+            if len(out) >= 8:
+                break
+        return out
 
     def _check_thinking_back(self, query: str) -> str:
         # Simple hash check (in reality, semantic search is better)

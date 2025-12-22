@@ -351,7 +351,6 @@ async def loopback_transcribe(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
 
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 
@@ -437,7 +436,6 @@ async def tts_play(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
 
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 
@@ -527,12 +525,10 @@ async def transcribe_audio(
     """
     Transcribe audio file to text (STT).
     """
-    # Fallback to settings if available (assuming user might add them later) or error
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
     
-    final_api_key = final_api_key or settings.OPENAI_API_KEY # Fallback to generic key if compatible
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 
@@ -574,7 +570,6 @@ async def generate_speech_stream(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
         
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         logger.error("[AudioRoutes] generate_speech_stream missing API key")
         raise HTTPException(status_code=401, detail="API Key is required")
@@ -622,7 +617,6 @@ async def generate_speech(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
         
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         logger.error("[AudioRoutes] generate_speech missing API key")
         raise HTTPException(status_code=401, detail="API Key is required")
@@ -674,7 +668,6 @@ async def upload_voice(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
 
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 
@@ -719,7 +712,6 @@ async def get_voices(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
 
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 
@@ -746,7 +738,6 @@ async def delete_voice(
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
 
-    final_api_key = final_api_key or settings.OPENAI_API_KEY
     if not final_api_key:
         raise HTTPException(status_code=401, detail="API Key is required")
 

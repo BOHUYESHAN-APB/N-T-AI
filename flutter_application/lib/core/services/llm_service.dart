@@ -174,6 +174,8 @@ class LLMService {
     String usageType = 'main',
     double temperature = 0.7,
     AiProviderConfig? providerOverride,
+    String? systemPromptOverride,
+    String? assistantNameOverride,
     String? sessionId,
   }) async {
     final provider = providerOverride ?? await _getActiveProvider();
@@ -185,6 +187,8 @@ class LLMService {
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
     final suppressInnerMonologue = prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
+    final systemPrompt = systemPromptOverride ?? (prefs.getString('settings.ai.systemPrompt') ?? '');
+    final assistantName = assistantNameOverride ?? (prefs.getString('settings.ai.assistantName') ?? 'Firefly');
     
     // Parse search region from int setting (0: auto, 1: cn, 2: global)
     final searchRegionIdx = prefs.getInt('settings.agent.searchRegion');
@@ -256,6 +260,14 @@ class LLMService {
       headers['X-Chat-Mode'] = chatMode;
       headers['X-Deep-Research'] = enableDeepResearch.toString();
       headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
+      final learningProbability = prefs.getDouble('settings.user.learningProbability') ?? 1.0;
+      headers['X-Learning-Probability'] = learningProbability.toString();
+      if (systemPrompt.trim().isNotEmpty) {
+        headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+      }
+      if (assistantName.trim().isNotEmpty) {
+        headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
+      }
       if (sessionId != null && sessionId.isNotEmpty) {
         headers['X-Session-Id'] = sessionId;
       }
@@ -531,6 +543,8 @@ class LLMService {
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
+    final systemPrompt = prefs.getString('settings.ai.systemPrompt') ?? '';
+    final assistantName = prefs.getString('settings.ai.assistantName') ?? 'Firefly';
 
     final apiKey = provider.apiKey;
     var baseUrl = provider.baseUrl;
@@ -560,6 +574,12 @@ class LLMService {
       headers['X-Target-Model'] = model;
       headers['X-Enable-Browser'] = enableBrowser.toString();
       headers['X-Usage-Type'] = usageType;
+      if (systemPrompt.trim().isNotEmpty) {
+        headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+      }
+      if (assistantName.trim().isNotEmpty) {
+        headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
+      }
     } else {
       // Direct connection
       requestUrl = baseUrl;

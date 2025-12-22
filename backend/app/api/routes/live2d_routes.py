@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Header, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Set
+from collections import deque
 import json
 import asyncio
 import base64
@@ -9,6 +10,10 @@ import time
 import uuid
 from app.services.motion_agent_service import MotionAgentService
 from app.services.llm_service import LLMService
+from app.services.audio_service import AudioService
+from app.core.config import settings
+import io
+import wave
 
 router = APIRouter(prefix="/api/live2d", tags=["live2d"])
 
@@ -49,6 +54,7 @@ class Live2DConnectionManager:
 manager = Live2DConnectionManager()
 _last_motion_broadcast_ts: float = 0.0
 _last_motion_broadcast_key: str = ""
+_scheduled_chat_tasks: Dict[str, asyncio.Task] = {}
 
 class MotionRequest(BaseModel):
     user_text: str
@@ -86,6 +92,28 @@ class ChatBroadcastRequest(BaseModel):
     text: str
     sender: str = "chat_normal" # user, chat_normal, chat_sc, agent
     senderName: Optional[str] = None
+
+class ScheduleChatRequest(BaseModel):
+    delay_ms: int = 0
+    prompt: str
+    user_id: str = "live2d_websocket_user"
+    enable_backend_tts: bool = True
+    enable_thinking: bool = False
+    enable_search: bool = False
+
+class CancelScheduledChatRequest(BaseModel):
+    task_id: str
+
+class VoiceChannelRequest(BaseModel):
+    channel_id: str
+    is_active: bool = True
+
+class VoiceChannelTranscriptRequest(BaseModel):
+    channel_id: str
+    text: str
+    speaker: Optional[str] = None
+    respond: bool = True
+    user_id: str = "live2d_websocket_user"
 
 # Initialize services
 # Note: In a real app, use dependency injection
@@ -151,48 +179,270 @@ async def live2d_websocket(websocket: WebSocket):
     悬浮窗和侧边栏都可以连接这个端点接收表情/动作指令
     """
     await manager.connect(websocket)
+    session_mode: str = "idle"
+    last_user_activity_ts = time.time()
+
+    audio_service = AudioService()
+    audio_sample_rate = 16000
+    audio_channels = 1
+    audio_pcm_buffer = bytearray()
+    audio_pre_roll = deque(maxlen=6)
+    speaking = False
+    silence_frames = 0
+    noise_floor = 80.0
+    last_voice_ts = time.time()
+    auto_close_sent = False
+    stt_lock = asyncio.Lock()
+
+    def _pcm16_to_wav_bytes(pcm_bytes: bytes, sample_rate: int, channels: int) -> bytes:
+        bio = io.BytesIO()
+        with wave.open(bio, "wb") as wf:
+            wf.setnchannels(int(channels))
+            wf.setsampwidth(2)
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(pcm_bytes)
+        return bio.getvalue()
+
+    async def _process_utterance(pcm_bytes: bytes):
+        if not pcm_bytes:
+            return
+        stt_api_key = (getattr(settings, "STT_API_KEY", "") or "").strip()
+        stt_base_url = (getattr(settings, "STT_BASE_URL", "") or "").strip()
+        stt_model = (getattr(settings, "STT_MODEL", "") or "FunAudioLLM/SenseVoiceSmall").strip()
+        if not stt_api_key or not stt_base_url:
+            return
+
+        async with stt_lock:
+            try:
+                wav_bytes = _pcm16_to_wav_bytes(pcm_bytes, audio_sample_rate, audio_channels)
+            except Exception:
+                return
+
+            try:
+                transcript = await audio_service.transcribe(
+                    file_obj=wav_bytes,
+                    filename="utterance.wav",
+                    api_key=stt_api_key,
+                    base_url=stt_base_url,
+                    model=stt_model,
+                )
+            except Exception:
+                return
+
+            transcript = (transcript or "").strip()
+            if not transcript:
+                return
+
+            await manager.broadcast(
+                {
+                    "type": "user_transcript",
+                    "text": transcript,
+                    "isNewMessage": True,
+                }
+            )
+
+            from app.services.chat_service import ChatService
+            chat_service = ChatService()
+            await chat_service.process_message(
+                message=transcript,
+                user_id="live2d_websocket_user",
+                enable_thinking=False,
+                enable_search=False,
+                enable_backend_tts=True,
+            )
+
+    def _reset_audio_state():
+        nonlocal audio_pcm_buffer, audio_pre_roll, speaking, silence_frames, noise_floor, last_voice_ts, auto_close_sent
+        audio_pcm_buffer = bytearray()
+        audio_pre_roll.clear()
+        speaking = False
+        silence_frames = 0
+        noise_floor = 80.0
+        last_voice_ts = time.time()
+        auto_close_sent = False
+
     try:
         while True:
-            # 保持连接，等待客户端消息（心跳等）
-            data = await websocket.receive_text()
-            try:
-                message = json.loads(data)
-                action = message.get('action')
-                if action == 'ping':
+            packet = await websocket.receive()
+            if "text" in packet and packet["text"] is not None:
+                data = packet["text"]
+                try:
+                    message = json.loads(data)
+                except json.JSONDecodeError:
+                    print(f"[Live2D WS] Invalid JSON received: {data}")
+                    continue
+
+                action = message.get("action")
+                if action == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))
-                elif action == 'text_input':
-                    text = message.get('text')
-                    enable_thinking = message.get('enable_thinking', False)
-                    enable_search = message.get('enable_search', False)
-                    
+                    continue
+
+                if action == "start_session":
+                    input_type = (message.get("input_type") or "").strip().lower()
+                    if input_type not in ["audio", "text"]:
+                        input_type = "text"
+                    session_mode = input_type
+                    last_user_activity_ts = time.time()
+                    if session_mode == "audio":
+                        _reset_audio_state()
+                    await websocket.send_text(json.dumps({"type": "session_started", "input_mode": session_mode}))
+                    continue
+
+                if action == "end_session":
+                    session_mode = "idle"
+                    _reset_audio_state()
+                    await websocket.send_text(json.dumps({"type": "session_ended"}))
+                    continue
+
+                if action == "text_input":
+                    text = message.get("text")
+                    enable_thinking = message.get("enable_thinking", False)
+                    enable_search = message.get("enable_search", False)
                     if text:
-                        print(f"[Live2D WS] Processing text input: {text[:50]}... (Thinking: {enable_thinking})")
-                        
-                        # Lazy import to avoid circular dependency
+                        last_user_activity_ts = time.time()
                         from app.services.chat_service import ChatService
                         chat_service = ChatService()
-                        
-                        # Process message (async)
-                        # Note: This will block the WebSocket loop until completion. 
-                        # For production, consider using a background task or separate queue.
-                        response_text = await chat_service.process_message(
+                        await chat_service.process_message(
                             message=text,
                             user_id="live2d_websocket_user",
                             enable_thinking=enable_thinking,
                             enable_search=enable_search,
-                            enable_backend_tts=True # Enable TTS for Live2D
+                            enable_backend_tts=True,
                         )
-                        
-                        # Send final response back to this client specifically?
-                        # chat_service already broadcasts 'gemini_response' via manager.broadcast
-                        # So we don't need to send it again here manually, unless we want a private reply.
-                        # But live2d architecture seems to rely on broadcast.
-                        
+                    continue
+
+                if action == "proactive_chat":
+                    if not bool(getattr(settings, "PROACTIVE_IDLE_ENABLED", True)):
+                        continue
+                    idle_sec = float(getattr(settings, "PROACTIVE_IDLE_MIN_SEC", 45) or 45)
+                    if (time.time() - float(last_user_activity_ts or 0.0)) < idle_sec:
+                        continue
+                    from app.services.chat_service import ChatService
+                    chat_service = ChatService()
+                    await chat_service.process_message(
+                        message="空闲时请你主动说一句话，口语化一点，短一些，可以带点口癖，并顺便抛一个轻问题。",
+                        user_id="live2d_websocket_user",
+                        enable_thinking=False,
+                        enable_search=False,
+                        enable_backend_tts=True,
+                    )
+                    last_user_activity_ts = time.time()
+                    continue
+
+                if action == "voice_channel_transcript":
+                    channel_id = (message.get("channel_id") or "").strip()
+                    text = (message.get("text") or "").strip()
+                    speaker = (message.get("speaker") or "").strip()
+                    respond = bool(message.get("respond", True))
+                    if channel_id and text:
+                        await manager.broadcast(
+                            {
+                                "type": "voice_channel_transcript",
+                                "channel_id": channel_id,
+                                "speaker": speaker or None,
+                                "text": text,
+                            }
+                        )
+                        prefix = f"【语音频道 {channel_id}】"
+                        if speaker:
+                            prefix += f"{speaker}: "
+                        else:
+                            prefix += " "
+                        await manager.broadcast(
+                            {
+                                "type": "chat_message",
+                                "text": prefix + text,
+                                "sender": "agent",
+                            }
+                        )
+                        if respond:
+                            from app.services.chat_service import ChatService
+                            chat_service = ChatService()
+                            await chat_service.process_message(
+                                message=prefix + text,
+                                user_id="live2d_websocket_user",
+                                enable_thinking=False,
+                                enable_search=False,
+                                enable_backend_tts=True,
+                            )
+                    continue
+
+                print(f"[Live2D WS] Received message: {action}")
+                continue
+
+            if "bytes" in packet and packet["bytes"] is not None:
+                if session_mode != "audio":
+                    continue
+                chunk = packet["bytes"]
+                if not isinstance(chunk, (bytes, bytearray)) or len(chunk) < 2:
+                    continue
+
+                mv = memoryview(chunk)
+                if len(mv) % 2 != 0:
+                    continue
+                try:
+                    samples = mv.cast("h")
+                except TypeError:
+                    continue
+                if len(samples) == 0:
+                    continue
+
+                sum_abs = 0.0
+                for s in samples:
+                    if s < 0:
+                        sum_abs += -float(s)
+                    else:
+                        sum_abs += float(s)
+                mean_abs = sum_abs / float(len(samples))
+
+                dynamic_threshold = max(200.0, float(noise_floor) * 4.0)
+                is_voice = mean_abs > dynamic_threshold
+
+                if not is_voice:
+                    noise_floor = (noise_floor * 0.96) + (mean_abs * 0.04)
+                    if noise_floor < 20.0:
+                        noise_floor = 20.0
+
+                now = time.time()
+
+                if is_voice:
+                    last_voice_ts = now
+                    last_user_activity_ts = now
+                    if not speaking:
+                        speaking = True
+                        silence_frames = 0
+                        try:
+                            await manager.broadcast({"type": "user_activity"})
+                        except Exception:
+                            pass
+                        for fr in list(audio_pre_roll):
+                            audio_pcm_buffer.extend(fr)
+                        audio_pre_roll.clear()
+                    audio_pcm_buffer.extend(chunk)
+                    if (len(audio_pcm_buffer) / 2.0) >= (audio_sample_rate * 12.0):
+                        pcm_copy = bytes(audio_pcm_buffer)
+                        _reset_audio_state()
+                        asyncio.create_task(_process_utterance(pcm_copy))
                 else:
-                    print(f"[Live2D WS] Received message: {action}")
-            except json.JSONDecodeError:
-                print(f"[Live2D WS] Invalid JSON received: {data}")
-                pass
+                    if speaking:
+                        silence_frames += 1
+                        audio_pcm_buffer.extend(chunk)
+                        if silence_frames >= 10:
+                            pcm_copy = bytes(audio_pcm_buffer)
+                            _reset_audio_state()
+                            asyncio.create_task(_process_utterance(pcm_copy))
+                    else:
+                        audio_pre_roll.append(bytes(chunk))
+
+                if not auto_close_sent:
+                    idle_limit = float(getattr(settings, "PROACTIVE_IDLE_MIN_SEC", 45) or 45)
+                    if (now - float(last_voice_ts or now)) > max(20.0, idle_limit):
+                        auto_close_sent = True
+                        try:
+                            await websocket.send_text(json.dumps({"type": "auto_close_mic", "message": "长时间无语音输入，已自动关闭麦克风"}))
+                        except Exception:
+                            pass
+                continue
     except WebSocketDisconnect as e:
         print(f"[Live2D WS] Disconnect code: {e.code}, reason: {e.reason}")
         manager.disconnect(websocket)
@@ -286,6 +536,45 @@ async def broadcast_chat(request: ChatBroadcastRequest):
     })
     return {"status": "ok", "clients": len(manager.active_connections)}
 
+@router.post("/agent/schedule_chat")
+async def schedule_chat(request: ScheduleChatRequest):
+    task_id = str(uuid.uuid4())
+    delay_ms = int(request.delay_ms or 0)
+    if delay_ms < 0:
+        delay_ms = 0
+
+    async def _run():
+        try:
+            if delay_ms:
+                await asyncio.sleep(delay_ms / 1000.0)
+            from app.services.chat_service import ChatService
+
+            chat_service = ChatService()
+            await chat_service.process_message(
+                message=request.prompt,
+                user_id=request.user_id,
+                enable_thinking=bool(request.enable_thinking),
+                enable_search=bool(request.enable_search),
+                enable_backend_tts=bool(request.enable_backend_tts),
+            )
+        finally:
+            _scheduled_chat_tasks.pop(task_id, None)
+
+    _scheduled_chat_tasks[task_id] = asyncio.create_task(_run())
+    return {"status": "ok", "task_id": task_id, "delay_ms": delay_ms}
+
+@router.post("/agent/cancel_scheduled_chat")
+async def cancel_scheduled_chat(request: CancelScheduledChatRequest):
+    task_id = (request.task_id or "").strip()
+    task = _scheduled_chat_tasks.pop(task_id, None)
+    if not task:
+        return {"status": "not_found", "task_id": task_id}
+    try:
+        task.cancel()
+    except Exception:
+        pass
+    return {"status": "ok", "task_id": task_id}
+
 @router.post("/broadcast/audio")
 async def broadcast_audio(request: AudioBroadcastRequest):
     """
@@ -360,3 +649,47 @@ async def broadcast_audio(request: AudioBroadcastRequest):
 async def get_connections():
     """获取当前 WebSocket 连接数"""
     return {"count": len(manager.active_connections)}
+
+@router.post("/agent/voice_channel_monitor")
+async def voice_channel_monitor(request: VoiceChannelRequest):
+    await manager.broadcast(
+        {
+            "type": "voice_channel_update",
+            "channel_id": request.channel_id,
+            "is_active": bool(request.is_active),
+        }
+    )
+    return {"status": "ok", "clients": len(manager.active_connections)}
+
+@router.post("/agent/voice_channel_transcript")
+async def voice_channel_transcript(request: VoiceChannelTranscriptRequest):
+    text = (request.text or "").strip()
+    if not text:
+        return {"status": "empty", "clients": len(manager.active_connections)}
+
+    payload = {
+        "type": "voice_channel_transcript",
+        "channel_id": request.channel_id,
+        "speaker": request.speaker,
+        "text": text,
+    }
+    await manager.broadcast(payload)
+
+    if bool(request.respond):
+        from app.services.chat_service import ChatService
+        chat_service = ChatService()
+        speaker = (request.speaker or "").strip()
+        prefix = f"【语音频道 {request.channel_id}】"
+        if speaker:
+            prefix += f"{speaker}: "
+        else:
+            prefix += " "
+        await chat_service.process_message(
+            message=prefix + text,
+            user_id=(request.user_id or "live2d_websocket_user"),
+            enable_thinking=False,
+            enable_search=False,
+            enable_backend_tts=True,
+        )
+
+    return {"status": "ok", "clients": len(manager.active_connections)}

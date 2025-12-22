@@ -3630,11 +3630,15 @@ class Live2DManager {
                             appCheckbox.checked = isChecked;
                             appCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
                         } else if (!appCheckbox) {
-                            window.proactiveChatEnabled = isChecked;
-                            if (isChecked && typeof window.resetProactiveChatBackoff === 'function') {
-                                window.resetProactiveChatBackoff();
-                            } else if (!isChecked && typeof window.stopProactiveChatSchedule === 'function') {
-                                window.stopProactiveChatSchedule();
+                            if (typeof window.setProactiveChatEnabled === 'function') {
+                                window.setProactiveChatEnabled(isChecked);
+                            } else {
+                                window.proactiveChatEnabled = isChecked;
+                                if (isChecked && typeof window.resetProactiveChatBackoff === 'function') {
+                                    window.resetProactiveChatBackoff();
+                                } else if (!isChecked && typeof window.stopProactiveChatSchedule === 'function') {
+                                    window.stopProactiveChatSchedule();
+                                }
                             }
                             console.log(`主动搭话已${isChecked ? '开启' : '关闭'}`);
                         }

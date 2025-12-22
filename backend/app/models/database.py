@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlmodel import Field, SQLModel, create_engine
 
 from app.core.config import settings
+from sqlalchemy import inspect
 
 class Memory(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -24,6 +25,8 @@ class Person(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: str = Field(index=True, unique=True)  # External ID
     nickname: Optional[str] = None
+    assistant_name: Optional[str] = None
+    system_prompt: Optional[str] = None
     know_times: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -64,7 +67,29 @@ class MoodState(SQLModel, table=True):
     last_updated: datetime = Field(default_factory=datetime.utcnow)
 
 # Database Setup
-engine = create_engine(settings.DATABASE_URL, echo=True)
+engine = create_engine(settings.DATABASE_URL, echo=settings.SQL_ECHO)
+
+def _migrate_sqlite_person_columns() -> None:
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    try:
+        insp = inspect(engine)
+        if "person" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("person")}
+        stmts: list[str] = []
+        if "assistant_name" not in cols:
+            stmts.append("ALTER TABLE person ADD COLUMN assistant_name VARCHAR")
+        if "system_prompt" not in cols:
+            stmts.append("ALTER TABLE person ADD COLUMN system_prompt TEXT")
+        if not stmts:
+            return
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.exec_driver_sql(stmt)
+    except Exception:
+        return
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
+    _migrate_sqlite_person_columns()
