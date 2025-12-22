@@ -93,7 +93,7 @@ final List<ChatMessage> chatMessages = [
   ChatMessage(id: '3', text: '试试切换到 Notes 或 Social 页面看看。', isMine: false, time: '09:02'),
 ];
 
-final List<Contact> contacts = const [
+const List<Contact> contacts = [
   Contact(id: 'ai_local', name: '本地智能体', type: ContactType.ai, avatarEmoji: '🤖', pinned: true),
   Contact(id: 'alice', name: 'Alice', type: ContactType.human, avatarEmoji: '🧑🏻‍💻'),
   Contact(id: 'system', name: '系统助手', type: ContactType.other, avatarEmoji: '🛠️'),

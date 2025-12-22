@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_application/l10n/app_localizations.dart';
 
 class AboutTab extends StatelessWidget {
-  const AboutTab({Key? key}) : super(key: key);
+  const AboutTab({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -253,9 +253,9 @@ class _ChangelogWidget extends StatelessWidget {
           height: 300,
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5)),
+            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
           ),
           child: Markdown(
             data: content,

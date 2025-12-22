@@ -1,14 +1,12 @@
 import json
 import math
 import uuid
-import os
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from sqlmodel import Session, select
 from app.models.database import engine
 from app.models.meme import Meme
 from app.services.llm_service import LLMService
-from app.core.config import settings
 
 class MemeService:
     def __init__(self):

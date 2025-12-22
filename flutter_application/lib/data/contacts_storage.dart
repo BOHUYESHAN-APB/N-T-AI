@@ -19,7 +19,7 @@ class AiContactConfig {
 }
 
 class ContactsStorage {
-  static String _key(String contactId) => 'contacts.aiConfig.' + contactId;
+  static String _key(String contactId) => 'contacts.aiConfig.$contactId';
 
   static Future<AiContactConfig?> loadAiConfig(String contactId) async {
     final prefs = await SharedPreferences.getInstance();

@@ -4,7 +4,6 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.models.database import engine, Person, MemoryPoint
 from app.services.llm_service import LLMService
-from datetime import datetime
 
 class PersonService:
     def __init__(self):
@@ -182,8 +181,8 @@ class PersonService:
             if not person:
                 return ""
             
-            mem_statement = select(MemoryPoint).where(MemoryPoint.person_id == person.id)
-            memories = session.exec(mem_statement).all()
+            # mem_statement = select(MemoryPoint).where(MemoryPoint.person_id == person.id)
+            # memories = session.exec(mem_statement).all()
             
             profile = f"User ID: {person.user_id}\n"
             if person.nickname:

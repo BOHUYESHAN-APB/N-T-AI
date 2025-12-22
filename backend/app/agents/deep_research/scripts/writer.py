@@ -1,17 +1,19 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import os
-import json
 from openai import AsyncOpenAI
 from app.tools.office_suite import OfficeProcessor
 from app.tools.unified_office import UnifiedOfficeTool
 from .utils import normalize_output_format, parse_writer_output_files
 
+from app.services.rag_service import TempRAGSession
+
 class Writer:
-    def __init__(self, config: Dict[str, Any], output_dir: str = "app/static/reports"):
+    def __init__(self, config: Dict[str, Any], output_dir: str = "app/static/reports", rag_session: Optional[TempRAGSession] = None):
         self.config = config
         self.output_dir = output_dir
         self.office_tool = UnifiedOfficeTool(output_dir=output_dir)
         self.office_processor = OfficeProcessor(output_dir=output_dir)
+        self.rag_session = rag_session
 
     def _get_client(self) -> AsyncOpenAI:
         role_config = self.config.get("writer") or {}
@@ -36,6 +38,19 @@ class Writer:
         client = self._get_client()
         model = self._get_model()
 
+        # Search RAG for extra context
+        rag_context = ""
+        if self.rag_session:
+            try:
+                # Query RAG for the most relevant bits from files and logs
+                rag_results = await self.rag_session.search(user_input, top_k=8)
+                if rag_results:
+                    rag_context = "\n[Additional Context from Local Files/Logs]:\n"
+                    for r in rag_results:
+                        rag_context += f"- {r['content']}\n"
+            except Exception as e:
+                print(f"Error searching RAG in Writer: {e}")
+
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         prompts_dir = os.path.join(base_dir, "prompts")
         
@@ -46,7 +61,7 @@ class Writer:
 
         sys_prompt = sys_template.replace("{{current_date}}", current_date)
         user_prompt = user_template.replace("{{user_input}}", user_input)\
-                                   .replace("{{research_log}}", research_log)\
+                                   .replace("{{research_log}}", research_log + "\n" + rag_context)\
                                    .replace("{{requested_formats}}", ", ".join(requested_formats))
 
         messages = [

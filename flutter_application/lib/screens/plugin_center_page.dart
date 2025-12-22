@@ -3,7 +3,7 @@ import '../plugins/plugin_manager.dart';
 import '../plugins/base_plugin.dart';
 
 class PluginCenterPage extends StatefulWidget {
-  const PluginCenterPage({Key? key}) : super(key: key);
+  const PluginCenterPage({super.key});
 
   @override
   State<PluginCenterPage> createState() => _PluginCenterPageState();
@@ -56,6 +56,7 @@ class _PluginCenterPageState extends State<PluginCenterPage> {
                             onChanged: (v) async {
                               await globalPluginManager.togglePlugin(plugin.id, v);
                               if (v) {
+                                if (!context.mounted) return;
                                 await plugin.onSync(context);
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -113,7 +114,7 @@ class _PluginCenterPageState extends State<PluginCenterPage> {
 class PluginDetailPage extends StatelessWidget {
   final BasePlugin plugin;
 
-  const PluginDetailPage({Key? key, required this.plugin}) : super(key: key);
+  const PluginDetailPage({super.key, required this.plugin});
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +136,7 @@ class PluginDetailPage extends StatelessWidget {
                 onChanged: (v) async {
                   await globalPluginManager.togglePlugin(plugin.id, v);
                   if (v) {
+                    if (!context.mounted) return;
                     await plugin.onSync(context);
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(

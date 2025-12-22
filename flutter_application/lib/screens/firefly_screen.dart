@@ -1,9 +1,8 @@
-import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -32,7 +31,7 @@ import '../plugins/plugin_manager.dart'; // Import PluginManager
 import '../services/logger_service.dart';
 
 class FireflyScreen extends StatefulWidget {
-  const FireflyScreen({Key? key}) : super(key: key);
+  const FireflyScreen({super.key});
 
   @override
   State<FireflyScreen> createState() => _FireflyScreenState();
@@ -422,10 +421,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest.withOpacity(0.85),
+                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: colorScheme.outlineVariant.withOpacity(0.35),
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.35),
                   ),
                 ),
                 child: Column(
@@ -591,16 +590,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   Future<void> _checkApiKey() async {
     final key = await _llmService.getApiKey();
+    if (!mounted) return;
     final l10n = AppLocalizations.of(context)!;
     if (key == null || key.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _messages.add(<String, dynamic>{
-            'role': 'assistant',
-            'content': l10n.greetingMissingKey,
-          });
+      setState(() {
+        _messages.add(<String, dynamic>{
+          'role': 'assistant',
+          'content': l10n.greetingMissingKey,
         });
-      }
+      });
     } else {
       // Add initial greeting
       setState(() {
@@ -622,7 +620,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           p.enabled &&
           p.baseUrl.isNotEmpty &&
           p.apiKey.isNotEmpty,
-      orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+      orElse: () => const AiProviderConfig(id: '', name: '', kind: AiProvider.local),
     );
     if (explicit.id.isNotEmpty) return explicit;
 
@@ -633,7 +631,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             p.enabled &&
             p.kind == AiProvider.local &&
             (p.meta['local_stt']?.toString() == 'windows_speech'),
-        orElse: () => AiProviderConfig(id: '', name: '', kind: AiProvider.local),
+        orElse: () => const AiProviderConfig(id: '', name: '', kind: AiProvider.local),
       );
       if (local.id.isNotEmpty) return local;
     }
@@ -669,16 +667,17 @@ class _FireflyScreenState extends State<FireflyScreen> {
         logger.error(
           '语音转写结果为空（已保留音频文件）：fromLoopback=$fromLoopback provider=${sttProvider.name} file=$path',
         );
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('未识别到文字（转写结果为空，已保留音频文件）：$path')),
         );
       }
     } catch (e) {
       logger.error('语音输入失败', e);
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('语音输入失败: $e')));
     } finally {
       try {
         if (!keepFile) {
@@ -785,6 +784,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
       text.isEmpty ? '[图片]' : text,
     );
 
+    if (!mounted) return;
+    final settings = SettingsScope.of(context).settings;
+
     // Update session title if it's the first message
     if (_messages.length <= 2) {
       // Simple heuristic: use first 10 chars
@@ -794,7 +796,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
 
     try {
-      final settings = SettingsScope.of(context).settings;
       String response;
       logger.info(
         '发送到AI: uiRole=$uiRole session=${_currentSessionId ?? ''} textLen=${text.length} hasImage=${_pendingImageBytes != null}',
@@ -809,13 +810,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
           // Try direct vision with active model
           try {
+            if (!mounted) throw Exception('Widget unmounted');
             final s = SettingsScope.of(context).settings;
             // Vision selection strategy: use main if capable; else use selected vision provider; else fallback
             final useMainIfCapable = s.useMainVisionIfCapable;
             final mainVisionCapable = await _llmService
                 .isActiveModelVisionCapable();
+            
+            if (!mounted) throw Exception('Widget unmounted');
             final selectedVisionProviderId =
-                s.activeVisionProviderId; // null means follow main
+                SettingsScope.of(context).settings.activeVisionProviderId; // null means follow main
 
             if (useMainIfCapable && mainVisionCapable) {
               final defaultHint =
@@ -876,7 +880,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               return AiResponse(content: content);
             } else {
               // Fallback: insert helper guidance to switch to a vision-capable model
-              final helper =
+              const helper =
                   '当前未配置视觉中枢或模型不支持视觉。建议在系统 → 视觉中枢中选择具备视觉能力的平台（如 gpt-4o、qwen2.5-vl）。我将按文字路径继续。';
               if (mounted) {
                 setState(() {
@@ -914,6 +918,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             );
           }
         } else {
+          if (!mounted) throw Exception('Widget unmounted');
           final provider = SettingsScope.of(
             context,
           ).selectProviderForNextCall(category: AiProviderCategory.llm);
@@ -934,7 +939,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             sessionId: _currentSessionId,
           );
 
-          if (provider != null) {
+          if (provider != null && mounted) {
             await SettingsScope.of(context).incrementUsage(provider.id);
           }
           return result;
@@ -1135,6 +1140,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${AppLocalizations.of(context)!.errImagePick}$e'),
@@ -1294,7 +1300,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                  color: Theme.of(context).dividerColor.withOpacity(0.1),
+                  color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
                 ),
               ),
             ),
@@ -1344,7 +1350,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
+                BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
               ],
             ),
             child: Material(
@@ -1396,7 +1402,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
+                BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
               ],
             ),
             child: Material(
@@ -1446,7 +1452,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.15),
+                color: Colors.black.withValues(alpha: 0.15),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -1617,10 +1623,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   width: _miniExpanded || _floatingControlsVisible ? 84 : 36,
                   padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface.withOpacity(0.9),
+                    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 8, offset: const Offset(0,4)),
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 8, offset: const Offset(0,4)),
                     ],
                   ),
                   child: Column(
@@ -1634,7 +1640,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       const SizedBox(height: 8),
                       if (_miniExpanded || _floatingControlsVisible)
                         Builder(builder: (ctx) {
-                          Future<void> _evalJs(String js) async {
+                          Future<void> evalJs(String js) async {
                             try {
                               if (settings.enableFloatingWindow && _floatingWindowService != null) {
                                 await _floatingWindowService!.executeJavaScript(js);
@@ -1672,7 +1678,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                                                   title: const Text('Follow Mouse'),
                                                   value: true,
                                                   onChanged: (val) {
-                                                    _evalJs("if(window.live2dManager) { window.live2dManager.mouseTrackingEnabled = $val; }");
+                                                    evalJs("if(window.live2dManager) { window.live2dManager.mouseTrackingEnabled = $val; }");
                                                     Navigator.pop(context);
                                                   },
                                                 );
@@ -1738,7 +1744,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 borderRadius: borderRadius,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withValues(alpha: 0.3),
                     blurRadius: 14,
                     offset: const Offset(0, 6),
                   ),
@@ -1924,7 +1930,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                         letterSpacing: 3.0,
                         color: Theme.of(
                           context,
-                        ).colorScheme.outline.withOpacity(0.5),
+                        ).colorScheme.outline.withValues(alpha: 0.5),
                         fontFamily: titleFontFamily,
                       ),
                     ),
@@ -1996,7 +2002,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 ).settings.showAgentThoughts;
 
                 if (!showThoughts) {
-                  return Center(
+                  return const Center(
                     child: SizedBox(
                       width: 24,
                       height: 24,
@@ -2013,13 +2019,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(
                       context,
-                    ).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
@@ -2062,9 +2068,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const MemoryManagerScreen(
-                            heroTag: 'memory_fab_sidebar',
-                          ),
+                          builder: (_) => const MemoryManagerScreen(),
                         ),
                       );
                       break;
@@ -2451,13 +2455,13 @@ class _DynamicIslandState extends State<_DynamicIsland> {
 
   @override
   Widget build(BuildContext context) {
-    final minW = 160.0;
-    final text = _status.length > 24 ? _status.substring(0, 24) + '…' : _status;
+    const minW = 160.0;
+    final text = _status.length > 24 ? '${_status.substring(0, 24)}…' : _status;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-      constraints: BoxConstraints(minWidth: minW, maxWidth: 340),
+      constraints: const BoxConstraints(minWidth: minW, maxWidth: 340),
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(34)),
       child: Glass(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -2593,7 +2597,7 @@ class _VoiceInputButtonState extends State<_VoiceInputButton> {
         setState(() => _isRecording = true);
       }
     } catch (e) {
-      print('Recording Error: $e');
+      logger.error('Recording Error: $e');
     }
   }
 
@@ -2606,7 +2610,7 @@ class _VoiceInputButtonState extends State<_VoiceInputButton> {
         widget.onRecorded(path);
       }
     } catch (e) {
-      print('Stop Recording Error: $e');
+      logger.error('Stop Recording Error: $e');
     }
   }
 

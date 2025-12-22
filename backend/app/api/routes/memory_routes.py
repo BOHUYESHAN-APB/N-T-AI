@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
-from app.models.database import engine, MemoryPoint, Person
+from app.models.database import engine, MemoryPoint, Person, Jargon
 from app.services.llm_service import LLMService
 from app.services.memory_system_service import MemorySystemService
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 import os
 import json
@@ -309,3 +309,115 @@ async def delete_memory_v1(memory_id: int):
         session.commit()
     await svc.delete_vector_index(user_id=user_id, memory_id=int(memory_id))
     return {"ok": True, "message": "Memory deleted successfully"}
+
+# --- Jargon CRUD ---
+
+class JargonCreate(BaseModel):
+    term: str
+    definition: str
+    context_example: Optional[str] = None
+    is_verified: bool = True
+
+class JargonUpdate(BaseModel):
+    term: Optional[str] = None
+    definition: Optional[str] = None
+    context_example: Optional[str] = None
+    is_verified: Optional[bool] = None
+
+@router.get("/v1/jargon/all")
+async def get_all_jargon(limit: int = 100):
+    with Session(engine) as session:
+        statement = select(Jargon).order_by(Jargon.term).limit(limit)
+        results = session.exec(statement).all()
+        return results
+
+@router.post("/v1/jargon")
+async def create_jargon(jargon: JargonCreate):
+    with Session(engine) as session:
+        db_jargon = Jargon(
+            term=jargon.term,
+            definition=jargon.definition,
+            context_example=jargon.context_example,
+            is_verified=jargon.is_verified
+        )
+        session.add(db_jargon)
+        session.commit()
+        session.refresh(db_jargon)
+        return db_jargon
+
+@router.put("/v1/jargon/{jargon_id}")
+async def update_jargon(jargon_id: int, jargon: JargonUpdate):
+    with Session(engine) as session:
+        db_jargon = session.get(Jargon, jargon_id)
+        if not db_jargon:
+            raise HTTPException(status_code=404, detail="Jargon not found")
+        
+        if jargon.term is not None:
+            db_jargon.term = jargon.term
+        if jargon.definition is not None:
+            db_jargon.definition = jargon.definition
+        if jargon.context_example is not None:
+            db_jargon.context_example = jargon.context_example
+        if jargon.is_verified is not None:
+            db_jargon.is_verified = jargon.is_verified
+            
+        session.add(db_jargon)
+        session.commit()
+        session.refresh(db_jargon)
+        return db_jargon
+
+@router.delete("/v1/jargon/{jargon_id}")
+async def delete_jargon(jargon_id: int):
+    with Session(engine) as session:
+        db_jargon = session.get(Jargon, jargon_id)
+        if not db_jargon:
+            raise HTTPException(status_code=404, detail="Jargon not found")
+        session.delete(db_jargon)
+        session.commit()
+        return {"ok": True}
+
+# --- Person (User Info) CRUD ---
+
+class PersonUpdate(BaseModel):
+    nickname: Optional[str] = None
+    assistant_name: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+@router.get("/v1/person/all")
+async def get_all_persons(limit: int = 50):
+    with Session(engine) as session:
+        statement = select(Person).order_by(Person.user_id).limit(limit)
+        results = session.exec(statement).all()
+        return results
+
+@router.put("/v1/person/{user_id}")
+async def update_person(user_id: str, person: PersonUpdate):
+    with Session(engine) as session:
+        db_person = session.exec(select(Person).where(Person.user_id == user_id)).first()
+        if not db_person:
+            # If person doesn't exist, create one
+            db_person = Person(user_id=user_id)
+            session.add(db_person)
+            session.flush()
+        
+        if person.nickname is not None:
+            db_person.nickname = person.nickname
+        if person.assistant_name is not None:
+            db_person.assistant_name = person.assistant_name
+        if person.system_prompt is not None:
+            db_person.system_prompt = person.system_prompt
+            
+        session.add(db_person)
+        session.commit()
+        session.refresh(db_person)
+        return db_person
+
+@router.delete("/v1/person/{user_id}")
+async def delete_person(user_id: str):
+    with Session(engine) as session:
+        db_person = session.exec(select(Person).where(Person.user_id == user_id)).first()
+        if not db_person:
+            raise HTTPException(status_code=404, detail="Person not found")
+        session.delete(db_person)
+        session.commit()
+        return {"ok": True}

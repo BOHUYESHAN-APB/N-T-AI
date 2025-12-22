@@ -5,7 +5,6 @@ Wraps OpenAI/Claude Vision capabilities to describe images.
 
 import os
 import base64
-from typing import Optional
 from openai import AsyncOpenAI
 
 class VisionService:

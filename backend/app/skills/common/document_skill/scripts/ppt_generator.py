@@ -7,7 +7,7 @@ Inspired by free-OKC's slides_generator tool (MIT License).
 import os
 import datetime
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import List, Dict
 from bs4 import BeautifulSoup
 from pptx import Presentation
 from pptx.util import Inches, Pt

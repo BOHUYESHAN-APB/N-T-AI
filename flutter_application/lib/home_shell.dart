@@ -19,7 +19,7 @@ void logToFile(String message) {
 }
 
 class HomeShell extends StatefulWidget {
-  const HomeShell({Key? key}) : super(key: key);
+  const HomeShell({super.key});
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -30,11 +30,11 @@ class _HomeShellState extends State<HomeShell> {
 
   static final List<Widget> _pages = <Widget>[
     const FireflyScreen(),
-    const MemoryManagerScreen(heroTag: 'memory_fab_home'),
+    const MemoryManagerScreen(),
     const DeepResearchScreen(), // Deep Research
-    NotesScreen(),
+    const NotesScreen(),
     const TarotScreen(),
-    SettingsScreen(),
+    const SettingsScreen(),
   ];
 
 
@@ -137,7 +137,7 @@ class _HomeShellState extends State<HomeShell> {
                       borderRadius: BorderRadius.circular(25),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 10,
                           spreadRadius: 2,
                         ),

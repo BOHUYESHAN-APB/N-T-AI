@@ -142,17 +142,6 @@ class BackendService {
     _startHealthCheck();
   }
 
-  /// Checks if a local port is in use.
-  Future<bool> _isPortInUse(int port) async {
-    try {
-      final socket = await Socket.connect('localhost', port, timeout: const Duration(milliseconds: 200));
-      socket.destroy();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   /// Attempts to start the bundled Python backend on Windows.
   Future<void> _startLocalBackend() async {
     // Debug 模式下，严禁启动同级 server.exe，防止混淆 (用户反馈构建脚本可能导致 server 文件夹残留)

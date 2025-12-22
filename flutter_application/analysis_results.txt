@@ -1,0 +1,232 @@
+Analyzing flutter_application...                                
+
+   info - The constant name 'FIREFLY_PERSONA' isn't a lowerCamelCase identifier - lib\core\prompts\prompts.dart:1:14 - constant_identifier_names
+warning - The declaration '_isPortInUse' isn't referenced - lib\core\services\backend_service.dart:146:16 - unused_element
+warning - Unused import: '../prompts/prompts.dart' - lib\core\services\brain_service.dart:13:8 - unused_import
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:164:13 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:166:13 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:169:11 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:172:9 - avoid_print
+   info - Use 'const' for final variables initialized to a constant value - lib\core\services\brain_service.dart:752:5 - prefer_const_declarations
+   info - Use interpolation to compose strings and values - lib\core\services\brain_service.dart:901:30 - prefer_interpolation_to_compose_strings
+   info - The private field _danmakuBuffer could be 'final' - lib\core\services\brain_service.dart:940:16 - prefer_final_fields
+   info - Use interpolation to compose strings and values - lib\core\services\brain_service.dart:1148:67 - prefer_interpolation_to_compose_strings
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:1510:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:1527:9 - avoid_print
+   info - Use 'const' with the constructor to improve performance - lib\core\services\brain_service.dart:1529:30 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\core\services\brain_service.dart:1584:28 - prefer_const_constructors
+   info - Don't invoke 'print' in production code - lib\core\services\brain_service.dart:1587:7 - avoid_print
+warning - Unused import: 'package:flutter/services.dart' - lib\core\services\character_service.dart:2:8 - unused_import
+   info - Don't invoke 'print' in production code - lib\core\services\character_service.dart:40:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\character_service.dart:78:11 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\character_service.dart:81:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\character_service.dart:96:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\character_service.dart:99:7 - avoid_print
+   info - Use 'const' for final variables initialized to a constant value - lib\core\services\expression_inference_agent_service.dart:26:9 - prefer_const_declarations
+   info - The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' - lib\core\services\llm_service.dart:3:8 - unnecessary_import
+   info - Don't invoke 'print' in production code - lib\core\services\llm_service.dart:67:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\llm_service.dart:163:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\llm_service.dart:167:7 - avoid_print
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:197:33 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:198:38 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:199:12 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:206:33 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:207:38 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\core\services\llm_service.dart:208:12 - curly_braces_in_flow_control_structures
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:392:53 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:403:54 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:490:53 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:504:54 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:624:64 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\core\services\llm_service.dart:635:54 - prefer_interpolation_to_compose_strings
+warning - Unused import: 'package:uuid/uuid.dart' - lib\core\services\note_service.dart:5:8 - unused_import
+   info - Don't invoke 'print' in production code - lib\core\services\note_service.dart:125:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\core\services\note_service.dart:159:7 - avoid_print
+   info - Use interpolation to compose strings and values - lib\core\tools\web_browser_tool.dart:188:56 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\data\contacts_storage.dart:22:43 - prefer_interpolation_to_compose_strings
+   info - Use 'const' for final variables initialized to a constant value - lib\data\mock_data.dart:96:1 - prefer_const_declarations
+   info - Use interpolation to compose strings and values - lib\data\storage.dart:7:51 - prefer_interpolation_to_compose_strings
+   info - Parameter 'key' could be a super parameter - lib\home_shell.dart:22:9 - use_super_parameters
+   info - Use 'const' with the constructor to improve performance - lib\home_shell.dart:35:5 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\home_shell.dart:37:5 - prefer_const_constructors
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\home_shell.dart:140:47 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\main.dart:114:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\main.dart:160:9 - use_super_parameters
+   info - Don't invoke 'print' in production code - lib\plugins\base_plugin.dart:22:5 - avoid_print
+   info - Don't invoke 'print' in production code - lib\plugins\base_plugin.dart:28:5 - avoid_print
+   info - Use 'const' with the constructor to improve performance - lib\plugins\bilibili_live\bilibili_live_plugin.dart:522:13 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps - lib\plugins\bilibili_live\bilibili_live_plugin.dart:611:45 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\plugins\bilibili_live\bilibili_live_plugin.dart:726:45 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\plugins\bilibili_live\bilibili_live_plugin.dart:749:45 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\plugins\bilibili_live\bilibili_live_plugin.dart:830:60 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance - lib\plugins\linux_terminal\linux_connection_button.dart:18:24 - prefer_const_constructors
+   info - Use 'const' literals as arguments to constructors of '@immutable' classes - lib\plugins\linux_terminal\linux_connection_button.dart:20:27 - prefer_const_literals_to_create_immutables
+   info - Use 'const' with the constructor to improve performance - lib\plugins\linux_terminal\linux_connection_button.dart:23:19 - prefer_const_constructors
+   info - Parameter 'key' could be a super parameter - lib\screens\agents_screen.dart:7:9 - use_super_parameters
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\screens\agents_screen.dart:150:38 - invalid_null_aware_operator
+warning - The '!' will have no effect because the receiver can't be null - lib\screens\agents_screen.dart:151:38 - unnecessary_non_null_assertion
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\screens\agents_screen.dart:205:42 - invalid_null_aware_operator
+warning - The '!' will have no effect because the receiver can't be null - lib\screens\agents_screen.dart:206:56 - unnecessary_non_null_assertion
+   info - Don't use 'BuildContext's across async gaps - lib\screens\agents_screen.dart:239:29 - use_build_context_synchronously
+   info - Parameter 'key' could be a super parameter - lib\screens\chats_screen.dart:23:9 - use_super_parameters
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\chats_screen.dart:369:25 - prefer_const_declarations
+   info - 'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre - lib\screens\chats_screen.dart:438:39 - deprecated_member_use
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\chats_screen.dart:650:9 - prefer_const_declarations
+   info - The local variable '_shouldUseBubbleUI' starts with an underscore - lib\screens\chats_screen.dart:824:10 - no_leading_underscores_for_local_identifiers
+   info - The local variable '_animated' starts with an underscore - lib\screens\chats_screen.dart:845:12 - no_leading_underscores_for_local_identifiers
+warning - The value of the local variable 'value' isn't used - lib\screens\deep_research\deep_research_screen.dart:2130:35 - unused_local_variable
+   info - Don't use 'BuildContext's across async gaps - lib\screens\deep_research\deep_research_screen.dart:2242:48 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\deep_research\widgets\process_step_widget.dart:57:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\deep_research\widgets\process_step_widget.dart:62:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\deep_research\widgets\process_step_widget.dart:67:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\deep_research\widgets\process_step_widget.dart:83:29 - deprecated_member_use
+   info - Use a 'SizedBox' to add whitespace to a layout - lib\screens\deep_research\widgets\process_step_widget.dart:102:19 - sized_box_for_whitespace
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\deep_research\widgets\process_step_widget.dart:196:47 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\screens\expression_demo_screen.dart:9:9 - use_super_parameters
+   info - Use 'const' with the constructor to improve performance - lib\screens\expression_demo_screen.dart:74:25 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\expression_demo_screen.dart:88:25 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\expression_demo_screen.dart:102:25 - prefer_const_constructors
+   info - Constructors for public widgets should have a named 'key' parameter - lib\screens\firefly_plugin_dashboard.dart:5:7 - use_key_in_widget_constructors
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_plugin_dashboard.dart:25:55 - deprecated_member_use
+warning - Unused import: 'package:http/http.dart' - lib\screens\firefly_screen.dart:6:8 - unused_import
+   info - Parameter 'key' could be a super parameter - lib\screens\firefly_screen.dart:35:9 - use_super_parameters
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:425:62 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:428:55 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:594:38 - use_build_context_synchronously
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:625:21 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:636:23 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:672:30 - use_build_context_synchronously
+   info - Statements in an if should be enclosed in a block - lib\screens\firefly_screen.dart:679:9 - curly_braces_in_flow_control_structures
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:797:41 - use_build_context_synchronously
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\firefly_screen.dart:879:15 - prefer_const_declarations
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:938:36 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:1138:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\firefly_screen.dart:1140:48 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1297:57 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1347:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1399:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1449:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1620:66 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1623:53 - deprecated_member_use
+   info - The local variable '_evalJs' starts with an underscore - lib\screens\firefly_screen.dart:1637:40 - no_leading_underscores_for_local_identifiers
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1741:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:1927:47 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:1999:26 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:2000:28 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:2003:30 - prefer_const_constructors
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\firefly_screen.dart:2016:59 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:2022:23 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\screens\firefly_screen.dart:2025:32 - prefer_const_constructors
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\firefly_screen.dart:2454:5 - prefer_const_declarations
+   info - Use interpolation to compose strings and values - lib\screens\firefly_screen.dart:2455:40 - prefer_interpolation_to_compose_strings
+   info - Don't invoke 'print' in production code - lib\screens\firefly_screen.dart:2596:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\screens\firefly_screen.dart:2609:7 - avoid_print
+   info - Parameter 'key' could be a super parameter - lib\screens\first_run_dialog.dart:9:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\memory_manager_screen.dart:7:9 - use_super_parameters
+   info - The 'child' argument should be last in widget constructor invocations - lib\screens\memory_manager_screen.dart:526:9 - sort_child_properties_last
+   info - Parameter 'key' could be a super parameter - lib\screens\notes_screen.dart:10:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\plugin_center_page.dart:6:9 - use_super_parameters
+   info - Don't use 'BuildContext's across async gaps - lib\screens\plugin_center_page.dart:59:53 - use_build_context_synchronously
+   info - Parameter 'key' could be a super parameter - lib\screens\plugin_center_page.dart:116:9 - use_super_parameters
+   info - Don't use 'BuildContext's across async gaps - lib\screens\plugin_center_page.dart:138:41 - use_build_context_synchronously
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\character_manager_screen.dart:7:9 - use_super_parameters
+   info - Don't use 'BuildContext's across async gaps - lib\screens\settings\character_manager_screen.dart:60:26 - use_build_context_synchronously
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\settings_screen.dart:13:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\about_tab.dart:9:9 - use_super_parameters
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\about_tab.dart:256:74 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\about_tab.dart:258:84 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\agents_tab.dart:7:9 - use_super_parameters
+   info - Unnecessary use of 'toList' in a spread - lib\screens\settings\tabs\agents_tab.dart:103:16 - unnecessary_to_list_in_spreads
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\agents_tab.dart:140:45 - deprecated_member_use
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\screens\settings\tabs\agents_tab.dart:478:44 - invalid_null_aware_operator
+warning - The '!' will have no effect because the receiver can't be null - lib\screens\settings\tabs\agents_tab.dart:479:44 - unnecessary_non_null_assertion
+warning - The operand can't be 'null', so the condition is always 'true' - lib\screens\settings\tabs\agents_tab.dart:579:49 - unnecessary_null_comparison
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\screens\settings\tabs\agents_tab.dart:580:55 - invalid_null_aware_operator
+warning - The '!' will have no effect because the receiver can't be null - lib\screens\settings\tabs\agents_tab.dart:581:68 - unnecessary_non_null_assertion
+   info - Don't use 'BuildContext's across async gaps - lib\screens\settings\tabs\agents_tab.dart:630:35 - use_build_context_synchronously
+warning - Unused import: '../../../plugins/plugin_manager.dart' - lib\screens\settings\tabs\capabilities_tab.dart:8:8 - unused_import
+warning - Unused import: '../../../plugins/base_plugin.dart' - lib\screens\settings\tabs\capabilities_tab.dart:9:8 - unused_import
+warning - Unused import: '../../../core/services/backend_service.dart' - lib\screens\settings\tabs\capabilities_tab.dart:10:8 - unused_import
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\screens\settings\tabs\capabilities_tab.dart:12:8 - unnecessary_import
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\capabilities_tab.dart:15:9 - use_super_parameters
+   info - 'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre - lib\screens\settings\tabs\capabilities_tab.dart:28:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:28:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:32:53 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:386:44 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:389:60 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\screens\settings\tabs\capabilities_tab.dart:452:7 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\settings\tabs\capabilities_tab.dart:481:9 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:575:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\capabilities_tab.dart:578:49 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\data_tab.dart:6:9 - use_super_parameters
+   info - 'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre - lib\screens\settings\tabs\deep_research_tab.dart:21:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\deep_research_tab.dart:21:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\deep_research_tab.dart:25:53 - deprecated_member_use
+   info - 'surfaceVariant' is deprecated and shouldn't be used. Use surfaceContainerHighest instead. This feature was deprecated after v3.18.0-0.1.pre - lib\screens\settings\tabs\deep_research_tab.dart:100:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\deep_research_tab.dart:100:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\settings\tabs\deep_research_tab.dart:104:53 - deprecated_member_use
+warning - Unused import: 'agents_tab.dart' - lib\screens\settings\tabs\default_capabilities_tab.dart:5:8 - unused_import
+warning - Unused import: 'capabilities_tab.dart' - lib\screens\settings\tabs\default_capabilities_tab.dart:6:8 - unused_import
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\default_capabilities_tab.dart:10:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\plugins_tab.dart:6:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\settings\tabs\providers_tab.dart:8:9 - use_super_parameters
+   info - Use 'const' with the constructor to improve performance - lib\screens\settings\tabs\providers_tab.dart:272:34 - prefer_const_constructors
+   info - Don't use 'BuildContext's across async gaps - lib\screens\settings\tabs\providers_tab.dart:594:52 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\settings\tabs\providers_tab.dart:614:43 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\settings\tabs\providers_tab.dart:618:43 - use_build_context_synchronously
+   info - Parameter 'key' could be a super parameter - lib\screens\social_screen.dart:7:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\system_screen.dart:13:9 - use_super_parameters
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:68:102 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:132:84 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:134:80 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\screens\system_screen.dart:304:64 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\system_screen.dart:314:38 - use_build_context_synchronously
+   info - The local variable '_suggestionsFor' starts with an underscore - lib\screens\system_screen.dart:451:18 - no_leading_underscores_for_local_identifiers
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:761:66 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:763:78 - deprecated_member_use
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\system_screen.dart:773:23 - prefer_const_declarations
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\system_screen.dart:802:85 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\screens\tarot_screen.dart:4:9 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\screens\whiteboard_screen.dart:15:9 - use_super_parameters
+   info - Don't invoke 'print' in production code - lib\screens\whiteboard_screen.dart:87:7 - avoid_print
+   info - Use 'const' for final variables initialized to a constant value - lib\screens\whiteboard_screen.dart:121:7 - prefer_const_declarations
+   info - Don't use 'BuildContext's across async gaps - lib\screens\whiteboard_screen.dart:150:28 - use_build_context_synchronously
+   info - Use interpolation to compose strings and values - lib\services\ai_client.dart:48:11 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\services\ai_client.dart:138:15 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\services\ai_client.dart:154:13 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\services\ai_client.dart:214:15 - prefer_interpolation_to_compose_strings
+   info - Use interpolation to compose strings and values - lib\services\ai_client.dart:230:13 - prefer_interpolation_to_compose_strings
+warning - The value of the field '_urlSubscription' isn't used - lib\services\android\floating_window_android.dart:13:23 - unused_field
+   info - The local variable '_toDouble' starts with an underscore - lib\services\expression_service.dart:8:12 - no_leading_underscores_for_local_identifiers
+   info - Unnecessary braces in a string interpolation - lib\services\expression_service.dart:53:46 - unnecessary_brace_in_string_interps
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\services\expression_service.dart:67:39 - deprecated_member_use
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:224:9 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:235:9 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:246:9 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:257:9 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:268:9 - prefer_const_constructors
+   info - Use 'const' with the constructor to improve performance - lib\settings\settings_controller.dart:279:9 - prefer_const_constructors
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:331:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:333:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:335:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:337:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:339:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\settings\settings_controller.dart:1326:7 - curly_braces_in_flow_control_structures
+   info - Parameter 'child' could be a super parameter - lib\settings\settings_scope.dart:5:9 - use_super_parameters
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\widgets\character_display.dart:5:8 - unnecessary_import
+   info - Parameter 'key' could be a super parameter - lib\widgets\character_display.dart:22:9 - use_super_parameters
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:105:13 - avoid_print
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:107:14 - avoid_print
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:111:9 - avoid_print
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:154:7 - avoid_print
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:175:13 - avoid_print
+   info - Don't invoke 'print' in production code - lib\widgets\character_display.dart:204:5 - avoid_print
+   info - Use 'const' with the constructor to improve performance - lib\widgets\expressive_face.dart:25:39 - prefer_const_constructors
+   info - Parameters ''begin' and 'end'' could be super parameters - lib\widgets\expressive_face.dart:89:3 - use_super_parameters
+   info - Parameter 'key' could be a super parameter - lib\widgets\expressive_face.dart:99:9 - use_super_parameters
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\expressive_face.dart:181:55 - deprecated_member_use
+   info - Parameter 'key' could be a super parameter - lib\widgets\message_bubble.dart:13:9 - use_super_parameters
+   info - Use 'const' with the constructor to improve performance - lib\widgets\message_bubble.dart:119:16 - prefer_const_constructors
+   info - Parameter 'key' could be a super parameter - lib\windows\floating_window_entry.dart:11:9 - use_super_parameters
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\windows\floating_window_entry.dart:93:35 - deprecated_member_use
+

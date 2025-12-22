@@ -10,7 +10,7 @@ class FloatingWindowAndroid implements FloatingWindowService {
   static const platform = MethodChannel('com.bohuyeshan.ntai/floating_window');
   bool _isInitialized = false;
   bool _isVisible = false;
-  StreamSubscription? _urlSubscription;
+  // StreamSubscription? _urlSubscription;
 
   FloatingWindowAndroid({required this.backendUrl});
 
@@ -20,7 +20,7 @@ class FloatingWindowAndroid implements FloatingWindowService {
 
     try {
       // Subscribe to backend URL changes
-      _urlSubscription = BackendService().urlStream.listen((url) {
+      BackendService().urlStream.listen((url) {
         debugPrint('[FloatingWindowAndroid] Received backend URL update: $url');
         updateBackendUrl(url);
       });

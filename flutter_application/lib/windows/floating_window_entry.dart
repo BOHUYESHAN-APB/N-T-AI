@@ -9,10 +9,10 @@ class FloatingWindowEntry extends StatefulWidget {
   final bool showTitleBar;
 
   const FloatingWindowEntry({
-    Key? key,
+    super.key,
     required this.backendUrl,
     this.showTitleBar = true,
-  }) : super(key: key);
+  });
 
   @override
   State<FloatingWindowEntry> createState() => _FloatingWindowEntryState();
@@ -90,7 +90,7 @@ class _FloatingWindowEntryState extends State<FloatingWindowEntry> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),

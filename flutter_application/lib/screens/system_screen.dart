@@ -10,7 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import '../core/services/llm_service.dart';
 
 class SystemScreen extends StatefulWidget {
-  const SystemScreen({Key? key}) : super(key: key);
+  const SystemScreen({super.key});
 
   @override
   State<SystemScreen> createState() => _SystemScreenState();
@@ -65,7 +65,7 @@ class _SystemScreenState extends State<SystemScreen> {
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             elevation: controller.settings.agentEnabled ? 2 : 0,
-            color: controller.settings.agentEnabled ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3) : null,
+            color: controller.settings.agentEnabled ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
             child: SwitchListTile(
               secondary: Icon(Icons.auto_awesome, color: controller.settings.agentEnabled ? Theme.of(context).colorScheme.primary : null),
               title: const Text('启用 Agent 模式', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -118,7 +118,8 @@ class _SystemScreenState extends State<SystemScreen> {
                             } else {
                               await controller.setActiveExpressionProvider(v);
                             }
-                            if (!mounted) return; setState(() {});
+                            if (!mounted) return;
+                            setState(() {});
                           },
                         ),
                       ),
@@ -129,9 +130,9 @@ class _SystemScreenState extends State<SystemScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.25)),
+                      border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.25)),
                     ),
                     padding: const EdgeInsets.all(10),
                     child: const Text(
@@ -295,28 +296,32 @@ class _SystemScreenState extends State<SystemScreen> {
                     alignment: Alignment.centerRight,
                     child: FilledButton.tonal(
                       onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         final picker = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
                         if (picker == null || picker.files.first.bytes == null) return;
                         final bytes = picker.files.first.bytes!;
                         final llm = LLMService();
                         final s = controller.settings;
                         final hint = '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
-                        final messenger = ScaffoldMessenger.of(context);
                         try {
                           final result = await llm.chatWithImage(
-                            messages: const [ {'role':'system','content':'你是一个擅长中文描述的图像助手。'} ],
-                            imageBytes: bytes,
-                            prompt: hint,
-                            usageType: 'tool',
-                            providerIdOverride: controller.settings.activeVisionProviderId,
-                          );
-                          if (!mounted) return;
+                          messages: const [ {'role':'system','content':'你是一个擅长中文描述的图像助手。'} ],
+                          imageBytes: bytes,
+                          prompt: hint,
+                          usageType: 'tool',
+                          providerIdOverride: controller.settings.activeVisionProviderId,
+                        );
+                        if (!mounted) return;
+                        
+                        if (context.mounted) {
                           showDialog(context: context, builder: (ctx) => AlertDialog(
-                            title: const Text('视觉测试结果'),
-                            content: SingleChildScrollView(child: Text(result)),
-                            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭'))],
-                          ));
+                              title: const Text('视觉测试结果'),
+                              content: SingleChildScrollView(child: Text(result)),
+                              actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('关闭'))],
+                            ));
+                        }
                         } catch (e) {
+                          if (!mounted) return;
                           messenger.showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
                         }
                       },
@@ -448,7 +453,7 @@ class _SystemScreenState extends State<SystemScreen> {
       );
     }
 
-    List<String> _suggestionsFor(AiProvider kind) {
+    List<String> suggestionsFor(AiProvider kind) {
       switch (kind) {
         case AiProvider.openai:
           return const [
@@ -475,7 +480,7 @@ class _SystemScreenState extends State<SystemScreen> {
       // final rpmCtl = TextEditingController(text: cfg.rpm == null ? '' : cfg.rpm.toString());
 
       final modelOptions = {
-        ...{for (final s in _suggestionsFor(cfg.kind)) s: true}.keys,
+        ...{for (final s in suggestionsFor(cfg.kind)) s: true}.keys,
         // ...?cfg.modelCatalog,
       }.toList();
 
@@ -758,10 +763,10 @@ class _SystemScreenState extends State<SystemScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.4)),
-                  ),
+                    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.4)),
+                ),
                   child: Builder(
                     builder: (context) {
                       final baseFam = (s.baseFontMode == BaseFontModeOption.miSansPreferred) ? 'MiSansVF' : null;
@@ -770,7 +775,7 @@ class _SystemScreenState extends State<SystemScreen> {
                           : (s.decoFamily == DecorativeFontFamily.nfdcs)
                               ? 'nfdcs'
                               : null;
-                      final fallback = const ['MiSansVF', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Roboto'];
+                      const fallback = ['MiSansVF', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Roboto'];
                       final titleFam = (s.decoUseTitles && decoFam != null) ? decoFam : baseFam;
                       final bubbleFam = (s.decoUseBubbles && decoFam != null) ? decoFam : baseFam;
 
@@ -799,7 +804,7 @@ class _SystemScreenState extends State<SystemScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
+                              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.7),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(

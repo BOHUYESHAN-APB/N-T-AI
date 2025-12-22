@@ -207,11 +207,11 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [x] **Architecture Refinement**: Separation of Client (Body) and Server (Brain).
 - [x] **Secure Connectivity**: HTTPS support with self-signed certificate rotation.
 - [x] **Frontend-Centric TTS/STT**: Moving audio processing logic to Flutter for lower latency.
+- [ ] **[Highest Priority] Ultra-Low Latency Voice Loop**: Stream LLM output → chunking → early TTS playback (temporarily on hold).
 - [x] **Deployment Tools**: Docker support and One-click startup scripts.
 - [x] **Stateless Backend**: Per-request target configuration via headers (`X-Target-*`), no server-side key storage.
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
 - [ ] **Fast Mode (Minimal Orchestration)**: Default to the main loop; only invoke extra agents/services when required.
-- [ ] **Ultra-Low Latency Voice Loop**: Stream LLM output → chunking → early TTS playback (keep sentence-level playback as default).
 - [ ] **Emotion-Aware Voice**: Bind expression/emotion signals to TTS styles/parameters; prefer evaluating omni-class models.
 - [ ] **Voice Chat Integration**: Virtual microphone injection, auto-capture, and fast routing presets for Discord/KOOK-like apps.
 - [ ] **Continuous STT + Gating Agent**: VAD/endpointing, multi-segment merge, “should-send-to-LLM” filtering, summarize-then-send when needed.

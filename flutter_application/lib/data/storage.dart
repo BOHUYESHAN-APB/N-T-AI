@@ -4,7 +4,7 @@ import 'mock_data.dart';
 
 class ChatStorage {
   static const _kChatMessages = 'chat.messages.json';
-  static String _keyFor(String conversationId) => 'chat.messages.' + conversationId + '.json';
+  static String _keyFor(String conversationId) => 'chat.messages.$conversationId.json';
 
   static Future<List<ChatMessage>> loadMessages() async {
     final prefs = await SharedPreferences.getInstance();

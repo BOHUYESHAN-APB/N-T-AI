@@ -3,7 +3,6 @@ Prompt Manager
 Handles loading and rendering of prompt templates.
 """
 
-import os
 from typing import Dict, Any
 from pathlib import Path
 

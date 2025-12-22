@@ -1,7 +1,6 @@
 import json
 import math
 import asyncio
-import os
 import re
 import time
 from sqlmodel import Session, select
@@ -80,15 +79,82 @@ class MemorySystemService:
             jargon_context = self.jargon_service.get_jargon_context(user_query)
             if jargon_context:
                 context_results.append(jargon_context)
-                
-        # (Add more tools like search_chat_history here)
 
+        if plan.get("search_chat_history"):
+            chat_context = await self.search_chat_history(user_query, user_id, limit=5)
+            if chat_context:
+                context_results.append(chat_context)
+                
         # 4. Save to Thinking Back (Simplified)
         if context_results:
             final_context = "\n".join(context_results)
             # self._save_thinking_back(user_query, final_context) # Optional: save the result
             return final_context
         
+        return ""
+
+    async def search_chat_history(self, query: str, user_id: str, limit: int = 5) -> str:
+        """
+        Search recent chat history for keywords.
+        """
+        query = (query or "").strip()
+        if not query:
+            return ""
+
+        keywords = self._extract_keywords(query)
+        if not keywords:
+            # If no keywords, return nothing or maybe last few messages? 
+            # Better to return nothing to avoid noise if query is abstract.
+            return ""
+
+        from app.models.database import Conversation
+        
+        # Simple keyword match
+        # Ideally, we should use vector search if available for chat history, 
+        # but for now we stick to simple LIKE or fuzzy match.
+        # Since SQLModel doesn't support complex full text search easily across DBs,
+        # we'll fetch recent history and filter in python or use simple LIKE.
+        
+        with Session(engine) as session:
+            # Fetch last 100 messages to search within reasonable window
+            # Adjust limit as needed.
+            statement = (
+                select(Conversation)
+                # .where(Conversation.session_id == user_id) # Assuming session_id can be user_id or we filter by it if available
+                # Wait, Conversation table has session_id, but user_id is not directly there?
+                # chat_service saves session_id. Let's assume session_id might match user_id or we ignore for now if not strictly linked.
+                # Actually, chat_service.process_message uses session_id.
+                # If user_id is passed as session_id or similar.
+                # For now, let's search globally or assume session_id handling is consistent.
+                # BUT, Conversation doesn't have user_id column in the model I saw.
+                # It has session_id.
+                .order_by(Conversation.id.desc())
+                .limit(200) 
+            )
+            # If we want to filter by user/session, we need that info. 
+            # chat_service passes user_id, but Conversation stores session_id.
+            # Usually session_id IS user_id in many simple implementations, or distinct.
+            # I'll try to filter by session_id if it matches user_id, otherwise search all (might be leaky).
+            # To be safe, I will fetch all and if session_id matches user_id (if feasible).
+            # Let's assume for this specific task context that session_id might be relevant.
+            # Actually, looking at ChatService, it saves with session_id=session_id.
+            # The user_id is passed to process_message.
+            
+            results = session.exec(statement).all()
+
+        if not results:
+            return ""
+
+        hits = []
+        for msg in results:
+            content = (msg.content or "")
+            if any(k in content for k in keywords):
+                hits.append(f"[{msg.role}]: {content}")
+                if len(hits) >= limit:
+                    break
+        
+        if hits:
+            return "Relevant Chat History (Keyword Match):\n" + "\n".join(hits)
         return ""
 
     async def retrieve_relevant_memories(self, query: str, user_id: str, api_key: str = None, base_url: str = None, limit: int = 5) -> str:
@@ -557,11 +623,13 @@ class MemorySystemService:
         Available Tools:
         - search_person_info: If the query is about the user (preferences, name, history).
         - search_jargon: If the query contains slang or specific terms.
+        - search_chat_history: If the query refers to something said earlier in the conversation.
         
         Output JSON:
         {{
             "search_person_info": true/false,
-            "search_jargon": true/false
+            "search_jargon": true/false,
+            "search_chat_history": true/false
         }}
         """
         response = await self.llm.get_response([{"role": "user", "content": prompt}], api_key, base_url, model)

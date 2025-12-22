@@ -4,10 +4,8 @@ Converts HTML content (including Markdown-converted HTML) into a PDF document.
 Uses WeasyPrint for rendering.
 """
 
-import os
 import datetime
 from pathlib import Path
-from typing import Optional
 
 class PDFGenerator:
     def __init__(self, output_dir: str = "generated_docs/pdf"):

@@ -1,6 +1,6 @@
 import enum
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 class PlanStepStatus(str, enum.Enum):
     NOT_STARTED = "not_started"

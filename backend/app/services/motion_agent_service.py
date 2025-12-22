@@ -441,8 +441,6 @@ class MotionAgentService:
                 self._last_decision = dict(result)
             return result
         
-        combined_text = f"{user_text}\n{ai_text}".strip()
-
         # [Optimization] 检查文本中的动作触发词，跳过 LLM 调用
         action_trigger = self._check_action_triggers(ai_text)
         if not action_trigger.get('triggered'):
@@ -490,7 +488,7 @@ class MotionAgentService:
 
         if not str(ai_text or "").strip():
             natural_params = self._sanitize_parameters(self._generate_natural_parameters('neutral'))
-            print(f"[MotionAgent] No ai_text provided. Using fast path.")
+            print("[MotionAgent] No ai_text provided. Using fast path.")
             result = {
                 "motion": None,
                 "expression": None,
@@ -589,7 +587,7 @@ Return a JSON object ONLY, no markdown:
         try:
             # Call LLM
             # We use a lower temperature for deterministic JSON output
-            print(f"[MotionAgent] Sending prompt to LLM...")
+            print("[MotionAgent] Sending prompt to LLM...")
             response_text = await self.llm_service.analyze_text(
                 text="", # Context is already in prompt
                 prompt=prompt,

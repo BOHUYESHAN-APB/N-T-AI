@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart';
@@ -20,13 +19,13 @@ class CharacterDisplay extends StatefulWidget {
   final bool showControls;
 
   const CharacterDisplay({
-    Key? key,
+    super.key,
     required this.backendUrl,
     this.expressionAgent,
     this.controller,
     this.floatingUi = false,
     this.showControls = true,
-  }) : super(key: key);
+  });
 
   @override
   State<CharacterDisplay> createState() => _CharacterDisplayState();
@@ -102,13 +101,13 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
             final first = models.first;
             path = first['path']; // e.g. /static/live2d/Name/file.model3.json
             await prefs.setString('settings.character.modelPath', path);
-            print('[CharacterDisplay] Auto-selected model: $path');
+            debugPrint('[CharacterDisplay] Auto-selected model: $path');
           } else {
-             print('[CharacterDisplay] No models found on backend.');
+             debugPrint('[CharacterDisplay] No models found on backend.');
           }
         }
       } catch (e) {
-        print('[CharacterDisplay] Failed to auto-select model: $e');
+        debugPrint('[CharacterDisplay] Failed to auto-select model: $e');
       }
     }
 
@@ -151,7 +150,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
         _injectInitialExpression();
       }
     } catch (e) {
-      print("Error initializing Windows WebView: $e");
+      debugPrint("Error initializing Windows WebView: $e");
       if (mounted) {
         // Show error in UI
         ScaffoldMessenger.of(context).showSnackBar(
@@ -172,7 +171,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
-            print('Page finished loading: $url');
+            debugPrint('Page finished loading: $url');
             _runJavascript("window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;");
             _injectInitialExpression();
           },
@@ -201,7 +200,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
     final js =
         "if (window.live2dManager) window.live2dManager.updateParameters($jsonStr);";
 
-    print('[CharacterDisplay] Injecting initial expression: $jsonStr');
+    debugPrint('[CharacterDisplay] Injecting initial expression: $jsonStr');
     _runJavascript(js);
   }
 

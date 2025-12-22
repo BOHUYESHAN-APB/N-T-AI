@@ -27,7 +27,8 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
   @override
   void initState() {
     super.initState();
-    // Default expanded if running or failed
+    // Default expanded if running or failed. 
+    // If completed, keep collapsed to save space.
     _isExpanded = widget.status == 'running' || widget.status == 'failed';
   }
 
@@ -37,6 +38,9 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
     if (widget.status != oldWidget.status) {
       if (widget.status == 'running' || widget.status == 'failed') {
         _isExpanded = true;
+      } else if (widget.status == 'completed') {
+        // Automatically collapse when completed to save space
+        _isExpanded = false;
       }
     }
   }
@@ -54,17 +58,17 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
       case "running":
         statusColor = colorScheme.primary;
         statusIcon = Icons.sync;
-        bgColor = colorScheme.primaryContainer.withOpacity(0.1);
+        bgColor = colorScheme.primaryContainer.withValues(alpha: 0.1);
         break;
       case "completed":
         statusColor = Colors.green;
         statusIcon = Icons.check_circle;
-        bgColor = Colors.green.withOpacity(0.05);
+        bgColor = Colors.green.withValues(alpha: 0.05);
         break;
       case "failed":
         statusColor = colorScheme.error;
         statusIcon = Icons.error;
-        bgColor = colorScheme.errorContainer.withOpacity(0.1);
+        bgColor = colorScheme.errorContainer.withValues(alpha: 0.1);
         break;
       default:
         statusColor = colorScheme.outline;
@@ -80,7 +84,7 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: widget.status == 'running' 
-              ? statusColor.withOpacity(0.3) 
+              ? statusColor.withValues(alpha: 0.3) 
               : Colors.transparent,
         ),
       ),
@@ -99,7 +103,7 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
               child: Row(
                 children: [
                   // Icon
-                  Container(
+                  SizedBox(
                     width: 24,
                     height: 24,
                     child: widget.status == "running"
@@ -193,7 +197,7 @@ class _ProcessStepWidgetState extends State<ProcessStepWidget> {
                         margin: const EdgeInsets.only(top: 4),
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         width: double.infinity,

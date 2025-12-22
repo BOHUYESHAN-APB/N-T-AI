@@ -3,17 +3,15 @@ File Ingestion Service
 Handles parsing of various file formats (PDF, DOCX, Images) and integrates with Vision Agents.
 """
 
-import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from pathlib import Path
-import io
 
 # Import our new office tools
 from app.tools.office_suite import OfficeProcessor
 from docx import Document
 import pdfplumber
 from pptx import Presentation
-from PIL import Image
+from app.services.rag_service import TempRAGSession
 
 class FileIngestionService:
     def __init__(self, upload_dir: str = "uploads"):
@@ -21,7 +19,7 @@ class FileIngestionService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.processor = OfficeProcessor(output_dir=str(self.upload_dir))
 
-    async def parse_file(self, file_path: str, vision_agent_callback=None) -> Dict[str, Any]:
+    async def parse_file(self, file_path: str, vision_agent_callback=None, rag_session: Optional[TempRAGSession] = None) -> Dict[str, Any]:
         """
         Parses a file and returns structured content.
         Supports PDF, DOCX, PPTX image extraction.
@@ -30,6 +28,7 @@ class FileIngestionService:
             file_path: Absolute path to the file.
             vision_agent_callback: Async function to call for image description. 
                                    Signature: async (image_path) -> str
+            rag_session: Optional RAG session to index the content.
         """
         path = Path(file_path)
         ext = path.suffix.lower()
@@ -74,7 +73,7 @@ class FileIngestionService:
                             # This is a bit low-level, skipping for stability in MVP
                             pass
 
-                content += f"--- DOCX CONTENT ---\n" + "\n".join(full_text)
+                content += "--- DOCX CONTENT ---\n" + "\n".join(full_text)
                 
             elif ext == ".pptx":
                 prs = Presentation(str(path))
@@ -102,11 +101,17 @@ class FileIngestionService:
                                     f.write(image_bytes)
                                     
                                 # Call Vision Agent
-                                desc = await vision_agent_callback(str(img_path))
-                                text_content.append(f"[Image on Slide {i+1}: {desc}]")
+                                description = await vision_agent_callback(str(img_path))
+                                text_content.append(f"[Image Description: {description}]")
+                                if rag_session:
+                                    await rag_session.add_document(
+                                        f"Image in {path.name} (Slide {i+1}): {description}",
+                                        metadata={"source": path.name, "type": "image_description", "slide": i+1}
+                                    )
                                 metadata["images_found"] += 1
 
-                content += f"--- PPTX CONTENT ---\n" + "\n".join(text_content)
+                content += "--- PPTX CONTENT ---\n" + "\n".join(text_content)
+                metadata["images_found"] = len([s for s in text_content if "[Image Description:" in s])
 
             elif ext in [".txt", ".md", ".py", ".json", ".csv", ".html", ".js", ".css", ".xml", ".yaml", ".yml"]:
                 with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -129,6 +134,13 @@ class FileIngestionService:
                 
         except Exception as e:
             return {"error": f"Failed to parse file: {str(e)}"}
+
+        # Index the whole content to RAG if session provided
+        if rag_session and content:
+            await rag_session.add_document(
+                content,
+                metadata={"source": path.name, "type": "file_content", "extension": ext}
+            )
 
         return {
             "content": content,

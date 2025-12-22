@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../../settings/settings_controller.dart';
-import 'agents_tab.dart'; // Reuse parts of AgentsTab logic if needed, or reimplement
-import 'capabilities_tab.dart'; // Reuse parts of CapabilitiesTab logic if needed
 import '../../memory_manager_screen.dart'; // For Data section
 
 class DefaultCapabilitiesTab extends StatefulWidget {
-  const DefaultCapabilitiesTab({Key? key}) : super(key: key);
+  const DefaultCapabilitiesTab({super.key});
 
   @override
   State<DefaultCapabilitiesTab> createState() => _DefaultCapabilitiesTabState();

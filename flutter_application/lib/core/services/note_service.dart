@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:uuid/uuid.dart';
 import '../models/note.dart';
 import 'llm_service.dart';
 
@@ -122,7 +122,7 @@ class NoteService {
           textToSummarize = textBuffer.toString();
         }
       } catch (e) {
-        print("Error parsing whiteboard JSON: $e");
+        debugPrint("Error parsing whiteboard JSON: $e");
         textToSummarize = ""; // Fallback
       }
     }
@@ -156,7 +156,7 @@ class NoteService {
       await _updateNoteSummary(note.copyWith(summary: summary));
       
     } catch (e) {
-      print("Error generating summary: $e");
+      debugPrint("Error generating summary: $e");
     }
   }
 

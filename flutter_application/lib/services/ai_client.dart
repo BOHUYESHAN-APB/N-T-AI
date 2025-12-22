@@ -45,7 +45,7 @@ class AiClient {
       throw Exception('未配置 Base URL');
     }
     final full = baseUrlIsRoot && !base.endsWith('/models')
-        ? base.replaceAll(RegExp(r"/+\$"), '') + '/models'
+        ? '${base.replaceAll(RegExp(r"/+$"), '')}/models'
         : base;
     url = Uri.parse(full);
 
@@ -135,7 +135,7 @@ class AiClient {
       if (ai.baseUrl.isNotEmpty) {
         final base = ai.baseUrl;
         final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-            ? base.replaceAll(RegExp(r"/+$"), '') + '/chat/completions'
+            ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
             : base;
         url = Uri.parse(full);
       } else {
@@ -151,7 +151,7 @@ class AiClient {
       }
       final base = ai.baseUrl;
       final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-          ? base.replaceAll(RegExp(r"/+$"), '') + '/chat/completions'
+          ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
           : base;
       url = Uri.parse(full);
       if (ai.apiKey.isNotEmpty) {
@@ -211,7 +211,7 @@ class AiClient {
       if (ai.baseUrl.isNotEmpty) {
         final base = ai.baseUrl;
         final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-            ? base.replaceAll(RegExp(r"/+$"), '') + '/chat/completions'
+            ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
             : base;
         url = Uri.parse(full);
       } else {
@@ -227,7 +227,7 @@ class AiClient {
       }
       final base = ai.baseUrl;
       final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-          ? base.replaceAll(RegExp(r"/+$"), '') + '/chat/completions'
+          ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
           : base;
       url = Uri.parse(full);
       if (ai.apiKey.isNotEmpty) {

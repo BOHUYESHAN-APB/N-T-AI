@@ -4,7 +4,7 @@ import '../settings/settings_controller.dart';
 import '../settings/settings.dart';
 
 class AgentsScreen extends StatefulWidget {
-  const AgentsScreen({Key? key}) : super(key: key);
+  const AgentsScreen({super.key});
 
   @override
   State<AgentsScreen> createState() => _AgentsScreenState();
@@ -147,8 +147,8 @@ class _AgentsScreenState extends State<AgentsScreen> {
           // 若用户未填写建议模型，则自动填充 provider 的默认模型
           if (v != null && modelCtl.text.trim().isEmpty) {
             final p = ctrl.getProviderById(v);
-            if (p != null && (p.model?.isNotEmpty ?? false)) {
-              modelCtl.text = p.model!;
+            if (p != null && p.model.isNotEmpty) {
+              modelCtl.text = p.model;
             }
           }
           setLocalState(() {});
@@ -202,8 +202,8 @@ class _AgentsScreenState extends State<AgentsScreen> {
                             const SizedBox(height: 6),
                             TextButton(onPressed: () {
                               // 允许用户手动将 provider 默认模型复制到建议模型
-                              if (p.model?.isNotEmpty ?? false) {
-                                modelCtl.text = p.model!;
+                              if (p.model.isNotEmpty) {
+                                modelCtl.text = p.model;
                                 setLocalState(() {});
                               }
                             }, child: const Text('自动填充为 Provider 默认模型')),
@@ -236,8 +236,9 @@ class _AgentsScreenState extends State<AgentsScreen> {
                 meta: {'suggestedModel': modelCtl.text.trim()},
               );
               await ctrl.addOrUpdateAgent(newAgent);
-              Navigator.pop(ctx);
-              if (mounted) setState(() {});
+              if (!mounted) return;
+              Navigator.of(context).pop();
+              setState(() {});
             }, child: const Text('保存')),
           ],
         );

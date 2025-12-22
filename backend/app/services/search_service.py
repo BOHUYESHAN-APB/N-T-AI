@@ -4,6 +4,7 @@ import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import asyncio
+from typing import List, Dict, Any, Optional, Tuple
 from app.core.logger import logger
 from app.services.browser_service import browser_service
 
@@ -196,7 +197,6 @@ class SearchService:
                     data = resp.json()
                 except Exception:
                     try:
-                        import json
                         data = json.loads(resp.text)
                     except:
                         return []
@@ -243,7 +243,6 @@ class SearchService:
             
             soup = BeautifulSoup(html, 'html.parser')
             images = []
-            import json
             
             for a in soup.find_all('a', class_='iusc'):
                 m_attr = a.get('m')
@@ -368,15 +367,15 @@ class SearchService:
             results = await asyncio.gather(*tasks)
             
             valid_count = 0
-            for img_url, is_valid in zip(matches, results):
+            for img_url, (is_valid, status) in zip(matches, results):
                 if is_valid:
                     valid_images.append(img_url)
                     valid_count += 1
                 else:
-                    logger.warning(f"✗ Removing inaccessible image: {img_url}")
+                    logger.warning(f"✗ Removing inaccessible image: {img_url} (Status: {status})")
 
         new_text = text
-        for img_url, is_valid in zip(matches, results):
+        for img_url, (is_valid, status) in zip(matches, results):
             if not is_valid:
                 new_text = new_text.replace(f"[IMAGE: {img_url}]\n", "")
                 new_text = new_text.replace(f"[IMAGE: {img_url}]", "")
@@ -384,7 +383,7 @@ class SearchService:
         logger.info(f"Validation complete: {valid_count}/{len(matches)} images passed")
         return new_text
 
-    async def _check_image(self, client, url: str, referer: str = None) -> bool:
+    async def _check_image(self, client, url: str, referer: str = None) -> Tuple[bool, int]:
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -415,23 +414,23 @@ class SearchService:
 
             success, status = await _do_request(headers)
             if success:
-                return True
+                return True, status
             
             if status == 403:
                 no_ref_headers = headers.copy()
                 no_ref_headers.pop('Referer', None)
                 success, status = await _do_request(no_ref_headers)
                 if success:
-                    return True
+                    return True, status
 
             if status == 403:
                 logger.warning(f"Image 403 Forbidden (even after retry): {url}")
             
-            return False
+            return False, status
 
         except Exception as e:
             logger.warning(f"Image probe failed for {url}: {e}")
-            return False
+            return False, 0
 
     async def _validate_urls(self, urls: list, referer: str = None) -> list:
         """Helper to validate a list of URLs concurrently."""

@@ -9,7 +9,6 @@ import contextlib
 import traceback
 import subprocess
 import shlex
-import sys
 import datetime
 import os
 import shutil
@@ -114,8 +113,6 @@ class SandboxSession:
         self._globals.clear()
         # Clean and recreate workspace? For now, keep files.
 
-import datetime
-
 class SandboxService:
     def __init__(self):
         self._sessions: Dict[str, SandboxSession] = {}
@@ -132,6 +129,19 @@ class SandboxService:
         if session_id in self._sessions:
             self._sessions[session_id].cleanup()
             del self._sessions[session_id]
+
+    def cleanup_old_sessions(self, max_age_hours: int = 24):
+        """Deletes sessions older than max_age_hours."""
+        now = datetime.datetime.now()
+        to_delete = []
+        for sid, session in self._sessions.items():
+            age = now - session.created_at
+            if age.total_seconds() > max_age_hours * 3600:
+                to_delete.append(sid)
+        
+        for sid in to_delete:
+            print(f"[Sandbox] Auto-cleaning expired session: {sid}")
+            self.delete_session(sid)
 
     def execute_code(self, session_id: str, code: str) -> Dict[str, Any]:
         session = self.get_session(session_id)

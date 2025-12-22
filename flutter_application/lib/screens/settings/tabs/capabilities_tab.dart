@@ -5,14 +5,10 @@ import '../../../core/services/llm_service.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../../settings/settings_controller.dart';
-import '../../../plugins/plugin_manager.dart';
-import '../../../plugins/base_plugin.dart';
-import '../../../core/services/backend_service.dart';
 import '../../plugin_center_page.dart';
-import 'package:flutter/foundation.dart';
 
 class CapabilitiesTab extends StatelessWidget {
-  const CapabilitiesTab({Key? key}) : super(key: key);
+  const CapabilitiesTab({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -25,11 +21,11 @@ class CapabilitiesTab extends StatelessWidget {
         _buildSectionHeader(context, 'Python 神经中枢 (Neural Hub)'),
         Card(
           elevation: 0,
-          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(
-              color: Theme.of(context).dividerColor.withOpacity(0.1),
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.1),
             ),
           ),
           child: Padding(
@@ -383,10 +379,10 @@ class CapabilitiesTab extends StatelessWidget {
             decoration: BoxDecoration(
               color: Theme.of(
                 context,
-              ).colorScheme.errorContainer.withOpacity(0.5),
+              ).colorScheme.errorContainer.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: Theme.of(context).colorScheme.error.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.error.withValues(alpha: 0.5),
               ),
             ),
             child: Row(
@@ -442,15 +438,15 @@ class CapabilitiesTab extends StatelessWidget {
       withData: true,
     );
     if (picker == null || picker.files.first.bytes == null) return;
+    if (!context.mounted) return;
     final bytes = picker.files.first.bytes!;
     final llm = LLMService();
     final s = controller.settings;
     final hint =
         '${s.visionPromptTemplate}\n长度建议约${s.visionPreferredLength}字，最多${s.visionMaxLength}字。';
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('正在请求视觉分析...')));
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('正在请求视觉分析...')));
 
     try {
       final result = await llm.chatWithImage(
@@ -477,9 +473,8 @@ class CapabilitiesTab extends StatelessWidget {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('视觉测试失败：$e')));
     }
   }
 
@@ -572,10 +567,10 @@ class CapabilitiesTab extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
-      color: enabled ? null : Theme.of(context).disabledColor.withOpacity(0.05),
+      color: enabled ? null : Theme.of(context).disabledColor.withValues(alpha: 0.05),
       shape: RoundedRectangleBorder(
         side: BorderSide(
-          color: Theme.of(context).dividerColor.withOpacity(0.2),
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
         ),
         borderRadius: BorderRadius.circular(8),
       ),

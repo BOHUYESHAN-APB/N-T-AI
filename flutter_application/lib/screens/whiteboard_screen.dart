@@ -12,7 +12,7 @@ import '../core/services/note_service.dart';
 
 class WhiteboardScreen extends StatefulWidget {
   final Note? note;
-  const WhiteboardScreen({Key? key, this.note}) : super(key: key);
+  const WhiteboardScreen({super.key, this.note});
 
   @override
   State<WhiteboardScreen> createState() => _WhiteboardScreenState();
@@ -84,7 +84,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
         });
       }
     } catch (e) {
-      print("Error initializing webview: $e");
+      debugPrint("Error initializing webview: $e");
     }
   }
 
@@ -118,7 +118,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
 
   Future<void> _saveAndExit() async {
     try {
-      final script = """
+      const script = """
         (function() {
             const elements = window.excalidrawAPI.getSceneElements();
             const appState = window.excalidrawAPI.getAppState();
@@ -147,6 +147,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> {
       
       if (mounted) Navigator.pop(context);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving: $e')));
     }
   }

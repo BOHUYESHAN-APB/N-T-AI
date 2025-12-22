@@ -3,7 +3,7 @@ import '../../../settings/settings_scope.dart';
 import '../../memory_manager_screen.dart';
 
 class DataTab extends StatelessWidget {
-  const DataTab({Key? key}) : super(key: key);
+  const DataTab({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -10,7 +10,7 @@ import '../theme/chat_colors.dart';
 class MessageBubble extends StatelessWidget {
   final ChatMessage message;
 
-  const MessageBubble({Key? key, required this.message}) : super(key: key);
+  const MessageBubble({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -116,9 +116,9 @@ class MessageBubble extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-               Row(
+               const Row(
                  mainAxisSize: MainAxisSize.min,
-                 children: const [
+                 children: [
                    Icon(Icons.star, size: 12, color: Color(0xFF856404)),
                    SizedBox(width: 4),
                    Text("SUPER CHAT", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF856404), letterSpacing: 1.5)),

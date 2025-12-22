@@ -23,7 +23,7 @@ class ExpressionInferenceAgentService {
     // If no heuristic match and provider override given, ask small model
     if (providerIdOverride != null && providerIdOverride.isNotEmpty) {
       try {
-        final sys = '你现在是一个情绪分析模块。请阅读用户与助手的对话最后一段内容（仅这一段文本），输出 JSON，不要包含解释，不要使用 markdown 代码块：\n格式: {"expression": {"mouth": -1..1, "eyes": 0..1, "eyebrow": -1..1, "blush": 0..1, "pupil_x": -1..1, "pupil_y": -1..1, "head_tilt": -0.5..0.5}}\n规则: 若无法判断情绪则输出 {"expression": {"mouth":0, "eyes":1, "eyebrow":0, "blush":0, "pupil_x":0, "pupil_y":0, "head_tilt":0}}';
+        const sys = '你现在是一个情绪分析模块。请阅读用户与助手的对话最后一段内容（仅这一段文本），输出 JSON，不要包含解释，不要使用 markdown 代码块：\n格式: {"expression": {"mouth": -1..1, "eyes": 0..1, "eyebrow": -1..1, "blush": 0..1, "pupil_x": -1..1, "pupil_y": -1..1, "head_tilt": -0.5..0.5}}\n规则: 若无法判断情绪则输出 {"expression": {"mouth":0, "eyes":1, "eyebrow":0, "blush":0, "pupil_x":0, "pupil_y":0, "head_tilt":0}}';
         final user = text.length > 600 ? text.substring(text.length - 600) : text; // truncate last part
         final raw = await _llm.chatWithProvider([
           {'role': 'system', 'content': sys},

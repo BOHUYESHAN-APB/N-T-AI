@@ -10,8 +10,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'llm_service.dart';
-import 'memory_service.dart';
-import '../prompts/prompts.dart';
 import '../tools/agent_tool.dart';
 import '../tools/clock_tool.dart';
 import '../tools/web_browser_tool.dart';
@@ -36,7 +34,6 @@ class BrainService {
   // ExpressionAgentService: 只接收结构化参数并驱动 UI 表情渲染，不参与推理；
   // （这样减少主脑上下文污染与 token 开销，允许后续独立选择更小的模型用于表情推理）。
   final LLMService _llmService = LLMService();
-  final MemoryService _memoryService = MemoryService();
   // Separate agents to reduce main brain load
   final ExpressionAgentService _expressionAgent = ExpressionAgentService();
   final Avatar3DAgentService _avatar3DAgent = Avatar3DAgentService();
@@ -163,15 +160,15 @@ class BrainService {
           final json = jsonDecode(response.body);
           final clientCount = json['clients'] as int;
           if (clientCount > 0) {
-            print('[BrainService] Audio broadcasted to $clientCount Live2D clients.');
+            debugPrint('[BrainService] Audio broadcasted to $clientCount Live2D clients.');
           } else {
-            print('[BrainService] No Live2D clients connected for audio broadcast.');
+            debugPrint('[BrainService] No Live2D clients connected for audio broadcast.');
           }
         } else {
-          print('[BrainService] Audio broadcast failed: ${response.statusCode}');
+          debugPrint('[BrainService] Audio broadcast failed: ${response.statusCode}');
         }
       } catch (e) {
-        print('[BrainService] Audio broadcast error: $e');
+        debugPrint('[BrainService] Audio broadcast error: $e');
       }
     }());
   }
@@ -751,7 +748,7 @@ class BrainService {
     String wavPath, {
     String language = '',
   }) async {
-    final script = r'''
+    const script = r'''
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName System.Speech
 $path = $env:NTAI_WAV_PATH
@@ -900,7 +897,7 @@ exit 0
     var sum = 0;
     for (final m in ctx) {
       sum += 4;
-      sum += _estimateTokens((m['role'] ?? '') + ':');
+      sum += _estimateTokens('${m['role'] ?? ''}:');
       sum += _estimateTokens(m['content'] ?? '');
     }
     return sum;
@@ -939,7 +936,7 @@ exit 0
   final _initiativeController = StreamController<AiResponse>.broadcast();
   Stream<AiResponse> get initiativeStream => _initiativeController.stream;
 
-  List<String> _danmakuBuffer = [];
+  final List<String> _danmakuBuffer = [];
   Timer? _initiativeTimer;
   bool _isProcessing = false;
   bool _initiativeLoopRequested = false;
@@ -1147,7 +1144,7 @@ Based on these comments, do you want to proactively say something to the audienc
     _statusController.add(isServerMode ? "Connecting to Neural Backend..." : "Connecting to AI Provider...");
     debugPrint("[BRAIN] Entering ${isServerMode ? 'Server' : 'Client'} Mode");
     debugPrint("[BRAIN] enableBrowser: $enableBrowser");
-    debugPrint("[BRAIN] User message: ${userMessage.length > 50 ? userMessage.substring(0, 50) + '...' : userMessage}");
+    debugPrint("[BRAIN] User message: ${userMessage.length > 50 ? '${userMessage.substring(0, 50)}...' : userMessage}");
     try {
       List<Map<String, String>> messages = List.from(_context);
       if (!allowEmojis) {
@@ -1442,12 +1439,6 @@ Based on these comments, do you want to proactively say something to the audienc
       }());
     }
 
-    // 6. Background Learning (Fire and Forget)
-    if (learningProbability > 0 && (learningProbability >= 1.0 || Random().nextDouble() < learningProbability)) {
-      _statusController.add("Learning...");
-      _learnFromInteraction(userMessage, finalResponse);
-    }
-    
     // 7. Auto-Compression Check
     _statusController.add(""); // Clear status
     
@@ -1515,45 +1506,7 @@ Based on these comments, do you want to proactively say something to the audienc
       // is satisfied by the persistent chat history which acts as the raw log.
       
     } catch (e) {
-      print("Compression failed: $e");
-    }
-  }
-
-  Future<void> _learnFromInteraction(String userMessage, String assistantResponse) async {
-    try {
-      // Ask LLM to extract facts
-      // We use a separate short context for learning to save tokens
-      final analysisResponse = await _llmService.chat([
-        {'role': 'system', 'content': MEMORY_EXTRACTION_PROMPT},
-        {'role': 'user', 'content': "User: $userMessage\nAssistant: $assistantResponse"}
-      ], usageType: 'system');
-      String analysisJson = analysisResponse.content;
-
-      // Clean up JSON if needed (remove markdown code blocks)
-      final start = analysisJson.indexOf('{');
-      final end = analysisJson.lastIndexOf('}');
-      if (start != -1 && end != -1 && end > start) {
-        analysisJson = analysisJson.substring(start, end + 1);
-      } else if (analysisJson.contains("```json")) {
-        analysisJson = analysisJson.split("```json")[1].split("```")[0];
-      } else if (analysisJson.contains("```")) {
-        analysisJson = analysisJson.split("```")[1].split("```")[0];
-      }
-
-      final data = jsonDecode(analysisJson);
-      if (data['should_save'] == true) {
-        await _memoryService.saveMemory(
-          data['memory_content'],
-          data['category'] ?? 'other',
-        );
-        if (kDebugMode) {
-          print("Learned: ${data['memory_content']}");
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print("Learning failed: $e");
-      }
+      debugPrint("Compression failed: $e");
     }
   }
 
@@ -1570,9 +1523,9 @@ Based on these comments, do you want to proactively say something to the audienc
       // Heuristic: If image is too large (e.g. > 4MP or > 2500px on any side), it's likely a photo/screenshot, not a meme.
       // Memes are usually smaller.
       if (width > 2500 || height > 2500) {
-        print("Image too large ($width x $height), skipping meme learning.");
+        debugPrint("Image too large ($width x $height), skipping meme learning.");
         _statusController.add("Image too large for meme.");
-        await Future.delayed(Duration(seconds: 1));
+        await Future.delayed(const Duration(seconds: 1));
         _statusController.add("");
         return;
       }
@@ -1618,19 +1571,19 @@ Output JSON format:
         // For this refactor, we just log it.
         _statusController.add("Meme detected (Backend migration pending)");
         if (kDebugMode) {
-          print("Meme detected: $description (Reason: ${data['reason']}) - Client side save disabled.");
+          debugPrint("Meme detected: $description (Reason: ${data['reason']}) - Client side save disabled.");
         }
       } else {
         _statusController.add("Image analyzed (Not a meme)");
         if (kDebugMode) {
-          print("Skipped meme learning: ${data['reason']}");
+          debugPrint("Skipped meme learning: ${data['reason']}");
         }
       }
       
-      await Future.delayed(Duration(seconds: 1));
+      await Future.delayed(const Duration(seconds: 1));
       _statusController.add("");
     } catch (e) {
-      print("Meme learning failed: $e");
+      debugPrint("Meme learning failed: $e");
       _statusController.add("Meme learning failed.");
     }
   }

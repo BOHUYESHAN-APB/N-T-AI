@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union
@@ -16,6 +17,8 @@ from app.core.logger import get_recent_errors, set_recent_error_max
 from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes, deep_research_routes, linux_routes
 from app.plugins import startup_plugins, shutdown_plugins, get_plugin
 from app.plugins.bilibili_live import BilibiliLivePlugin
+from app.services.sandbox_service import sandbox_service
+from app.services.rag_service import temp_rag_service
 
 import logging
 
@@ -27,16 +30,36 @@ class EndpointFilter(logging.Filter):
 # Apply the filter to uvicorn.access logger
 logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
+from app.services.priority_manager import priority_manager
+
 # Lifecycle manager
+async def periodic_cleanup():
+    """Background task to clean up old sessions."""
+    while True:
+        try:
+            logger.info("[Cleanup] Running periodic cleanup for Sandbox and RAG sessions...")
+            sandbox_service.cleanup_old_sessions(max_age_hours=24)
+            temp_rag_service.cleanup_old_sessions(max_age_hours=24)
+        except Exception as e:
+            logger.error(f"[Cleanup] Error during periodic cleanup: {e}")
+        await asyncio.sleep(3600) # Run every hour
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Astra-Me Backend...")
     create_db_and_tables()
     await startup_plugins()
+    # Start PriorityManager
+    await priority_manager.start()
+    
+    # Start background cleanup task
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    
     try:
         yield
     finally:
         logger.info("Shutting down Astra-Me Backend...")
+        cleanup_task.cancel()
         await shutdown_plugins()
 
 app = FastAPI(

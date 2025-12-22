@@ -54,6 +54,45 @@ class LLMService:
             # Re-raise exception so caller (ChatService) can handle fallbacks (e.g. downgrade to text-only)
             raise e
 
+    async def get_response_stream(self, messages: list, api_key: str = None, base_url: str = None, model: str = None, temperature: float = 0.7, timeout: float = 60.0, enable_thinking: bool = False):
+        try:
+            client = self.default_client
+            target_model = model or settings.LLM_MODEL
+            
+            if api_key and base_url:
+                client = openai.AsyncOpenAI(
+                    api_key=api_key, 
+                    base_url=base_url,
+                    timeout=timeout
+                )
+            
+            extra_body = {}
+            if target_model and "deepseek" in target_model.lower():
+                 if "reasoner" not in target_model.lower() and enable_thinking:
+                     extra_body["thinking"] = {"type": "enabled"}
+            
+            stream = await client.chat.completions.create(
+                model=target_model,
+                messages=messages,
+                temperature=temperature,
+                timeout=timeout,
+                stream=True,
+                extra_body=extra_body if extra_body else None
+            )
+            
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+                # Handle thinking/reasoning content if available
+                if hasattr(chunk.choices[0].delta, "reasoning_content") and chunk.choices[0].delta.reasoning_content:
+                    # We might want to handle this differently, but for now just yield as special marker or skip
+                    # Yielding reasoning might be useful for thinking mode UI
+                    pass
+
+        except Exception as e:
+            print(f"LLM Stream Error: {e}")
+            raise e
+
     async def analyze_text(self, text: str, prompt: str, api_key: str = None, base_url: str = None, model: str = None, timeout: float = 60.0) -> str:
         """Generic method for analysis tasks (memory extraction, emotion, etc.)"""
         messages = [

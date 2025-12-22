@@ -1,8 +1,7 @@
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 import os
-import json
 
 class TaskPlan(BaseModel):
     title: str = "Research Task"
@@ -53,7 +52,7 @@ class Planner:
         except:
             return "New Project"
 
-    async def analyze_request(self, user_input: str, memory_context: str, current_date: str, depth: str = "Medium", max_steps: int = 5) -> Tuple[str, Dict[str, Any]]:
+    async def analyze_request(self, user_input: str, memory_context: str, current_date: str, depth: str = "Medium", max_steps: int = 5) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         client = self._get_client()
         model = self._get_model()
 
@@ -87,10 +86,50 @@ class Planner:
         )
         content = response.choices[0].message.content
         
+        from .utils import extract_json_from_text
+        import json
+        
+        plan_data = extract_json_from_text(content)
+        if not plan_data:
+            plan_data = {"steps": [], "title": "Research Plan"}
+
         debug_info = {
             "agent": "Planner",
             "model": model,
             "messages": messages,
             "response": content
         }
-        return content, debug_info
+
+        if "clarification" in plan_data:
+            return plan_data, debug_info
+
+        # Clean up steps: remove "步骤 X:" or "Step X:" prefixes
+        import re
+        if "steps" in plan_data and isinstance(plan_data["steps"], list):
+            cleaned_steps = []
+            for step in plan_data["steps"]:
+                # Remove nested "步骤 1:", "Step 1:", "1.", etc.
+                cleaned = re.sub(r'^((步骤|Step|Step\s+)?\s*\d+[:.]\s*)+', '', step).strip()
+                
+                # Safeguard: If the LLM outputs a refusal message as a step, 
+                # convert it to a clarification request or a default research step.
+                if any(refusal in cleaned for refusal in ["不支持", "无法提供", "抱歉", "限制"]):
+                    if "clarification" not in plan_data:
+                        plan_data["clarification"] = {
+                            "title": "需要更多信息",
+                            "content": f"AI提示：{cleaned}。为了更好地完成任务，请补充以下信息：",
+                            "questions": [
+                                {
+                                    "id": "refusal_fix",
+                                    "type": "long_text",
+                                    "label": "补充说明",
+                                    "placeholder": "请具体说明您的研究目标、受众或所需格式..."
+                                }
+                            ]
+                        }
+                        return plan_data, debug_info
+                
+                cleaned_steps.append(cleaned)
+            plan_data["steps"] = cleaned_steps
+
+        return plan_data, debug_info

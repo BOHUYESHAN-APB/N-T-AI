@@ -1,5 +1,22 @@
 # 更新日志 (Changelog)
 
+## [0.3.10-beta] - 2025-12-22
+
+### 优化 (Changed)
+- **设置页整理（通用 / General）**:
+    - 按类别分组并改为可折叠展示，减少页面拥挤并提升观感。
+    - 展开后才显示分组边框与内容区域，收起时仅显示标题行。
+    - 位置: `flutter_application/lib/screens/settings/tabs/general_tab.dart`
+- **后端写库频率优化**:
+    - `Person.know_times` 改为内存缓冲 + 批量写入（默认阈值 `KNOW_TIMES_BATCH_SIZE=10`）。
+    - 位置: `backend/app/services/person_service.py`、`backend/app/core/config.py`
+- **SQL 日志开关**:
+    - 数据库 `echo` 改为读取 `SQL_ECHO` 配置（默认 false）。
+    - 位置: `backend/app/models/database.py`、`backend/app/core/config.py`
+
+<!-- LATEST_LOG_SPLIT: 最新日志与历史日志分割线，请勿删除 -->
+---
+
 ## [0.3.9-beta] - 2025-12-20
 
 ### 优化 (Changed)

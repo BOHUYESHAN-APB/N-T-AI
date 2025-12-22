@@ -56,6 +56,7 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
   String? _followupArtifactTitle;
   StreamSubscription<String>? _sseSubscription;
   bool _receivedFinalResult = false;
+  bool _showAllSteps = false;
   
   // Clarification State
   bool _isClarificationNeeded = false;
@@ -69,11 +70,15 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
   int _clarificationSecondsLeft = 0;
   bool _isClarificationCountdownPaused = false;
 
+  Timer? _uiUpdateTimer;
+  final List<Map<String, dynamic>> _eventBuffer = [];
+  
   @override
   void dispose() {
     _sseSubscription?.cancel();
     _stopClarificationCountdown();
     _persistTimer?.cancel();
+    _uiUpdateTimer?.cancel();
     _inputController.dispose();
     _inputScrollController.dispose();
     _clarificationController.dispose();
@@ -370,8 +375,8 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
           break;
         case 'step_start':
           ensureAssistantMsg();
-          final title = event['title']?.toString() ?? "";
-          final existingIndex = currentSteps.lastIndexWhere((s) => s['title'] == title);
+          final title = _cleanStepTitle(event['title']?.toString() ?? "");
+          final existingIndex = currentSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == title);
           if (existingIndex != -1) {
             currentSteps[existingIndex]['desc'] = event['desc'];
             currentSteps[existingIndex]['status'] = event['status'];
@@ -395,7 +400,8 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             }
           } else {
             if (currentSteps.isNotEmpty) {
-              final stepIndex = currentSteps.lastIndexWhere((s) => s['title'] == event['step_title']);
+              final stepTitle = _cleanStepTitle(event['step_title']?.toString() ?? "");
+              final stepIndex = currentSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == stepTitle);
               if (stepIndex != -1) {
                 final logs = currentSteps[stepIndex]['logs'];
                 if (logs is List) {
@@ -409,7 +415,7 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
           break;
         case 'resource':
           ensureAssistantMsg();
-          final stepTitle = event['step_title']?.toString() ?? "";
+          final stepTitle = _cleanStepTitle(event['step_title']?.toString() ?? "");
           if (stepTitle.isEmpty) break;
           resourcesByStep.putIfAbsent(stepTitle, () => []);
           final data = (event['data'] is Map<String, dynamic>)
@@ -420,12 +426,13 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             ...data,
           });
           break;
+        case 'plan':
         case 'plan_review':
           ensureAssistantMsg();
           final rawSteps = event['steps'];
           final existingByTitle = <String, Map<String, dynamic>>{};
           for (final s in currentSteps) {
-            final t = s['title']?.toString() ?? '';
+            final t = _cleanStepTitle(s['title']?.toString() ?? '');
             if (t.trim().isEmpty) continue;
             existingByTitle[t] = Map<String, dynamic>.from(s);
           }
@@ -433,7 +440,7 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
           final steps = <String>[];
           if (rawSteps is List) {
             for (final item in rawSteps) {
-              final step = item?.toString().trim() ?? '';
+              final step = _cleanStepTitle(item?.toString() ?? '');
               if (step.isEmpty) continue;
               if (!steps.contains(step)) {
                 steps.add(step);
@@ -441,9 +448,10 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             }
           }
 
-          final analysisStep = existingByTitle['任务分析'];
-          if (analysisStep != null && !steps.contains('任务分析')) {
-            steps.insert(0, '任务分析');
+          final analysisKey = existingByTitle.containsKey('任务分析') ? '任务分析' : 'Planning';
+          final analysisStep = existingByTitle[analysisKey];
+          if (analysisStep != null && !steps.contains(analysisKey) && !steps.contains('任务分析')) {
+            steps.insert(0, analysisKey);
           }
 
           currentSteps = [];
@@ -464,9 +472,11 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             resourcesByStep.putIfAbsent(step, () => []);
           }
           break;
+        case 'step_finish':
         case 'step_complete':
           ensureAssistantMsg();
-          final stepIndex = currentSteps.lastIndexWhere((s) => s['title'] == event['title']);
+          final title = _cleanStepTitle(event['title']?.toString() ?? "");
+          final stepIndex = currentSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == title);
           if (stepIndex != -1) {
             currentSteps[stepIndex]['status'] = 'completed';
           }
@@ -815,13 +825,222 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
     }
   }
 
+  String _cleanStepTitle(String title) {
+    // Remove nested prefixes like "步骤 1:", "Step 1:", "1.", etc.
+    // Enhanced regex to handle multiple nested prefixes
+    final regExp = RegExp(r'^((步骤|Step|Step\s+)?\s*\d+[:.]\s*)+', caseSensitive: false);
+    return title.replaceFirst(regExp, '').trim();
+  }
+
+  void _handleEventBatch(Map<String, dynamic> event) {
+    // Some events should trigger immediate UI update
+    final immediateTypes = {'clarification', 'final_result', 'error', 'metadata'};
+    final type = event['type']?.toString() ?? '';
+    
+    _eventBuffer.add(event);
+    
+    if (immediateTypes.contains(type)) {
+      _flushEventBuffer();
+    } else {
+      _uiUpdateTimer ??= Timer(const Duration(milliseconds: 150), () {
+        _flushEventBuffer();
+      });
+    }
+  }
+
+  void _flushEventBuffer() {
+    _uiUpdateTimer?.cancel();
+    _uiUpdateTimer = null;
+    
+    if (_eventBuffer.isEmpty) return;
+    
+    final events = List<Map<String, dynamic>>.from(_eventBuffer);
+    _eventBuffer.clear();
+    
+    _safeSetState(() {
+      for (final event in events) {
+        _handleEventInternal(event);
+      }
+    });
+  }
+
+  void _handleEventInternal(Map<String, dynamic> event) {
+    final eventSessionId = event['session_id']?.toString().trim();
+    if (eventSessionId != null && eventSessionId.isNotEmpty) {
+      _currentSessionId = eventSessionId;
+    }
+
+    switch (event['type']) {
+      case 'step_start':
+        final title = _cleanStepTitle(event['title']?.toString() ?? "");
+        final existingIndex = _processSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == title);
+        if (existingIndex != -1) {
+          _processSteps[existingIndex]['desc'] = event['desc'];
+          _processSteps[existingIndex]['status'] = event['status'];
+        } else {
+          _processSteps.add({
+            "title": title,
+            "desc": event['desc'],
+            "status": event['status'],
+            "logs": <String>[]
+          });
+        }
+        _resourcesByStep.putIfAbsent(title, () => []);
+        break;
+      case 'log':
+        final subtype = event['subtype'];
+        if (subtype == 'llm_call') {
+          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+            final logs = _messages.last['logs'];
+            if (logs is List) {
+              logs.add(event['content']);
+            }
+          }
+        } else {
+          if (_processSteps.isNotEmpty) {
+            final stepTitle = _cleanStepTitle(event['step_title']?.toString() ?? '');
+            final stepIndex = _processSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == stepTitle);
+            if (stepIndex != -1) {
+              final logs = _processSteps[stepIndex]['logs'];
+              if (logs is List) {
+                logs.add(event['content']);
+              } else {
+                _processSteps[stepIndex]['logs'] = [event['content']];
+              }
+            }
+          }
+        }
+        break;
+      case 'resource':
+        final stepTitle = _cleanStepTitle(event['step_title']?.toString() ?? "");
+        if (stepTitle.isEmpty) break;
+        _resourcesByStep.putIfAbsent(stepTitle, () => []);
+        final data = (event['data'] is Map<String, dynamic>) ? (event['data'] as Map<String, dynamic>) : <String, dynamic>{};
+        _resourcesByStep[stepTitle]!.add({
+          "kind": event['kind']?.toString() ?? "",
+          ...data,
+        });
+        break;
+      case 'plan':
+      case 'plan_review':
+        final rawSteps = event['steps'];
+        final existingByTitle = <String, Map<String, dynamic>>{};
+        for (final s in _processSteps) {
+          final t = _cleanStepTitle(s['title']?.toString() ?? '');
+          if (t.isEmpty) continue;
+          existingByTitle[t] = Map<String, dynamic>.from(s);
+        }
+
+        final steps = <String>[];
+        if (rawSteps is List) {
+          for (final item in rawSteps) {
+            final step = _cleanStepTitle(item?.toString() ?? '');
+            if (step.isEmpty) continue;
+            if (!steps.contains(step)) {
+              steps.add(step);
+            }
+          }
+        }
+
+        final analysisKey = existingByTitle.containsKey('任务分析') ? '任务分析' : 'Planning';
+        final analysisStep = existingByTitle[analysisKey];
+        if (analysisStep != null && !steps.contains(analysisKey) && !steps.contains('任务分析')) {
+          steps.insert(0, analysisKey);
+        }
+
+        _processSteps.clear();
+        for (final step in steps) {
+          final existing = existingByTitle[step];
+          if (existing != null) {
+            _processSteps.add(existing);
+          } else {
+            _processSteps.add({
+              "title": step,
+              "desc": "Waiting to start...",
+              "status": "pending",
+              "logs": <String>[]
+            });
+          }
+          _resourcesByStep.putIfAbsent(step, () => []);
+        }
+        break;
+      case 'step_finish':
+      case 'step_complete':
+        final title = _cleanStepTitle(event['title']?.toString() ?? "");
+        final stepIndex = _processSteps.lastIndexWhere((s) => _cleanStepTitle(s['title']) == title);
+        if (stepIndex != -1) {
+          _processSteps[stepIndex]['status'] = 'completed';
+        }
+        break;
+      case 'artifact':
+        final data = (event['data'] is Map) ? Map<String, dynamic>.from(event['data']) : <String, dynamic>{};
+        _artifacts.add({
+          "title": data['title']?.toString() ?? '',
+          "type": data['type']?.toString() ?? '',
+          "size": data['size']?.toString() ?? '',
+          "path": data['path']?.toString() ?? ''
+        });
+        break;
+      case 'artifact_preview':
+        final data = (event['data'] is Map) ? Map<String, dynamic>.from(event['data']) : <String, dynamic>{};
+        final title = data['title']?.toString() ?? '';
+        final html = data['html']?.toString() ?? '';
+        if (title.trim().isEmpty || html.trim().isEmpty) break;
+        _artifactPreviews[title] = {
+          "format": data['format']?.toString() ?? '',
+          "html": html,
+        };
+        break;
+      case 'final_result':
+        _receivedFinalResult = true;
+        _processSteps.add({
+          "title": "完成",
+          "desc": event['content']?.toString() ?? "研究任务成功完成。",
+          "status": "completed",
+          "logs": []
+        });
+        if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+          _messages.last['status'] = 'completed';
+        }
+        _isLoading = false;
+        break;
+      case 'clarification':
+        final seconds = int.tryParse(event['auto_decide_seconds']?.toString() ?? '') ?? 60;
+        final title = event['title']?.toString();
+        final content = event['content']?.toString();
+        final questions = _normalizeClarificationQuestions(event['questions'], content ?? '');
+        _resetClarificationForm();
+        _isClarificationNeeded = true;
+        _clarificationQuestion = title ?? (content ?? "");
+        _clarificationQuestions = questions;
+        _clarificationSecondsLeft = seconds;
+        _isLoading = false;
+        _startClarificationCountdown(seconds: seconds);
+        break;
+      case 'error':
+        _processSteps.add({
+          "title": "Error",
+          "desc": event['content']?.toString() ?? "Unknown error",
+          "status": "failed",
+          "logs": []
+        });
+        _isLoading = false;
+        if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+          _messages.last['status'] = 'failed';
+        }
+        break;
+    }
+  }
+
   void _handleEvent(Map<String, dynamic> event, {bool persist = true}) {
     final eventSessionId = event['session_id']?.toString().trim();
     final resolvedSessionId =
         (eventSessionId != null && eventSessionId.isNotEmpty) ? eventSessionId : _currentSessionId;
+    
     if (persist && _currentSessionId == null && eventSessionId != null && eventSessionId.isNotEmpty) {
       _chatHistory.createSession("未命名研究", id: eventSessionId, type: 'research');
     }
+    
     if (persist && resolvedSessionId != null && resolvedSessionId.trim().isNotEmpty) {
       _enqueuePersist(
         sessionId: resolvedSessionId,
@@ -830,179 +1049,8 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
       );
     }
 
-    _safeSetState(() {
-      if (eventSessionId != null && eventSessionId.isNotEmpty) {
-        _currentSessionId = eventSessionId;
-      }
-      switch (event['type']) {
-        case 'step_start':
-          final title = event['title']?.toString() ?? "";
-          final existingIndex = _processSteps.lastIndexWhere((s) => s['title'] == title);
-          if (existingIndex != -1) {
-            _processSteps[existingIndex]['desc'] = event['desc'];
-            _processSteps[existingIndex]['status'] = event['status'];
-          } else {
-            _processSteps.add({
-              "title": title,
-              "desc": event['desc'],
-              "status": event['status'],
-              "logs": <String>[]
-            });
-          }
-          _resourcesByStep.putIfAbsent(title, () => []);
-          break;
-        case 'log':
-          final subtype = event['subtype'];
-          if (subtype == 'llm_call') {
-             // Add to general logs of the last assistant message
-             if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-               final logs = _messages.last['logs'];
-               if (logs is List) {
-                 logs.add(event['content']);
-               }
-             }
-          } else {
-            if (_processSteps.isNotEmpty) {
-              // Find step by title or use last
-              final stepIndex = _processSteps.lastIndexWhere((s) => s['title'] == event['step_title']);
-              if (stepIndex != -1) {
-                final logs = _processSteps[stepIndex]['logs'];
-                if (logs is List) {
-                  logs.add(event['content']);
-                } else {
-                  _processSteps[stepIndex]['logs'] = [event['content']];
-                }
-              }
-            }
-          }
-          break;
-        case 'resource':
-          final stepTitle = event['step_title']?.toString() ?? "";
-          if (stepTitle.isEmpty) break;
-          _resourcesByStep.putIfAbsent(stepTitle, () => []);
-          final data = (event['data'] is Map<String, dynamic>) ? (event['data'] as Map<String, dynamic>) : <String, dynamic>{};
-          _resourcesByStep[stepTitle]!.add({
-            "kind": event['kind']?.toString() ?? "",
-            ...data,
-          });
-          break;
-        case 'plan':
-        case 'plan_review':
-          final rawSteps = event['steps'];
-          final existingByTitle = <String, Map<String, dynamic>>{};
-          for (final s in _processSteps) {
-            final t = s['title']?.toString() ?? '';
-            if (t.trim().isEmpty) continue;
-            existingByTitle[t] = Map<String, dynamic>.from(s);
-          }
-
-          final steps = <String>[];
-          if (rawSteps is List) {
-            for (final item in rawSteps) {
-              final step = item?.toString().trim() ?? '';
-              if (step.isEmpty) continue;
-              if (!steps.contains(step)) {
-                steps.add(step);
-              }
-            }
-          }
-
-          // Preserve initial analysis step (handle both English and Chinese keys)
-          final analysisKey = existingByTitle.containsKey('任务分析') ? '任务分析' : 'Planning';
-          final analysisStep = existingByTitle[analysisKey];
-          
-          if (analysisStep != null && !steps.contains(analysisKey) && !steps.contains('任务分析')) {
-            steps.insert(0, analysisKey);
-          }
-
-          // Use a temporary list to avoid clearing and rebuilding immediately if possible, 
-          // but clearing is safer to ensure order matches planner.
-          _processSteps.clear();
-          // _resourcesByStep.clear(); // Do NOT clear resources, they might be attached to previous steps or general
-
-          for (final step in steps) {
-            final existing = existingByTitle[step];
-            if (existing != null) {
-              // Preserve logs and status
-              _processSteps.add(existing);
-            } else {
-              _processSteps.add({
-                "title": step,
-                "desc": "Waiting to start...",
-                "status": "pending",
-                "logs": <String>[]
-              });
-            }
-            // Ensure resource list exists
-            _resourcesByStep.putIfAbsent(step, () => []);
-          }
-          break;
-        case 'step_finish':
-        case 'step_complete':
-           final stepIndex = _processSteps.lastIndexWhere((s) => s['title'] == event['title']);
-           if (stepIndex != -1) {
-              _processSteps[stepIndex]['status'] = 'completed';
-           }
-           break;
-        case 'artifact':
-            final data = (event['data'] is Map) ? Map<String, dynamic>.from(event['data']) : <String, dynamic>{};
-            _artifacts.add({
-              "title": data['title']?.toString() ?? '',
-              "type": data['type']?.toString() ?? '',
-              "size": data['size']?.toString() ?? '',
-              "path": data['path']?.toString() ?? '' // Store path for download
-            });
-            break;
-        case 'artifact_preview':
-          final data = (event['data'] is Map) ? Map<String, dynamic>.from(event['data']) : <String, dynamic>{};
-          final title = data['title']?.toString() ?? '';
-          final html = data['html']?.toString() ?? '';
-          if (title.trim().isEmpty || html.trim().isEmpty) break;
-          _artifactPreviews[title] = {
-            "format": data['format']?.toString() ?? '',
-            "html": html,
-          };
-          break;
-        case 'final_result':
-          _receivedFinalResult = true;
-          _processSteps.add({
-            "title": "完成",
-            "desc": event['content']?.toString() ?? "研究任务成功完成。",
-            "status": "completed",
-            "logs": []
-          });
-          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-            _messages.last['status'] = 'completed';
-          }
-          _isLoading = false;
-          break;
-        case 'clarification':
-          final seconds = int.tryParse(event['auto_decide_seconds']?.toString() ?? '') ?? 60;
-          final title = event['title']?.toString();
-          final content = event['content']?.toString();
-          final questions = _normalizeClarificationQuestions(event['questions'], content ?? '');
-          _resetClarificationForm();
-          _isClarificationNeeded = true;
-          _clarificationQuestion = title ?? (content ?? "");
-          _clarificationQuestions = questions;
-          _clarificationSecondsLeft = seconds;
-          _isLoading = false; // Stop loading to allow user input
-          _startClarificationCountdown(seconds: seconds);
-          break;
-        case 'error':
-          _processSteps.add({
-            "title": "Error",
-            "desc": event['content']?.toString() ?? "Unknown error",
-            "status": "failed",
-            "logs": []
-          });
-          _isLoading = false;
-          break;
-        case 'metadata':
-          break;
-       }
-     });
-   }
+    _handleEventBatch(event);
+  }
 
   Uri _artifactUrlFromPath(String path) {
     final settings = SettingsScope.of(context).settings;
@@ -1355,7 +1403,9 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
                       children: [
                         Expanded(
                           child: Text(
-                            _processSteps.isNotEmpty ? _processSteps.last['title'] ?? "Processing..." : "Ready",
+                            _processSteps.any((s) => s['status'] == 'running')
+                                ? _processSteps.firstWhere((s) => s['status'] == 'running')['title'] ?? "Processing..."
+                                : (_processSteps.isNotEmpty ? _processSteps.last['title'] ?? "Ready" : "Ready"),
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1704,8 +1754,26 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (steps.isNotEmpty)
-                  ...steps.asMap().entries.map((entry) {
+                if (steps.isNotEmpty) ...[
+                  ...steps.asMap().entries.where((entry) {
+                    if (_showAllSteps) return true;
+                    final status = entry.value['status'] ?? 'pending';
+                    if (status == 'running' || status == 'failed') return true;
+                    
+                    // Show only the last 2 completed steps if not showing all
+                    if (status == 'completed') {
+                      final completedIndices = steps.asMap().entries
+                          .where((e) => e.value['status'] == 'completed')
+                          .map((e) => e.key)
+                          .toList();
+                      if (completedIndices.length <= 2) return true;
+                      // Get the last 2 completed indices
+                      final lastTwo = completedIndices.sublist(completedIndices.length - 2);
+                      return lastTwo.contains(entry.key);
+                    }
+                    
+                    return false; // Hide pending and older completed
+                  }).map((entry) {
                     final step = entry.value;
                     return ProcessStepWidget(
                       stepNumber: entry.key + 1,
@@ -1715,6 +1783,38 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
                       logs: (step['logs'] as List<dynamic>?)?.cast<String>(),
                     );
                   }),
+                  
+                  // Show "More" button if there are hidden steps
+                  if (!_showAllSteps && (steps.any((s) => s['status'] == 'pending') || steps.where((s) => s['status'] == 'completed').length > 2))
+                    Padding(
+                      padding: const EdgeInsets.only(left: 48, top: 4, bottom: 12),
+                      child: InkWell(
+                        onTap: () => setState(() => _showAllSteps = true),
+                        child: Text(
+                          "查看全部 ${steps.length} 个步骤...",
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                  
+                  if (_showAllSteps)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 48, top: 4, bottom: 12),
+                      child: InkWell(
+                        onTap: () => setState(() => _showAllSteps = false),
+                        child: Text(
+                          "仅显示当前及最近步骤",
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
                 
                 if (logs.isNotEmpty)
                   Padding(
@@ -2127,7 +2227,6 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
                           },
                           const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
                             // Submit on Ctrl+Enter
-                            final value = _inputController.value;
                             if (_isLoading) return;
                             if (_inputController.text.trim().isEmpty) return;
                             _submitTask();
@@ -2235,11 +2334,13 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
                       icon: const Icon(Icons.folder_open),
                       onPressed: () async {
                         final settings = SettingsScope.of(context).settings;
+                        final messenger = ScaffoldMessenger.of(context);
                         final baseUrl = settings.pythonBackendUrl;
                         try {
                           await http.post(Uri.parse('$baseUrl/api/deep-research/task/open_folder/$_currentSessionId'));
                         } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("无法打开文件夹: $e")));
+                          if (!mounted) return;
+                          messenger.showSnackBar(SnackBar(content: Text("无法打开文件夹: $e")));
                         }
                       },
                     ),

@@ -185,7 +185,7 @@ class WebPageReaderTool extends AgentTool {
       }
 
       // Increased limit for deeper content
-      final truncatedBody = cleanBody.length > 10000 ? cleanBody.substring(0, 10000) + '...[Truncated]' : cleanBody;
+      final truncatedBody = cleanBody.length > 10000 ? '${cleanBody.substring(0, 10000)}...[Truncated]' : cleanBody;
 
       final buffer = StringBuffer();
       buffer.writeln('Page Title: $title');

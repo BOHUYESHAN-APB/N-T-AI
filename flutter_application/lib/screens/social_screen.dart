@@ -4,7 +4,7 @@ import '../settings/settings_scope.dart';
 import '../settings/settings.dart';
 
 class SocialScreen extends StatelessWidget {
-  const SocialScreen({Key? key}) : super(key: key);
+  const SocialScreen({super.key});
 
   String _initials(String name) {
     if (name.trim().isEmpty) return '?';

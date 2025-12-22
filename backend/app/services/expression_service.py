@@ -1,6 +1,5 @@
 from sqlmodel import Session, select
 from app.models.database import engine, ExpressionStyle
-import random
 
 class ExpressionService:
     def get_style_suggestion(self, context_text: str) -> str:

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,7 +63,7 @@ class LLMService {
       final providers = data.map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>)).toList();
       return providers.firstWhere((p) => p.id == activeId, orElse: () => providers.first);
     } catch (e) {
-      print("Error loading providers: $e");
+      debugPrint("Error loading providers: $e");
       return null;
     }
   }
@@ -160,11 +159,11 @@ class LLMService {
         final List<dynamic> embedding = data['data'][0]['embedding'];
         return embedding.cast<double>();
       } else {
-        print('Embedding API error: ${response.statusCode} ${response.body}');
+        debugPrint('Embedding API error: ${response.statusCode} ${response.body}');
         return [];
       }
     } catch (e) {
-      print('Embedding network error: $e');
+      debugPrint('Embedding network error: $e');
       return [];
     }
   }
@@ -194,18 +193,26 @@ class LLMService {
     final searchRegionIdx = prefs.getInt('settings.agent.searchRegion');
     String searchRegion = 'zh-CN'; // Default
     if (searchRegionIdx != null) {
-      if (searchRegionIdx == 2) searchRegion = 'wt-wt';
-      else if (searchRegionIdx == 1) searchRegion = 'zh-CN';
-      else searchRegion = 'zh-CN'; // Auto defaults to CN for now, or could be 'auto' if backend supports it
+      if (searchRegionIdx == 2) {
+        searchRegion = 'wt-wt';
+      } else if (searchRegionIdx == 1) {
+        searchRegion = 'zh-CN';
+      } else {
+        searchRegion = 'zh-CN'; // Auto defaults to CN for now, or could be 'auto' if backend supports it
+      }
     }
 
     // Parse Persona Level
     final personaLevelIdx = prefs.getInt('settings.ui.personaLevel');
     String personaMode = 'full';
     if (personaLevelIdx != null) {
-      if (personaLevelIdx == 0) personaMode = 'basic';
-      else if (personaLevelIdx == 1) personaMode = 'advanced';
-      else personaMode = 'full';
+      if (personaLevelIdx == 0) {
+        personaMode = 'basic';
+      } else if (personaLevelIdx == 1) {
+        personaMode = 'advanced';
+      } else {
+        personaMode = 'full';
+      }
     }
     
     // Parse Chat Mode (persona vs standard)
@@ -384,12 +391,11 @@ class LLMService {
       // 'user': 'user_id' // Could pass user ID here if available
     });
 
-    debugPrint('--- [LLM Request] ---');
+    debugPrint('--- [LLM Request ($usageType)] ---');
     debugPrint('URL: $requestUrl');
     debugPrint('Model: $model (Vision: $supportsVision)');
-    debugPrint('Headers: $headers');
     // Truncate body log if too long
-    debugPrint('Body: ${requestBody.length > 2000 ? requestBody.substring(0, 2000) + '...' : requestBody}');
+    debugPrint('Body: ${requestBody.length > 2000 ? '${requestBody.substring(0, 2000)}...' : requestBody}');
     debugPrint('-----------------------');
 
     final response = await http.post(
@@ -400,7 +406,7 @@ class LLMService {
 
     debugPrint('--- [LLM Response] ---');
     debugPrint('Status: ${response.statusCode}');
-    debugPrint('Body: ${response.body.length > 500 ? response.body.substring(0, 500) + '...' : response.body}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
     debugPrint('------------------------');
 
     if (response.statusCode == 200) {
@@ -487,7 +493,7 @@ class LLMService {
     debugPrint('--- [LLM Provider Request ($usageType)] ---');
     debugPrint('URL: $baseUrl');
     debugPrint('Model: $model');
-    debugPrint('Body: ${requestBody.length > 1000 ? requestBody.substring(0, 1000) + '...' : requestBody}');
+    debugPrint('Body: ${requestBody.length > 1000 ? '${requestBody.substring(0, 1000)}...' : requestBody}');
     debugPrint('-----------------------------------------');
 
     final response = await http.post(
@@ -501,7 +507,7 @@ class LLMService {
 
     debugPrint('--- [LLM Provider Response ($usageType)] ---');
     debugPrint('Status: ${response.statusCode}');
-    debugPrint('Body: ${response.body.length > 500 ? response.body.substring(0, 500) + '...' : response.body}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
     debugPrint('------------------------------------------');
 
     if (response.statusCode == 200) {
@@ -621,7 +627,7 @@ class LLMService {
     debugPrint('URL: $requestUrl');
     debugPrint('Model: $model');
     // Don't log full body for vision as base64 is huge
-    debugPrint('Body (truncated): ${requestBody.length > 500 ? requestBody.substring(0, 500) + '... [Image Data Omitted] ...' : requestBody}');
+    debugPrint('Body (truncated): ${requestBody.length > 500 ? '${requestBody.substring(0, 500)}... [Image Data Omitted] ...' : requestBody}');
     debugPrint('----------------------------');
 
     final response = await http.post(
@@ -632,7 +638,7 @@ class LLMService {
 
     debugPrint('--- [LLM Vision Response] ---');
     debugPrint('Status: ${response.statusCode}');
-    debugPrint('Body: ${response.body.length > 500 ? response.body.substring(0, 500) + '...' : response.body}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
     debugPrint('-----------------------------');
 
     if (response.statusCode == 200) {

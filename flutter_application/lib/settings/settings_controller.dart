@@ -220,7 +220,7 @@ class SettingsController extends ChangeNotifier {
     // If no providers persisted, migrate legacy single ai settings into a default provider
     if (providers.isEmpty) {
       // Seed only minimal presets to avoid clutter (User Feedback)
-      providers = [
+      providers = const [
         AiProviderConfig(
           id: 'deepseek',
           name: 'DeepSeek',
@@ -327,16 +327,17 @@ class SettingsController extends ChangeNotifier {
         final p = providers[i];
         if (p.model.isEmpty) {
           String? newModel;
-          if (p.id == 'deepseek')
+          if (p.id == 'deepseek') {
             newModel = 'deepseek-chat';
-          else if (p.id == 'openai')
+          } else if (p.id == 'openai') {
             newModel = 'gpt-4o-mini';
-          else if (p.id == 'glm_cn' || p.id == 'glm_global')
+          } else if (p.id == 'glm_cn' || p.id == 'glm_global') {
             newModel = 'glm-4';
-          else if (p.id == 'siliconflow')
+          } else if (p.id == 'siliconflow') {
             newModel = 'deepseek-ai/DeepSeek-V2-Chat';
-          else if (p.id == 'kimi')
+          } else if (p.id == 'kimi') {
             newModel = 'moonshot-v1-8k';
+          }
 
           if (newModel != null) {
             providers[i] = p.copyWith(model: newModel);
@@ -1322,8 +1323,9 @@ class SettingsController extends ChangeNotifier {
     final todayStr =
         "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
 
-    if (p.lastUsageDate != todayStr)
+    if (p.lastUsageDate != todayStr) {
       return true; // Will reset on next increment
+    }
     return p.usageCount < p.dailyLimit;
   }
 

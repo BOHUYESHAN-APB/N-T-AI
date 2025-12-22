@@ -10,7 +10,7 @@ import 'tabs/about_tab.dart';
 class SettingsScreen extends StatefulWidget {
   final int initialIndex;
 
-  const SettingsScreen({Key? key, this.initialIndex = 0}) : super(key: key);
+  const SettingsScreen({super.key, this.initialIndex = 0});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();

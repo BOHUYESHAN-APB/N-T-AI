@@ -19,13 +19,13 @@ abstract class BasePlugin {
   /// Called when the plugin is enabled by user
   Future<void> onEnable() async {
     isEnabled = true;
-    print('[$name] Plugin enabled');
+    debugPrint('[$name] Plugin enabled');
   }
 
   /// Called when the plugin is disabled by user
   Future<void> onDisable() async {
     isEnabled = false;
-    print('[$name] Plugin disabled');
+    debugPrint('[$name] Plugin disabled');
   }
 
   /// Optional: Provide a settings widget for this plugin

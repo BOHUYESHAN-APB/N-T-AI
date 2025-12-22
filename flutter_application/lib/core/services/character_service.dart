@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -37,7 +37,7 @@ class CharacterService {
         return list.map((e) => CharacterModel.fromJson(e)).toList();
       }
     } catch (e) {
-      print('Error listing models: $e');
+      debugPrint('Error listing models: $e');
     }
     return [];
   }
@@ -75,10 +75,10 @@ class CharacterService {
         if (response.statusCode == 200) {
           return true;
         } else {
-          print('Upload failed: ${response.body}');
+          debugPrint('Upload failed: ${response.body}');
         }
       } catch (e) {
-        print('Error uploading model: $e');
+        debugPrint('Error uploading model: $e');
       }
     }
     return false;
@@ -93,10 +93,10 @@ class CharacterService {
       if (response.statusCode == 200) {
         return true;
       } else {
-        print('Delete failed: ${response.body}');
+        debugPrint('Delete failed: ${response.body}');
       }
     } catch (e) {
-      print('Error deleting model: $e');
+      debugPrint('Error deleting model: $e');
     }
     return false;
   }

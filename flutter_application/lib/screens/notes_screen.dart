@@ -7,7 +7,7 @@ import '../settings/settings_scope.dart';
 import '../settings/settings.dart';
 
 class NotesScreen extends StatefulWidget {
-  const NotesScreen({Key? key}) : super(key: key);
+  const NotesScreen({super.key});
 
   @override
   State<NotesScreen> createState() => _NotesScreenState();

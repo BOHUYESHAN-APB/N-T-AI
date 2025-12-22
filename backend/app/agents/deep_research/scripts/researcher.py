@@ -6,13 +6,15 @@ from openai import AsyncOpenAI
 from app.services.search_service import SearchService
 from app.agents.deep_research.scripts.code_generator import CodeGenerator
 from app.services.sandbox_service import sandbox_service
+from app.services.rag_service import TempRAGSession
 
 class Researcher:
-    def __init__(self, config: Dict[str, Any], session_id: Optional[str] = None):
+    def __init__(self, config: Dict[str, Any], session_id: Optional[str] = None, rag_session: Optional[TempRAGSession] = None):
         self.config = config
         self.search_service = SearchService()
         self.code_generator = CodeGenerator(config)
         self.sandbox_session_id = session_id
+        self.rag_session = rag_session
         
         # Standard matplotlib setup for Chinese support
         self.visualizer_code = """
@@ -154,6 +156,18 @@ plt.rcParams['axes.unicode_minus'] = False
              msg = f"Action Required: The requested sources ({', '.join(restricted_keywords)}) usually require manual access or institutional login. Please manually search for '{step_description}' and upload the relevant documents."
              return msg, {"agent": "Researcher", "error": "Restricted source", "msg": msg}
 
+        # 0.5 Check RAG session for existing information
+        rag_results_text = ""
+        if self.rag_session:
+            try:
+                rag_results = await self.rag_session.search(step_description, top_k=5)
+                if rag_results:
+                    rag_results_text = "\n[Found relevant information in local context/files]:\n"
+                    for r in rag_results:
+                        rag_results_text += f"- {r['content']}\n"
+            except Exception as e:
+                print(f"Error searching RAG session: {e}")
+
         # 1. Determine Iterations based on Depth
         iterations = 1
         if depth == "High":
@@ -263,7 +277,7 @@ Current Results Summary:
         sys_prompt = sys_template.replace("{{current_date}}", current_date)
         user_prompt = user_template.replace("{{step_description}}", step_description)\
                                    .replace("{{user_input}}", user_input)\
-                                   .replace("{{search_results}}", search_results_text)
+                                   .replace("{{search_results}}", rag_results_text + "\n" + search_results_text)
 
         messages = [
             {"role": "system", "content": sys_prompt},

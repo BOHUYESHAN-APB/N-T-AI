@@ -1,9 +1,6 @@
 import re
 import json
-import html
 from typing import List, Dict, Any, Optional
-from pathlib import Path
-from app.skills.common.document_skill.scripts.office_processor import OfficeProcessor
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """
@@ -25,66 +22,6 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     except json.JSONDecodeError:
         return None
 
-def extract_file_content(context_files: List[Dict[str, Any]], office_processor: Any) -> str:
-    revision_context_text = ""
-    extracted_parts: List[str] = []
-    
-    if not context_files:
-        return ""
-
-    for item in context_files:
-        if not isinstance(item, dict):
-            continue
-        path = str(item.get("path") or "").strip()
-        title = str(item.get("title") or "").strip()
-        if not path:
-            continue
-        try:
-            p = Path(path)
-            if not p.exists():
-                p = Path("app/static/reports") / p.name
-            if not p.exists():
-                continue
-
-            suffix = p.suffix.lower()
-            extracted = ""
-            if suffix == ".pdf":
-                extracted = office_processor.extract_text_from_pdf(str(p))
-            elif suffix == ".docx":
-                from docx import Document as DocxDocument
-                doc = DocxDocument(str(p))
-                extracted = "\n".join([para.text for para in doc.paragraphs if para.text])
-            elif suffix == ".pptx":
-                from pptx import Presentation
-                prs = Presentation(str(p))
-                lines: List[str] = []
-                for slide in prs.slides:
-                    for shape in slide.shapes:
-                        if getattr(shape, "has_text_frame", False) and shape.text_frame:
-                            t = (shape.text_frame.text or "").strip()
-                            if t:
-                                lines.append(t)
-                extracted = "\n".join(lines)
-            elif suffix in (".xlsx", ".xls"):
-                try:
-                    import pandas as pd
-                    df = pd.read_excel(str(p))
-                    extracted = df.head(50).to_csv(index=False)
-                except Exception:
-                    extracted = ""
-
-            extracted = (extracted or "").strip()
-            if extracted:
-                extracted = extracted[:8000]
-                extracted_parts.append(f"=== {title or p.name} ({p.name}) ===\n{extracted}")
-        except Exception:
-            continue
-
-    if extracted_parts:
-        revision_context_text = "\n\n".join(extracted_parts)
-    
-    return revision_context_text
-
 def normalize_user_input(user_input: str) -> str:
     text = (user_input or "").strip()
     if not text:
@@ -92,8 +29,8 @@ def normalize_user_input(user_input: str) -> str:
     text = re.sub(r"^User Request:\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"^\s*Topic\s*&\s*Constraints.*?:\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = text.replace("原始需求:", "")
-    text = text.replace("补充信息:", "")
+    # text = text.replace("原始需求:", "")
+    # text = text.replace("补充信息:", "")
     text = text.replace("未填写项请AI自行补全，并继续执行。", "")
     text = text.replace("用户60秒未响应，请基于现有信息自行补全缺失项并继续执行。", "")
     text = text.replace("用户选择跳过补充信息，请基于现有信息自行补全缺失项并继续执行。", "")

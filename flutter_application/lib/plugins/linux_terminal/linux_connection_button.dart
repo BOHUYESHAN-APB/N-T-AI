@@ -15,11 +15,11 @@ class LinuxConnectionButton extends StatelessWidget {
           builder: (context, setState) {
             return AlertDialog(
               title: const Text("正在下载 Linux 环境"),
-              content: Column(
+              content: const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const LinearProgressIndicator(),
-                  const SizedBox(height: 16),
+                  LinearProgressIndicator(),
+                  SizedBox(height: 16),
                   Text("正在连接服务器..."),
                 ],
               ),

@@ -17,41 +17,12 @@ import wave
 
 router = APIRouter(prefix="/api/live2d", tags=["live2d"])
 
-# ========== WebSocket 广播管理 ==========
-# 存储所有连接的 Live2D WebSocket 客户端
-class Live2DConnectionManager:
-    def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.add(websocket)
-        print(f"[Live2D WS] Client connected. Total: {len(self.active_connections)}")
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.discard(websocket)
-        print(f"[Live2D WS] Client disconnected. Total: {len(self.active_connections)}")
-    
-    async def broadcast(self, message: dict):
-        """广播消息到所有连接的客户端"""
-        if not self.active_connections:
-            return
-        
-        message_str = json.dumps(message)
-        disconnected = set()
-        
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message_str)
-            except Exception as e:
-                print(f"[Live2D WS] Send failed: {e}")
-                disconnected.add(connection)
-        
-        # 清理断开的连接
-        for conn in disconnected:
-            self.active_connections.discard(conn)
+from app.services.priority_manager import priority_manager, ChatPriority
+from app.services.live2d_service import manager
 
-manager = Live2DConnectionManager()
+# ========== WebSocket 广播管理 ==========
+# Live2DConnectionManager is now in app.services.live2d_service
+
 _last_motion_broadcast_ts: float = 0.0
 _last_motion_broadcast_key: str = ""
 _scheduled_chat_tasks: Dict[str, asyncio.Task] = {}
@@ -241,9 +212,8 @@ async def live2d_websocket(websocket: WebSocket):
                 }
             )
 
-            from app.services.chat_service import ChatService
-            chat_service = ChatService()
-            await chat_service.process_message(
+            await priority_manager.add_task(
+                priority=ChatPriority.USER,
                 message=transcript,
                 user_id="live2d_websocket_user",
                 enable_thinking=False,
@@ -300,9 +270,8 @@ async def live2d_websocket(websocket: WebSocket):
                     enable_search = message.get("enable_search", False)
                     if text:
                         last_user_activity_ts = time.time()
-                        from app.services.chat_service import ChatService
-                        chat_service = ChatService()
-                        await chat_service.process_message(
+                        await priority_manager.add_task(
+                            priority=ChatPriority.USER,
                             message=text,
                             user_id="live2d_websocket_user",
                             enable_thinking=enable_thinking,
@@ -317,9 +286,9 @@ async def live2d_websocket(websocket: WebSocket):
                     idle_sec = float(getattr(settings, "PROACTIVE_IDLE_MIN_SEC", 45) or 45)
                     if (time.time() - float(last_user_activity_ts or 0.0)) < idle_sec:
                         continue
-                    from app.services.chat_service import ChatService
-                    chat_service = ChatService()
-                    await chat_service.process_message(
+                    
+                    await priority_manager.add_task(
+                        priority=ChatPriority.PROACTIVE,
                         message="空闲时请你主动说一句话，口语化一点，短一些，可以带点口癖，并顺便抛一个轻问题。",
                         user_id="live2d_websocket_user",
                         enable_thinking=False,
@@ -356,9 +325,8 @@ async def live2d_websocket(websocket: WebSocket):
                             }
                         )
                         if respond:
-                            from app.services.chat_service import ChatService
-                            chat_service = ChatService()
-                            await chat_service.process_message(
+                            await priority_manager.add_task(
+                                priority=ChatPriority.VOICE_CH,
                                 message=prefix + text,
                                 user_id="live2d_websocket_user",
                                 enable_thinking=False,

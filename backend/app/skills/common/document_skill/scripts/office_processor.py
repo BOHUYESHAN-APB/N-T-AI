@@ -6,7 +6,6 @@ Handles PDF extraction and advanced Markdown processing.
 import pdfplumber
 import markdown
 from pathlib import Path
-from typing import Optional
 
 class OfficeProcessor:
     def __init__(self, output_dir: str = "generated_docs/processed"):

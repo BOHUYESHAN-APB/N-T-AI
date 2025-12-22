@@ -5,7 +5,7 @@ import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 
 class ProvidersTab extends StatefulWidget {
-  const ProvidersTab({Key? key}) : super(key: key);
+  const ProvidersTab({super.key});
 
   @override
   State<ProvidersTab> createState() => _ProvidersTabState();
@@ -269,7 +269,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
                         title: Text(p.name),
                         subtitle: Text(
                           '${p.kind.name}${p.enabled ? '' : ' (禁用)'}${p.dailyLimit > 0 ? ' • ${p.usageCount}/${p.dailyLimit}' : ''}',
-                          style: TextStyle(fontSize: 12),
+                          style: const TextStyle(fontSize: 12),
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
@@ -588,36 +588,43 @@ class _ProvidersTabState extends State<ProvidersTab> {
             label: const Text('上传参考音频'),
             onPressed: () async {
               final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+              if (!mounted) return;
               if (result != null && result.files.single.path != null) {
                  final path = result.files.single.path!;
-                 final nameCtl = TextEditingController(text: 'voice_${DateTime.now().millisecondsSinceEpoch}');
-                 final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-                   title: const Text('上传音频'),
-                   content: Column(
-                     mainAxisSize: MainAxisSize.min,
-                     children: [
-                       TextField(controller: nameCtl, decoration: const InputDecoration(labelText: '自定义名称')),
-                       const SizedBox(height: 8),
-                       const Text('将上传到 SiliconFlow 并获取 Voice ID'),
-                     ],
-                   ),
-                   actions: [
-                     TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
-                     FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('上传')),
-                   ],
-                 ));
-                 
-                 if (ok == true) {
-                   try {
-                     final uri = await controller.uploadReferenceAudio(cfg.id, path, nameCtl.text);
-                     if (!mounted) return;
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传成功: $uri')));
-                     setState(() {});
-                   } catch (e) {
-                     if (!mounted) return;
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传失败: $e')));
-                   }
-                 }
+                final nameCtl = TextEditingController(text: 'voice_${DateTime.now().millisecondsSinceEpoch}');
+                if (!context.mounted) return;
+                final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+                  title: const Text('上传音频'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(controller: nameCtl, decoration: const InputDecoration(labelText: '自定义名称')),
+                      const SizedBox(height: 8),
+                      const Text('将上传到 SiliconFlow 并获取 Voice ID'),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+                    FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('上传')),
+                  ],
+                ));
+                
+                if (ok == true) {
+                  if (!context.mounted) return;
+                  final messenger = ScaffoldMessenger.of(context);
+                  try {
+                    final uri = await controller.uploadReferenceAudio(cfg.id, path, nameCtl.text);
+                    final meta = Map<String, dynamic>.from(cfg.meta);
+                    meta['voice'] = uri;
+                    await controller.addOrUpdateProvider(cfg.copyWith(meta: meta));
+                    if (!context.mounted) return;
+                    messenger.showSnackBar(SnackBar(content: Text('上传成功: $uri')));
+                    setState(() {});
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    messenger.showSnackBar(SnackBar(content: Text('上传失败: $e')));
+                  }
+                }
               }
             },
           ),

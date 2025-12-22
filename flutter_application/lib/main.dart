@@ -111,7 +111,7 @@ class ErrorApp extends StatelessWidget {
   final Object error;
   final StackTrace? stackTrace;
   
-  const ErrorApp({Key? key, required this.error, this.stackTrace}) : super(key: key);
+  const ErrorApp({super.key, required this.error, this.stackTrace});
   
   @override
   Widget build(BuildContext context) {
@@ -157,7 +157,7 @@ class ErrorApp extends StatelessWidget {
 
 class NTApp extends StatelessWidget {
   final SettingsController controller;
-  const NTApp({Key? key, required this.controller}) : super(key: key);
+  const NTApp({super.key, required this.controller});
 
   @override
   Widget build(BuildContext context) {

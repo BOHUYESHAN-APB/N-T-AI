@@ -519,9 +519,9 @@ class BilibiliLivePlugin extends BasePlugin {
               ),
             ),
             const Divider(),
-            ListTile(
-              title: const Text('账号登录 (可选)'),
-              subtitle: const Text('配置 SESSDATA 和 BILI_JCT 以获取完整用户昵称 (解决"***"问题)'),
+            const ListTile(
+              title: Text('账号登录 (可选)'),
+              subtitle: Text('配置 SESSDATA 和 BILI_JCT 以获取完整用户昵称 (解决"***"问题)'),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -608,6 +608,7 @@ class BilibiliLivePlugin extends BasePlugin {
                     allowAiEmojis = v;
                   });
                   await _saveLocalConfig();
+                  if (!context.mounted) return;
                   await syncConfigToBackend(context);
                 },
               ),
@@ -723,6 +724,7 @@ class BilibiliLivePlugin extends BasePlugin {
                     });
                   }
                   await _saveLocalConfig();
+                  if (!context.mounted) return;
                   await syncConfigToBackend(context);
                 },
               ),
@@ -746,6 +748,7 @@ class BilibiliLivePlugin extends BasePlugin {
                     });
                   }
                   await _saveLocalConfig();
+                  if (!context.mounted) return;
                   await syncConfigToBackend(context);
                 },
               ),
@@ -827,6 +830,7 @@ class BilibiliLivePlugin extends BasePlugin {
                   ElevatedButton.icon(
                     onPressed: () async {
                       await _saveLocalConfig();
+                      if (!context.mounted) return;
                       final ok = await syncConfigToBackend(context);
                       if (ok && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(

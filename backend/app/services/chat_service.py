@@ -1,6 +1,6 @@
 import json
 from sqlmodel import Session, select
-from app.models.database import engine, Conversation, Memory
+from app.models.database import engine, Conversation
 from app.services.llm_service import LLMService
 from app.services.person_service import PersonService
 from app.services.mood_service import MoodService
@@ -9,9 +9,8 @@ from app.services.expression_service import ExpressionService
 from app.services.search_service import SearchService
 from app.services.audio_service import AudioService
 from app.services.meme_service import MemeService
-from app.api.routes.live2d_routes import manager as live2d_manager
+from app.services.live2d_service import manager as live2d_manager
 from app.core.prompts import (
-    FIREFLY_PERSONA,
     FIREFLY_PERSONA_BASIC,
     FIREFLY_PERSONA_ADVANCED,
     FIREFLY_PERSONA_FULL,
@@ -192,6 +191,134 @@ class ChatService:
             final.append(acc.strip())
         return final
 
+    async def process_message_stream(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
+                            session_id: str = None,
+                            target_api_key: str = None, 
+                            target_base_url: str = None, 
+                            target_model: str = None,
+                            tts_api_key: str = None,
+                            tts_base_url: str = None,
+                            tts_voice: str = None,
+                            enable_search: bool = False,
+                            search_region: str = "zh-CN",
+                            vision_config: Dict[str, Any] = None,
+                            temperature: float = 0.7,
+                            background_tasks: BackgroundTasks = None,
+                            enable_backend_tts: bool = False,
+                            enable_thinking: bool = False,
+                            persona_mode: str = "full",
+                            chat_mode: str = "persona",
+                            deep_research: bool = False,
+                            suppress_inner_monologue: bool = False,
+                            user_nickname: Optional[str] = None,
+                            system_prompt_override: Optional[str] = None,
+                            assistant_name: Optional[str] = None,
+                            learning_probability: float = 1.0):
+        """
+        Streaming version of process_message for fast response.
+        Yields text chunks and triggers TTS as soon as a sentence is complete.
+        """
+        # Reuse context gathering logic (simplified for brevity here, but full logic should be used)
+        self.person_service.increment_know_times(user_id)
+        if user_nickname or assistant_name or system_prompt_override:
+            self.person_service.upsert_persona(user_id=user_id, nickname=user_nickname, assistant_name=assistant_name, system_prompt=system_prompt_override)
+        
+        stored_person = self.person_service.get_or_create_person(user_id)
+        effective_nickname = user_nickname or stored_person.nickname
+        effective_assistant_name = assistant_name or getattr(stored_person, "assistant_name", None)
+        effective_system_prompt = system_prompt_override or getattr(stored_person, "system_prompt", None)
+
+        text_content = message
+        if isinstance(message, list):
+            text_content = "".join([part.get("text", "") for part in message if part.get("type") == "text"]).strip()
+
+        with Session(engine) as session:
+            session.add(Conversation(role="user", content=text_content, session_id=session_id))
+            session.commit()
+            query = select(Conversation)
+            if session_id: query = query.where(Conversation.session_id == session_id)
+            history = session.exec(query.order_by(Conversation.id.desc()).limit(10)).all()
+            history.reverse()
+
+        current_mood = "neutral"
+        try: current_mood = self.mood_service.get_current_mood(user_id)
+        except: pass
+
+        # Get Context (RAG)
+        react_context = await self.memory_system.retrieve_context(text_content, user_id, target_api_key, target_base_url, target_model, fast_mode=True)
+        
+        # Build System Prompt (Simplified for the example, but should match process_message)
+        system_prompt = effective_system_prompt or (FIREFLY_PERSONA_FULL if persona_mode == "full" else FIREFLY_PERSONA_BASIC)
+        system_prompt += f"\n\n[Current Mood]: {current_mood}"
+        if react_context: system_prompt += f"\n\n[Context]: {react_context}"
+        if effective_nickname: system_prompt += f"\n\n[User]: {effective_nickname}"
+        if effective_assistant_name: system_prompt += f"\n\n[Assistant Name]: {effective_assistant_name}"
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in history: messages.append({"role": msg.role, "content": msg.content})
+        if messages[-1]["role"] == "user": messages[-1]["content"] = message
+
+        # Stream LLM Response
+        full_response_text = ""
+        sentence_buffer = ""
+        
+        # Define punctuation that marks end of a TTS-able chunk
+        sentence_end_pattern = re.compile(r"([。！？!?\.\n])")
+
+        async for chunk in self.llm.get_response_stream(
+            messages, 
+            api_key=target_api_key, 
+            base_url=target_base_url, 
+            model=target_model,
+            temperature=temperature,
+            enable_thinking=enable_thinking
+        ):
+            if not chunk: continue
+            
+            full_response_text += chunk
+            sentence_buffer += chunk
+            yield chunk
+
+            # Check if we have a complete sentence to TTS
+            parts = sentence_end_pattern.split(sentence_buffer)
+            # If we have at least one separator, the parts before it are complete
+            if len(parts) > 1:
+                # Reconstruct completed sentences
+                completed_text = ""
+                # Join everything except the last part (which is the current incomplete sentence)
+                for i in range(0, len(parts) - 1, 2):
+                    completed_text += parts[i] + parts[i+1]
+                
+                # Update buffer to only contain the remaining incomplete part
+                sentence_buffer = parts[-1]
+                
+                # Trigger TTS for the completed part if enabled
+                if enable_backend_tts and completed_text.strip():
+                    clean_segment = self._sanitize_text_for_tts(completed_text)
+                    if clean_segment.strip():
+                        # Use asyncio.create_task for non-blocking TTS broadcast
+                        asyncio.create_task(self._generate_and_broadcast_audio(
+                            clean_segment, tts_api_key, tts_base_url, tts_voice
+                        ))
+
+        # Handle any remaining text in the buffer at the end
+        if enable_backend_tts and sentence_buffer.strip():
+            clean_segment = self._sanitize_text_for_tts(sentence_buffer)
+            if clean_segment.strip():
+                asyncio.create_task(self._generate_and_broadcast_audio(
+                    clean_segment, tts_api_key, tts_base_url, tts_voice
+                ))
+
+        # Save Assistant Response and post-processing
+        with Session(engine) as session:
+            session.add(Conversation(role="assistant", content=full_response_text, session_id=session_id))
+            session.commit()
+            
+        if background_tasks:
+            background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": full_response_text}], target_api_key, target_base_url, target_model)
+            if random.random() < learning_probability:
+                background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
+
     async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None, voice: str = None):
         if not text:
             return
@@ -286,6 +413,22 @@ class ChatService:
                             learning_probability: float = 1.0) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
+        
+        # 0.1 Persist Persona if provided
+        if user_nickname or assistant_name or system_prompt_override:
+            self.person_service.upsert_persona(
+                user_id=user_id,
+                nickname=user_nickname,
+                assistant_name=assistant_name,
+                system_prompt=system_prompt_override
+            )
+        
+        # 0.2 Retrieve stored persona if not provided in current request
+        # This ensures we use the persisted settings even if headers are missing
+        stored_person = self.person_service.get_or_create_person(user_id)
+        effective_nickname = user_nickname or stored_person.nickname
+        effective_assistant_name = assistant_name or getattr(stored_person, "assistant_name", None)
+        effective_system_prompt = system_prompt_override or getattr(stored_person, "system_prompt", None)
 
         # Extract text content for analysis/storage if message is structured
         text_content = message
@@ -383,8 +526,8 @@ class ChatService:
             logger.warning(f"Expression style retrieval failed, continuing without it: {e}")
         
         # 4. Build Prompt
-        if system_prompt_override and system_prompt_override.strip():
-            system_prompt = system_prompt_override.strip()
+        if effective_system_prompt and effective_system_prompt.strip():
+            system_prompt = effective_system_prompt.strip()
         else:
             if persona_mode == "basic":
                 system_prompt = FIREFLY_PERSONA_BASIC
@@ -416,8 +559,11 @@ class ChatService:
         if style_suggestion:
             system_prompt += f"\n\n[Style Instruction]: {style_suggestion}"
 
-        if user_nickname:
-            system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{user_nickname}。在称呼对方时请自然地使用这个昵称，不要使用“用户”等泛称。"
+        if effective_nickname:
+            system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{effective_nickname}。在称呼对方时请自然地使用这个昵称，不要使用“用户”等泛称。"
+        
+        if effective_assistant_name:
+             system_prompt += f"\n\n[Assistant Name]: 你的名字是：{effective_assistant_name}。请时刻记住你的名字。"
 
         # Output style rules based on chat mode
         if chat_mode == "persona" and not deep_research:

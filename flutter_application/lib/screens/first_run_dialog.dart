@@ -6,7 +6,7 @@ class FirstRunDialog extends StatefulWidget {
   final SettingsController settingsController;
   final BrainService brain;
 
-  const FirstRunDialog({Key? key, required this.settingsController, required this.brain}) : super(key: key);
+  const FirstRunDialog({super.key, required this.settingsController, required this.brain});
 
   @override
   State<FirstRunDialog> createState() => _FirstRunDialogState();

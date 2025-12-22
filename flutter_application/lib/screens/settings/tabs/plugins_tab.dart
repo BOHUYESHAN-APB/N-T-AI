@@ -3,7 +3,7 @@ import '../../../settings/settings_scope.dart';
 import '../../plugin_center_page.dart';
 
 class PluginsTab extends StatelessWidget {
-  const PluginsTab({Key? key}) : super(key: key);
+  const PluginsTab({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -1,8 +1,10 @@
+import os
+import asyncio
 import httpx
 import openai
-from fastapi import UploadFile
+import time
+from pathlib import Path
 from typing import Optional, List, Dict, Any
-import json
 from app.core.config import settings
 
 class AudioService:
@@ -57,7 +59,6 @@ class AudioService:
         """
         Generate speech using OpenAI-compatible API (TTS).
         """
-        import time
         start_time = time.time()
         client = self._get_client(api_key, base_url)
 
@@ -112,9 +113,6 @@ class AudioService:
         return audio_bytes[0:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"
 
     def _resolve_ffmpeg_path(self) -> str:
-        import os
-        from pathlib import Path
-
         configured = (getattr(settings, "FFMPEG_PATH", None) or "").strip()
         if configured:
             return configured
@@ -138,8 +136,6 @@ class AudioService:
         samplerate: Optional[int] = None,
         channels: Optional[int] = None,
     ) -> bytes:
-        import asyncio
-
         return await asyncio.to_thread(
             self._convert_audio_bytes_to_wav_blocking,
             audio_bytes,
@@ -486,7 +482,6 @@ class AudioService:
         dtype: str = "int16",
     ) -> Dict[str, Any]:
         import io
-        import time
         import wave
 
         sd = self._require_sounddevice()

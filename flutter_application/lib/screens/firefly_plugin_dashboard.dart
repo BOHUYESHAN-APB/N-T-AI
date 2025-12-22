@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../plugins/plugin_manager.dart';
 
 class PluginDashboardColumn extends StatelessWidget {
+  const PluginDashboardColumn({super.key});
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -22,7 +24,7 @@ class PluginDashboardColumn extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(
               left: BorderSide(
-                color: Theme.of(context).dividerColor.withOpacity(0.08),
+                color: Theme.of(context).dividerColor.withValues(alpha: 0.08),
               ),
             ),
           ),

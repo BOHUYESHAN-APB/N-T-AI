@@ -6,7 +6,7 @@ Supports JavaScript rendering and handling of dynamic content.
 
 import asyncio
 from typing import Optional
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.async_api import async_playwright, Browser
 from app.core.logger import logger
 
 class BrowserService:

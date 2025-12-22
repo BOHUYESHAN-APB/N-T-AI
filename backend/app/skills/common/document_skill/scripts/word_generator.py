@@ -5,8 +5,9 @@ Supports headings, paragraphs, and lists.
 """
 
 import datetime
+import os
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict
 import re
 from bs4 import BeautifulSoup, NavigableString, Tag
 from docx import Document

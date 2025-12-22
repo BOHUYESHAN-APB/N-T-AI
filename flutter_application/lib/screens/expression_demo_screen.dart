@@ -6,7 +6,7 @@ import '../widgets/expressive_face.dart';
 import '../services/expression_service.dart';
 
 class ExpressionDemoScreen extends StatefulWidget {
-  const ExpressionDemoScreen({Key? key}) : super(key: key);
+  const ExpressionDemoScreen({super.key});
 
   @override
   State<ExpressionDemoScreen> createState() => _ExpressionDemoScreenState();
@@ -71,7 +71,7 @@ class _ExpressionDemoScreenState extends State<ExpressionDemoScreen> {
               ElevatedButton(onPressed: () => applyPreset(ExpressionData.neutral()), child: const Text('中性')),
               ElevatedButton(
                   onPressed: () => applyPreset(
-                        ExpressionData(
+                        const ExpressionData(
                           mouth: 0.9,
                           eyes: 1.0,
                           eyebrow: 0.6,
@@ -79,13 +79,13 @@ class _ExpressionDemoScreenState extends State<ExpressionDemoScreen> {
                           pupilX: 0.0,
                           pupilY: 0.0,
                           headTilt: -0.05,
-                          faceColor: const Color(0xFFFFF0A0),
+                          faceColor: Color(0xFFFFF0A0),
                         ),
                       ),
                   child: const Text('开心')),
               ElevatedButton(
                   onPressed: () => applyPreset(
-                        ExpressionData(
+                        const ExpressionData(
                           mouth: -0.8,
                           eyes: 0.7,
                           eyebrow: -0.5,
@@ -93,13 +93,13 @@ class _ExpressionDemoScreenState extends State<ExpressionDemoScreen> {
                           pupilX: 0.0,
                           pupilY: 0.0,
                           headTilt: 0.03,
-                          faceColor: const Color(0xFFFFE066),
+                          faceColor: Color(0xFFFFE066),
                         ),
                       ),
                   child: const Text('伤心')),
               ElevatedButton(
                   onPressed: () => applyPreset(
-                        ExpressionData(
+                        const ExpressionData(
                           mouth: 0.2,
                           eyes: 1.0,
                           eyebrow: 0.9,
@@ -107,7 +107,7 @@ class _ExpressionDemoScreenState extends State<ExpressionDemoScreen> {
                           pupilX: 0.0,
                           pupilY: -0.1,
                           headTilt: -0.12,
-                          faceColor: const Color(0xFFFFE066),
+                          faceColor: Color(0xFFFFE066),
                         ),
                       ),
                   child: const Text('惊讶')),

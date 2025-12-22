@@ -22,7 +22,7 @@ class ExpressionData {
     required this.faceColor,
   });
 
-  factory ExpressionData.neutral() => ExpressionData(
+  factory ExpressionData.neutral() => const ExpressionData(
         mouth: 0.0,
         eyes: 1.0,
         eyebrow: 0.0,
@@ -30,7 +30,7 @@ class ExpressionData {
         pupilX: 0.0,
         pupilY: 0.0,
         headTilt: 0.0,
-        faceColor: const Color(0xFFFFE066),
+        faceColor: Color(0xFFFFE066),
       );
 
   static ExpressionData lerp(ExpressionData a, ExpressionData b, double t) {
@@ -86,7 +86,7 @@ class ExpressionController {
 }
 
 class ExpressionTween extends Tween<ExpressionData> {
-  ExpressionTween({ExpressionData? begin, ExpressionData? end}) : super(begin: begin, end: end);
+  ExpressionTween({super.begin, super.end});
 
   @override
   ExpressionData lerp(double t) => ExpressionData.lerp(begin ?? ExpressionData.neutral(), end ?? ExpressionData.neutral(), t);
@@ -96,7 +96,7 @@ class ExpressiveFace extends StatefulWidget {
   final ExpressionController controller;
   final double size;
 
-  const ExpressiveFace({Key? key, required this.controller, this.size = 220}) : super(key: key);
+  const ExpressiveFace({super.key, required this.controller, this.size = 220});
 
   @override
   State<ExpressiveFace> createState() => _ExpressiveFaceState();
@@ -178,7 +178,7 @@ class _FacePainter extends CustomPainter {
 
     // blush
     if (e.blush > 0.01) {
-      final blushPaint = Paint()..color = Colors.pink.withOpacity(0.35 * e.blush);
+      final blushPaint = Paint()..color = Colors.pink.withValues(alpha: 0.35 * e.blush);
       final offsetY = faceRadius * 0.25;
       final offsetX = faceRadius * 0.6;
       canvas.drawCircle(center + Offset(-offsetX, offsetY), faceRadius * 0.18 * e.blush, blushPaint);

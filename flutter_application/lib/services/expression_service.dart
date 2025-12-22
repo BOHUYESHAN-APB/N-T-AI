@@ -5,7 +5,7 @@ import '../widgets/expressive_face.dart';
 class ExpressionService {
   // Map from loose model-provided map to ExpressionData, with clamping and defaults.
   static ExpressionData fromMap(Map<String, dynamic> m) {
-    double _toDouble(Object? v, double fallback) {
+    double toDouble(Object? v, double fallback) {
       if (v == null) return fallback;
       if (v is num) return v.toDouble();
       try {
@@ -16,14 +16,14 @@ class ExpressionService {
     }
 
     // Mouth: -1 (frown) .. 1 (big smile). Keep model-provided semantics.
-    final mouth = _toDouble(m['mouth'] ?? m['smile'] ?? m['mouth_curvature'], 0.0).clamp(-1.0, 1.0);
-    final eyes = _toDouble(m['eyes'] ?? m['eye_open'] ?? m['eye'], 1.0).clamp(0.0, 1.0);
+    final mouth = toDouble(m['mouth'] ?? m['smile'] ?? m['mouth_curvature'], 0.0).clamp(-1.0, 1.0);
+    final eyes = toDouble(m['eyes'] ?? m['eye_open'] ?? m['eye'], 1.0).clamp(0.0, 1.0);
     // Eyebrow: -1 (down) .. 1 (up). Keep model-provided semantics.
-    final eyebrow = _toDouble(m['eyebrow'] ?? m['brow'] ?? m['eyebrow_tilt'], 0.0).clamp(-1.0, 1.0);
-    final blush = _toDouble(m['blush'] ?? m['cheeks'] ?? 0.0, 0.0).clamp(0.0, 1.0);
-    final pupilX = _toDouble(m['pupil_x'] ?? m['look_x'] ?? 0.0, 0.0).clamp(-1.0, 1.0);
-    final pupilY = _toDouble(m['pupil_y'] ?? m['look_y'] ?? 0.0, 0.0).clamp(-1.0, 1.0);
-    final headTilt = _toDouble(m['head_tilt'] ?? 0.0, 0.0).clamp(-0.5, 0.5);
+    final eyebrow = toDouble(m['eyebrow'] ?? m['brow'] ?? m['eyebrow_tilt'], 0.0).clamp(-1.0, 1.0);
+    final blush = toDouble(m['blush'] ?? m['cheeks'] ?? 0.0, 0.0).clamp(0.0, 1.0);
+    final pupilX = toDouble(m['pupil_x'] ?? m['look_x'] ?? 0.0, 0.0).clamp(-1.0, 1.0);
+    final pupilY = toDouble(m['pupil_y'] ?? m['look_y'] ?? 0.0, 0.0).clamp(-1.0, 1.0);
+    final headTilt = toDouble(m['head_tilt'] ?? 0.0, 0.0).clamp(-0.5, 0.5);
 
     Color faceColor = ExpressionData.neutral().faceColor;
     if (m.containsKey('face_color')) {
@@ -48,10 +48,7 @@ class ExpressionService {
     );
 
     // Debug: log mapping from incoming map to ExpressionData for diagnosis.
-    try {
-      // ignore: avoid_print
-      print('[ExpressionService] mapped from ${m} -> mouth:${result.mouth}, eyebrow:${result.eyebrow}, eyes:${result.eyes}');
-    } catch (_) {}
+    debugPrint('[ExpressionService] mapped from $m -> mouth:${result.mouth}, eyebrow:${result.eyebrow}, eyes:${result.eyes}');
 
     return result;
   }
@@ -64,7 +61,7 @@ class ExpressionService {
         'pupil_x': e.pupilX,
         'pupil_y': e.pupilY,
         'head_tilt': e.headTilt,
-        'face_color': '#${e.faceColor.value.toRadixString(16).padLeft(8, '0').substring(2)}',
+        'face_color': '#${e.faceColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}',
       };
 
   /// Try to extract an expression payload from assistant text.

@@ -20,7 +20,7 @@ import '../theme/chat_colors.dart';
 import '../plugins/plugin_manager.dart';
 
 class ChatsScreen extends StatefulWidget {
-  const ChatsScreen({Key? key}) : super(key: key);
+  const ChatsScreen({super.key});
 
   @override
   State<ChatsScreen> createState() => _ChatsScreenState();
@@ -366,7 +366,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       context: dctx,
                       showDragHandle: true,
                       builder: (ctx2) {
-                        final emojis = _commonEmojis;
+                        const emojis = _commonEmojis;
                         final cross = MediaQuery.of(ctx2).size.width ~/ 44;
                         return SizedBox(
                           height: 300,
@@ -435,7 +435,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Widget chip(ContactType? t, String label) {
             final selected = filter == t;
             final th = Theme.of(ctx);
-            final bg = th.colorScheme.surfaceVariant.withValues(alpha: th.brightness == Brightness.dark ? 0.35 : 0.9);
+            final bg = th.colorScheme.surfaceContainerHighest.withValues(alpha: th.brightness == Brightness.dark ? 0.35 : 0.9);
             final sel = th.colorScheme.primaryContainer;
             final txt = selected ? th.colorScheme.onPrimaryContainer : th.colorScheme.onSurface;
             return ChoiceChip(
@@ -647,7 +647,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (ctx) {
-        final emojis = _commonEmojis;
+        const emojis = _commonEmojis;
         final crossAxisCount = MediaQuery.of(ctx).size.width ~/ 44; // approx size
         return SizedBox(
           height: 300,
@@ -821,7 +821,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       DensityOption.spacious => const EdgeInsets.fromLTRB(18, 18, 18, 0),
     };
 
-    bool _shouldUseBubbleUI() {
+    bool shouldUseBubbleUI() {
       final mode = settings.uiMode;
       if (mode == UIModeOption.bubble) return true;
       if (mode == UIModeOption.simple) return false;
@@ -842,7 +842,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       return true;
     }
 
-    Widget _animated(Widget child, String keyId) {
+    Widget animated(Widget child, String keyId) {
       return TweenAnimationBuilder<double>(
         key: ValueKey(keyId),
         tween: Tween(begin: 0.96, end: 1),
@@ -855,7 +855,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       );
     }
 
-    final useBubble = _shouldUseBubbleUI();
+    final useBubble = shouldUseBubbleUI();
 
     if (!isThreePane) {
       return Container(
@@ -875,7 +875,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     onSecondaryTapDown: (d) => _showMessageMenu(context, msg, index, position: d.globalPosition),
                     child: useBubble ? MessageBubble(message: msg) : SimpleMessageRow(message: msg),
                   );
-                  return _animated(child, msg.id);
+                  return animated(child, msg.id);
                 },
               ),
             ),
@@ -989,7 +989,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       onSecondaryTapDown: (d) => _showMessageMenu(context, msg, index, position: d.globalPosition),
                       child: useBubble ? MessageBubble(message: msg) : SimpleMessageRow(message: msg),
                     );
-                    return _animated(child, msg.id);
+                    return animated(child, msg.id);
                   },
                 ),
               ),

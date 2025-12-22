@@ -4,7 +4,7 @@ import '../../core/services/character_service.dart';
 import '../../widgets/glass.dart';
 
 class CharacterManagerScreen extends StatefulWidget {
-  const CharacterManagerScreen({Key? key}) : super(key: key);
+  const CharacterManagerScreen({super.key});
 
   @override
   State<CharacterManagerScreen> createState() => _CharacterManagerScreenState();
@@ -57,6 +57,7 @@ class _CharacterManagerScreenState extends State<CharacterManagerScreen> {
     setState(() {
       _selectedModelPath = model.path;
     });
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Selected ${model.name}')));
   }
 

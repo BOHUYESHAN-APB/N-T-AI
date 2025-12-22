@@ -4,7 +4,7 @@ import '../../../settings/settings_controller.dart';
 import '../../../settings/settings.dart';
 
 class AgentsTab extends StatefulWidget {
-  const AgentsTab({Key? key}) : super(key: key);
+  const AgentsTab({super.key});
 
   @override
   State<AgentsTab> createState() => _AgentsTabState();
@@ -100,7 +100,7 @@ class _AgentsTabState extends State<AgentsTab> {
                   ),
                 ),
               );
-            }).toList(),
+            }),
 
             const SizedBox(height: 16),
             Row(
@@ -137,7 +137,7 @@ class _AgentsTabState extends State<AgentsTab> {
       elevation: 0,
       color: Theme.of(
         context,
-      ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -475,8 +475,8 @@ class _AgentsTabState extends State<AgentsTab> {
                 // 若用户未填写建议模型，则自动填充 provider 的默认模型
                 if (v != null && modelCtl.text.trim().isEmpty) {
                   final p = ctrl.getProviderById(v);
-                  if (p != null && (p.model?.isNotEmpty ?? false)) {
-                    modelCtl.text = p.model!;
+                  if (p != null && p.model.isNotEmpty) {
+                    modelCtl.text = p.model;
                   }
                 }
                 setLocalState(() {});
@@ -576,9 +576,8 @@ class _AgentsTabState extends State<AgentsTab> {
                                       TextButton(
                                         onPressed: () {
                                           // 允许用户手动将 provider 默认模型复制到建议模型
-                                          if (p != null &&
-                                              (p.model?.isNotEmpty ?? false)) {
-                                            modelCtl.text = p.model!;
+                                          if (p.model.isNotEmpty) {
+                                            modelCtl.text = p.model;
                                             setLocalState(() {});
                                           }
                                         },
@@ -627,8 +626,9 @@ class _AgentsTabState extends State<AgentsTab> {
                       meta: {'suggestedModel': modelCtl.text.trim()},
                     );
                     await ctrl.addOrUpdateAgent(newAgent);
-                    Navigator.pop(ctx);
-                    if (mounted) setState(() {});
+                    if (!mounted) return;
+                    Navigator.of(context).pop();
+                    setState(() {});
                   },
                   child: const Text('保存'),
                 ),
