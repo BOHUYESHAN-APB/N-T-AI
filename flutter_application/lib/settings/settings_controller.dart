@@ -67,14 +67,21 @@ class SettingsController extends ChangeNotifier {
   static const _kEnableStt = 'settings.audio.enableStt';
   static const _kTtsViaBackendDevice = 'settings.audio.ttsViaBackendDevice';
   static const _kTtsBackendDeviceIndex = 'settings.audio.ttsBackendDeviceIndex';
+  static const _kTtsMode = 'settings.audio.ttsMode';
   static const _kSttViaBackendLoopback = 'settings.audio.sttViaBackendLoopback';
   static const _kSttLoopbackDeviceIndex = 'settings.audio.sttLoopbackDeviceIndex';
   static const _kSttLoopbackDurationSeconds =
       'settings.audio.sttLoopbackDurationSeconds';
+  static const _kAutoMicListening = 'settings.audio.autoMicListening';
+  static const _kAutoVoiceChannelListening = 'settings.audio.autoVoiceChannelListening';
   static const _kLogMaxErrors = 'settings.logs.maxErrors';
   static const _kUserBubbleColor = 'settings.ui.userBubbleColor';
   static const _kAiBubbleColor = 'settings.ui.aiBubbleColor';
   static const _kDeepResearch = 'settings.deepResearch';
+  static const _kSpeechRefinerProviderId = 'settings.agent.speechRefinerProviderId';
+  static const _kEnableSpeechRefinement = 'settings.agent.speechRefinement.enabled';
+  static const _kToolCallingProviderId = 'settings.agent.toolCallingProviderId';
+  static const _kDeepResearchProviderId = 'settings.agent.deepResearchProviderId';
   // Legacy font mode key (for migration only)
   static const _kFontMode = 'settings.ui.fontMode';
   // New font settings keys
@@ -545,12 +552,19 @@ class SettingsController extends ChangeNotifier {
       enableStt: enableStt,
       ttsViaBackendDevice: ttsViaBackendDevice,
       ttsBackendDeviceIndex: ttsBackendDeviceIndex,
+      ttsMode: _prefs.getString(_kTtsMode) ?? 'sentence',
       sttViaBackendLoopback: sttViaBackendLoopback,
       sttLoopbackDeviceIndex: sttLoopbackDeviceIndex,
       sttLoopbackDurationSeconds: sttLoopbackDurationSeconds,
+      autoMicListening: _prefs.getBool(_kAutoMicListening) ?? false,
+      autoVoiceChannelListening: _prefs.getBool(_kAutoVoiceChannelListening) ?? false,
       logMaxErrors: logMaxErrors,
       userBubbleColor: userBubbleColor,
       aiBubbleColor: aiBubbleColor,
+      activeSpeechRefinerProviderId: _prefs.getString(_kSpeechRefinerProviderId),
+      enableSpeechRefinement: _prefs.getBool(_kEnableSpeechRefinement) ?? false,
+      activeToolCallingProviderId: _prefs.getString(_kToolCallingProviderId),
+      activeDeepResearchProviderId: _prefs.getString(_kDeepResearchProviderId),
     );
     notifyListeners();
 
@@ -730,6 +744,24 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setTtsMode(String mode) async {
+    _settings = _settings.copyWith(ttsMode: mode);
+    await _prefs.setString(_kTtsMode, mode);
+    notifyListeners();
+  }
+
+  Future<void> setAutoMicListening(bool v) async {
+    _settings = _settings.copyWith(autoMicListening: v);
+    await _prefs.setBool(_kAutoMicListening, v);
+    notifyListeners();
+  }
+
+  Future<void> setAutoVoiceChannelListening(bool v) async {
+    _settings = _settings.copyWith(autoVoiceChannelListening: v);
+    await _prefs.setBool(_kAutoVoiceChannelListening, v);
+    notifyListeners();
+  }
+
   Future<void> setTtsBackendDeviceIndex(int? v) async {
     _settings = _settings.copyWith(ttsBackendDeviceIndex: v);
     if (v == null) {
@@ -797,6 +829,42 @@ class SettingsController extends ChangeNotifier {
       await _prefs.setString(_kExpressionProviderId, id);
     }
     _settings = _settings.copyWith(activeExpressionProviderId: id);
+    notifyListeners();
+  }
+
+  Future<void> setActiveSpeechRefinerProvider(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_kSpeechRefinerProviderId);
+    } else {
+      await _prefs.setString(_kSpeechRefinerProviderId, id);
+    }
+    _settings = _settings.copyWith(activeSpeechRefinerProviderId: id);
+    notifyListeners();
+  }
+
+  Future<void> setEnableSpeechRefinement(bool v) async {
+    _settings = _settings.copyWith(enableSpeechRefinement: v);
+    await _prefs.setBool(_kEnableSpeechRefinement, v);
+    notifyListeners();
+  }
+
+  Future<void> setActiveToolCallingProvider(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_kToolCallingProviderId);
+    } else {
+      await _prefs.setString(_kToolCallingProviderId, id);
+    }
+    _settings = _settings.copyWith(activeToolCallingProviderId: id);
+    notifyListeners();
+  }
+
+  Future<void> setActiveDeepResearchProvider(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_kDeepResearchProviderId);
+    } else {
+      await _prefs.setString(_kDeepResearchProviderId, id);
+    }
+    _settings = _settings.copyWith(activeDeepResearchProviderId: id);
     notifyListeners();
   }
 

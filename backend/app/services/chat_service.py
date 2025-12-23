@@ -49,6 +49,19 @@ class ChatService:
         self.meme_service = MemeService()
 
     def _sanitize_text_for_tts(self, text: str) -> str:
+        """Removes mental/action descriptions and special tokens for TTS."""
+        # Remove text inside parentheses (mental/action descriptions)
+        # Supports both English () and Chinese （）
+        text = re.sub(r'\(.*?\)', '', text)
+        text = re.sub(r'（.*?）', '', text)
+        
+        # Remove special tokens
+        text = text.replace("[END_OF_SPEECH]", "")
+        text = text.replace("[SPLIT]", "")
+        
+        # Remove markdown/extra spaces
+        text = re.sub(r'[*#_`]', '', text)
+        return text.strip()
         s = text or ""
         s = re.sub(r"```[\s\S]*?```", "", s)
         s = re.sub(r"\[IMAGE:[^\]]*\]", "", s)
@@ -202,6 +215,7 @@ class ChatService:
                             enable_search: bool = False,
                             search_region: str = "zh-CN",
                             vision_config: Dict[str, Any] = None,
+                            agent_config: Dict[str, Any] = None,
                             temperature: float = 0.7,
                             background_tasks: BackgroundTasks = None,
                             enable_backend_tts: bool = False,
@@ -213,7 +227,8 @@ class ChatService:
                             user_nickname: Optional[str] = None,
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
-                            learning_probability: float = 1.0):
+                            learning_probability: float = 1.0,
+                            tts_mode: str = "sentence"): # "sentence" (default/stable) or "stream" (high speed)
         """
         Streaming version of process_message for fast response.
         Yields text chunks and triggers TTS as soon as a sentence is complete.
@@ -263,7 +278,12 @@ class ChatService:
         sentence_buffer = ""
         
         # Define punctuation that marks end of a TTS-able chunk
-        sentence_end_pattern = re.compile(r"([。！？!?\.\n])")
+        if tts_mode == "stream":
+            # In stream mode, even smaller marks like commas or just enough characters can trigger TTS
+            sentence_end_pattern = re.compile(r"([，。！？!?\.\n,;；])")
+        else:
+            # Standard sentence splitting
+            sentence_end_pattern = re.compile(r"([。！？!?\.\n])")
 
         async for chunk in self.llm.get_response_stream(
             messages, 
@@ -278,6 +298,18 @@ class ChatService:
             full_response_text += chunk
             sentence_buffer += chunk
             yield chunk
+
+            # Check for immediate TTS trigger token
+            if "[END_OF_SPEECH]" in sentence_buffer:
+                parts = sentence_buffer.split("[END_OF_SPEECH]")
+                to_tts = parts[0]
+                sentence_buffer = "[END_OF_SPEECH]".join(parts[1:]) # Keep the rest
+                if enable_backend_tts and to_tts.strip():
+                    clean_segment = self._sanitize_text_for_tts(to_tts)
+                    if clean_segment.strip():
+                        asyncio.create_task(self._generate_and_broadcast_audio(
+                            clean_segment, tts_api_key, tts_base_url, tts_voice, tts_mode
+                        ))
 
             # Check if we have a complete sentence to TTS
             parts = sentence_end_pattern.split(sentence_buffer)
@@ -298,7 +330,7 @@ class ChatService:
                     if clean_segment.strip():
                         # Use asyncio.create_task for non-blocking TTS broadcast
                         asyncio.create_task(self._generate_and_broadcast_audio(
-                            clean_segment, tts_api_key, tts_base_url, tts_voice
+                            clean_segment, tts_api_key, tts_base_url, tts_voice, tts_mode
                         ))
 
         # Handle any remaining text in the buffer at the end
@@ -306,7 +338,7 @@ class ChatService:
             clean_segment = self._sanitize_text_for_tts(sentence_buffer)
             if clean_segment.strip():
                 asyncio.create_task(self._generate_and_broadcast_audio(
-                    clean_segment, tts_api_key, tts_base_url, tts_voice
+                    clean_segment, tts_api_key, tts_base_url, tts_voice, tts_mode
                 ))
 
         # Save Assistant Response and post-processing
@@ -319,7 +351,7 @@ class ChatService:
             if random.random() < learning_probability:
                 background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
 
-    async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None, voice: str = None):
+    async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None, voice: str = None, tts_mode: str = "sentence"):
         if not text:
             return
 
@@ -339,9 +371,10 @@ class ChatService:
             tts_voice = "sys_female_01"
 
         try:
-            logger.info(f"[Backend TTS] Generating audio: text_len={len(clean_text)}, voice={tts_voice}")
+            logger.info(f"[Backend TTS] Generating audio: text_len={len(clean_text)}, voice={tts_voice}, mode={tts_mode}")
             
             # Split into chunks for faster response
+            # If mode is stream, we might want smaller chunks or just use the default splitter
             chunks = self._split_into_chunks(clean_text)
             logger.info(f"[Backend TTS] Split into {len(chunks)} chunks")
             
@@ -399,6 +432,7 @@ class ChatService:
                             enable_search: bool = False,
                             search_region: str = "zh-CN",
                             vision_config: Dict[str, Any] = None,
+                            agent_config: Dict[str, Any] = None,
                             temperature: float = 0.7,
                             background_tasks: BackgroundTasks = None,
                             enable_backend_tts: bool = False,
@@ -410,7 +444,8 @@ class ChatService:
                             user_nickname: Optional[str] = None,
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
-                            learning_probability: float = 1.0) -> str:
+                            learning_probability: float = 1.0,
+                            tts_mode: str = "sentence") -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
         
@@ -576,9 +611,22 @@ class ChatService:
 """
         if suppress_inner_monologue and not deep_research:
             system_prompt += """
-
+[Output Style]:
+- 不要输出任何心理描写（例如：括号内的动作描述或情感说明）。
+- 仅输出角色的直接对话内容。
+- 在句尾输出特殊的结束标记 [END_OF_SPEECH] 之后再进行任何补充说明（如果有）。
+"""
+        elif not deep_research:
+             system_prompt += """
+[Output Style]:
+- 所有的动作、表情、心理描写必须放在英文括号 () 内。
+- 正文对话内容不要包含任何括号。
+"""
+        
+        if chat_mode == "persona" and not deep_research:
+            system_prompt += """
 [Inner Monologue Policy]:
-- 严禁输出任何“心里描写/旁白/动作描写/OS”。
+- 严禁输出任何"心里描写/旁白/动作描写/OS"。
 - 不要输出任何括号（() 或 （））包裹的舞台指令、动作或表情描述。
 - 只输出对用户可见的正文内容。
 """
@@ -602,15 +650,24 @@ class ChatService:
         current_turn = 0
         final_response_text = ""
         
-        # If search is NOT enabled, we just do one pass (legacy mode)
-        # But if enabled, we enter the loop.
+        # Decide which model to use for the ReAct loop
+        loop_api_key = target_api_key
+        loop_base_url = target_base_url
+        loop_model = target_model
+        
+        if enable_search and agent_config and agent_config.get("tool_caller", {}).get("model"):
+            tc = agent_config["tool_caller"]
+            loop_api_key = tc.get("api_key") or target_api_key
+            loop_base_url = tc.get("base_url") or target_base_url
+            loop_model = tc.get("model")
+            print(f"[AGENT] Using specialized Tool Caller model: {loop_model}")
         
         while current_turn < max_turns:
             try:
                 response_data = await self.llm.get_response(messages, 
-                                                          api_key=target_api_key, 
-                                                          base_url=target_base_url, 
-                                                          model=target_model,
+                                                          api_key=loop_api_key, 
+                                                          base_url=loop_base_url, 
+                                                          model=loop_model,
                                                           temperature=temperature,
                                                           return_full=True,
                                                           enable_thinking=enable_thinking)
@@ -842,7 +899,7 @@ class ChatService:
                 final_tts_key = tts_api_key
                 final_tts_url = tts_base_url
                 tts_text = self._sanitize_text_for_tts(final_response_text)
-                background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url, tts_voice)
+                background_tasks.add_task(self._generate_and_broadcast_audio, tts_text, final_tts_key, final_tts_url, tts_voice, tts_mode)
         else:
             # Fallback for when no background_tasks context is provided
             # Note: Awaiting here will block the response, but it's safer than losing the tasks
@@ -867,7 +924,7 @@ class ChatService:
                 final_tts_key = tts_api_key
                 final_tts_url = tts_base_url
                 tts_text = self._sanitize_text_for_tts(final_response_text)
-                asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url, tts_voice))
+                asyncio.create_task(self._generate_and_broadcast_audio(tts_text, final_tts_key, final_tts_url, tts_voice, tts_mode))
 
         return final_response_text
 

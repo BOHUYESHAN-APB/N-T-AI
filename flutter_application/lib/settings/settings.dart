@@ -418,9 +418,16 @@ class AppSettings {
   final bool sttViaBackendLoopback; // 通过后端回环采集系统声音
   final int? sttLoopbackDeviceIndex; // 后端回环设备索引（通常为输出设备）
   final int sttLoopbackDurationSeconds; // 回环采集时长（秒）
+  final String ttsMode; // TTS 响应模式
+  final bool autoMicListening; // 自动麦克风监听
+  final bool autoVoiceChannelListening; // 自动语音频道监听
   final int logMaxErrors; // 最近错误日志条数
   final int? userBubbleColor; // 用户气泡颜色 (ARGB)
   final int? aiBubbleColor; // AI 气泡颜色 (ARGB)
+  final String? activeSpeechRefinerProviderId; // 语音修正 Agent 服务商
+  final bool enableSpeechRefinement; // 启用语音修正
+  final String? activeToolCallingProviderId; // 工具调用专用模型服务商
+  final String? activeDeepResearchProviderId; // 深度研究专用模型服务商
 
   const AppSettings({
     this.themeMode = ThemeModeOption.system,
@@ -444,6 +451,9 @@ class AppSettings {
     this.activeExpressionProviderId,
     this.activeSearchProviderId,
     this.activeMotionProviderId,
+    this.activeSpeechRefinerProviderId,
+    this.activeToolCallingProviderId,
+    this.activeDeepResearchProviderId,
     this.live2dModelPath = '',
     this.rotationEnabled = false,
     this.agentEnabled = true,
@@ -469,6 +479,7 @@ class AppSettings {
     this.autoStartBackend = false,
     this.pythonBackendUrl = 'http://localhost:23456',
     this.enableDeepResearch = false,
+    this.enableSpeechRefinement = false,
     this.searchRegion = SearchRegionOption.auto,
     this.userNickname = '',
     this.learningProbability = 1.0,
@@ -484,9 +495,12 @@ class AppSettings {
     this.enableStt = false,
     this.ttsViaBackendDevice = false,
     this.ttsBackendDeviceIndex,
+    this.ttsMode = 'sentence', // 'sentence' (stable) or 'stream' (fast)
     this.sttViaBackendLoopback = false,
     this.sttLoopbackDeviceIndex,
     this.sttLoopbackDurationSeconds = 5,
+    this.autoMicListening = false,
+    this.autoVoiceChannelListening = false,
     this.logMaxErrors = 5,
     this.userBubbleColor,
     this.aiBubbleColor,
@@ -512,6 +526,9 @@ class AppSettings {
     String? activeExpressionProviderId,
     String? activeSearchProviderId,
     String? activeMotionProviderId,
+    String? activeSpeechRefinerProviderId,
+    String? activeToolCallingProviderId,
+    String? activeDeepResearchProviderId,
     String? live2dModelPath,
     bool? rotationEnabled,
     bool? agentEnabled,
@@ -537,6 +554,7 @@ class AppSettings {
     bool? autoStartBackend,
     String? pythonBackendUrl,
     bool? enableDeepResearch,
+    bool? enableSpeechRefinement,
     SearchRegionOption? searchRegion,
     String? userNickname,
     double? learningProbability,
@@ -551,9 +569,12 @@ class AppSettings {
     bool? enableStt,
     bool? ttsViaBackendDevice,
     Object? ttsBackendDeviceIndex = _notSet,
+    String? ttsMode,
     bool? sttViaBackendLoopback,
     Object? sttLoopbackDeviceIndex = _notSet,
     int? sttLoopbackDurationSeconds,
+    bool? autoMicListening,
+    bool? autoVoiceChannelListening,
     int? logMaxErrors,
     int? userBubbleColor,
     int? aiBubbleColor,
@@ -582,6 +603,12 @@ class AppSettings {
         activeSearchProviderId ?? this.activeSearchProviderId,
     activeMotionProviderId:
         activeMotionProviderId ?? this.activeMotionProviderId,
+    activeSpeechRefinerProviderId:
+        activeSpeechRefinerProviderId ?? this.activeSpeechRefinerProviderId,
+    activeToolCallingProviderId:
+        activeToolCallingProviderId ?? this.activeToolCallingProviderId,
+    activeDeepResearchProviderId:
+        activeDeepResearchProviderId ?? this.activeDeepResearchProviderId,
     live2dModelPath: live2dModelPath ?? this.live2dModelPath,
     rotationEnabled: rotationEnabled ?? this.rotationEnabled,
     agentEnabled: agentEnabled ?? this.agentEnabled,
@@ -608,6 +635,8 @@ class AppSettings {
     autoStartBackend: autoStartBackend ?? this.autoStartBackend,
     pythonBackendUrl: pythonBackendUrl ?? this.pythonBackendUrl,
     enableDeepResearch: enableDeepResearch ?? this.enableDeepResearch,
+    enableSpeechRefinement:
+        enableSpeechRefinement ?? this.enableSpeechRefinement,
     searchRegion: searchRegion ?? this.searchRegion,
     userNickname: userNickname ?? this.userNickname,
     learningProbability: learningProbability ?? this.learningProbability,
@@ -625,6 +654,7 @@ class AppSettings {
         identical(ttsBackendDeviceIndex, _notSet)
             ? this.ttsBackendDeviceIndex
             : ttsBackendDeviceIndex as int?,
+    ttsMode: ttsMode ?? this.ttsMode,
     sttViaBackendLoopback: sttViaBackendLoopback ?? this.sttViaBackendLoopback,
     sttLoopbackDeviceIndex:
         identical(sttLoopbackDeviceIndex, _notSet)
@@ -632,6 +662,9 @@ class AppSettings {
             : sttLoopbackDeviceIndex as int?,
     sttLoopbackDurationSeconds:
         sttLoopbackDurationSeconds ?? this.sttLoopbackDurationSeconds,
+    autoMicListening: autoMicListening ?? this.autoMicListening,
+    autoVoiceChannelListening:
+        autoVoiceChannelListening ?? this.autoVoiceChannelListening,
     logMaxErrors: logMaxErrors ?? this.logMaxErrors,
     userBubbleColor: userBubbleColor ?? this.userBubbleColor,
     aiBubbleColor: aiBubbleColor ?? this.aiBubbleColor,

@@ -204,7 +204,8 @@ class BilibiliLivePlugin(BasePlugin):
                     await self.chat_service.process_message(
                         content, 
                         user_id="bilibili_agent", 
-                        enable_backend_tts=True # Or false if we don't want TTS for summaries
+                        enable_backend_tts=True, # Or false if we don't want TTS for summaries
+                        tts_mode="sentence"
                     )
                     
                     # Broadcast summary to frontend for display
@@ -268,7 +269,8 @@ class BilibiliLivePlugin(BasePlugin):
                         prompt, 
                         user_id="bilibili_agent_sc", # Different ID to avoid memory pollution/confusion? Or same?
                         # Using same ID might be better for continuity, but let's use bilibili_agent for now.
-                        enable_backend_tts=True
+                        enable_backend_tts=True,
+                        tts_mode="sentence"
                     )
 
             except asyncio.CancelledError:

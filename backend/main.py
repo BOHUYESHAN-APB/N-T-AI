@@ -386,21 +386,47 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     if not tts_api_key and auth_header and auth_header.startswith("Bearer "):
         tts_api_key = auth_header.replace("Bearer ", "").strip()
 
+    # Extract Agent Configs
+    agent_config = {
+        "refiner": {
+            "api_key": raw_request.headers.get("X-Refiner-Api-Key"),
+            "base_url": raw_request.headers.get("X-Refiner-Base-Url"),
+            "model": raw_request.headers.get("X-Refiner-Model"),
+        },
+        "tool_caller": {
+            "api_key": raw_request.headers.get("X-ToolCaller-Api-Key"),
+            "base_url": raw_request.headers.get("X-ToolCaller-Base-Url"),
+            "model": raw_request.headers.get("X-ToolCaller-Model"),
+        },
+        "researcher": {
+            "api_key": raw_request.headers.get("X-Researcher-Api-Key"),
+            "base_url": raw_request.headers.get("X-Researcher-Base-Url"),
+            "model": raw_request.headers.get("X-Researcher-Model"),
+        }
+    }
+
     # Debug logging
     logger.info(f"X-Enable-Browser header: '{enable_search_str}' -> enable_search={enable_search}")
     logger.info(f"X-Search-Region: {search_region}")
+    if agent_config["refiner"]["model"]:
+        logger.info(f"Agent Config (Refiner): {agent_config['refiner']['model']}")
     logger.info(f"Usage type: {usage_type}")
     if tts_api_key:
         logger.info("TTS API Key provided in headers")
     if vision_model:
         logger.info(f"Vision Agent Configured: {vision_model} (Fallback: {vision_fallback})")
 
+    # Process proactive chat toggle
+    enable_proactive_chat_header = raw_request.headers.get("X-Proactive-Chat", "false")
+    enable_proactive_chat = enable_proactive_chat_header.lower() in ["true", "1", "yes"]
+    priority_manager.set_proactive_chat(enable_proactive_chat)
+
     # Process via astra-me Logic
     try:
         # If usage_type is 'system' or 'memory', bypass the Persona/History/Mood logic
         # and just act as a raw LLM proxy. This prevents the backend from responding
         # as Firefly when the frontend just wants to extract memory or summarize text.
-        if usage_type in ["system", "memory", "tool"]:
+        if usage_type in ["system", "memory", "tool", "agent"]:
             logger.info(f"Processing system request (type={usage_type}), bypassing persona logic.")
             
             # Convert Pydantic messages to dicts
@@ -417,6 +443,47 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
         else:
             enable_backend_tts_header = raw_request.headers.get("X-Backend-TTS", "false")
             enable_backend_tts = enable_backend_tts_header.lower() in ["true", "1", "yes", "server"]
+            if request.stream:
+                async def stream_generator():
+                    async for chunk in chat_service.process_message_stream(
+                        last_message_content, 
+                        user_id,
+                        session_id=session_id,
+                        target_api_key=target_api_key,
+                        target_base_url=target_base_url,
+                        target_model=target_model,
+                        tts_api_key=tts_api_key,
+                        tts_base_url=tts_base_url,
+                        tts_voice=tts_voice,
+                        enable_search=enable_search,
+                        enable_thinking=enable_thinking,
+                        search_region=search_region,
+                        persona_mode=persona_mode,
+                        vision_config={
+                            "api_key": vision_api_key,
+                            "base_url": vision_base_url,
+                            "model": vision_model,
+                            "prompt": vision_prompt,
+                            "fallback": vision_fallback
+                        },
+                        agent_config=agent_config,
+                        temperature=temperature,
+                        background_tasks=background_tasks,
+                        enable_backend_tts=enable_backend_tts,
+                        chat_mode=chat_mode,
+                        deep_research=deep_research,
+                        suppress_inner_monologue=suppress_inner_monologue,
+                        user_nickname=user_nickname,
+                        system_prompt_override=system_prompt_override,
+                        assistant_name=assistant_name,
+                        learning_probability=learning_probability,
+                        tts_mode=raw_request.headers.get("X-TTS-Mode", "sentence")
+                    ):
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
             response_text = await chat_service.process_message(
                 last_message_content, 
                 user_id,
@@ -438,6 +505,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                     "prompt": vision_prompt,
                     "fallback": vision_fallback
                 },
+                agent_config=agent_config,
                 temperature=temperature,
                 background_tasks=background_tasks,
                 enable_backend_tts=enable_backend_tts,
@@ -448,6 +516,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 system_prompt_override=system_prompt_override,
                 assistant_name=assistant_name,
                 learning_probability=learning_probability,
+                tts_mode=raw_request.headers.get("X-TTS-Mode", "sentence")
             )
             current_mood = chat_service.mood_service.get_current_mood(user_id)
         

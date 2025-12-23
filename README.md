@@ -244,12 +244,15 @@ N-T-AI stands on the shoulders of many great open-source projects and tools.
 ### Referenced Open-Source Projects
 - **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Live2D interaction logic, emotive parameter layering, WebRTC/audio utilities inspiration. *License*: MIT. [Repository](https://github.com/BOHUYESHAN-APB/N.E.K.O.)
 - **dlp3d.ai**: 3D rendering and scene management architecture inspiration. *License*: MIT. [Repository](https://github.com/dlp3d/dlp3d.ai)
-- **Excalidraw**: Built-in whiteboard note type (offline copy). *License*: MIT. [Repository](https://github.com/excalidraw/excalidraw)
-- **live2d-py**: Live2D integration support inspiration. *License*: MIT. [Repository](https://github.com/EasyLive2D/live2d-py)
 - **DeepResearchAgent**: Hierarchical multi-agent architecture and TEA protocol inspiration. *License*: MIT. [Repository](https://github.com/SkyworkAI/DeepResearchAgent)
 - **free-OKC (OK Computer Virtual Machine)**: HTML-to-PPTX generation logic and sandboxed tool execution inspiration. *License*: MIT. [Repository](https://github.com/kexinoh/free-OKC)
 - **OpenManus**: Deep Research planning workflows, browser automation strategies, and ReAct patterns inspiration. *License*: MIT. [Repository](https://github.com/FoundationAgents/OpenManus)
 - **Skywork-Super-Agents**: MCP Server implementation inspiration. *License*: The Unlicense. [Repository](https://github.com/Skywork-ai/Skywork-Super-Agents)
+
+### Plugins & Extensions Credits
+- **blivechat**: Our Bilibili live comment display plugin is developed with reference to this project. *License*: MIT. [Repository](https://github.com/xfgryujk/blivechat/)
+- **MindCraft**: Used for the Minecraft AI agent integration, providing high-level LLM-driven intelligence. *License*: MIT. [Repository](https://github.com/mindcraft-bots/mindcraft)
+- **Mineflayer**: Used as the base engine for Minecraft bot interactions and low-level control. *License*: MIT. [Repository](https://github.com/PrismarineJS/mineflayer)
 
 ### Development Tools
 - **GitHub Copilot**: Code-assist help during development.

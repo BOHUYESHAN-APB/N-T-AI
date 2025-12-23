@@ -68,13 +68,22 @@ class LLMService {
     }
   }
 
-  Future<AiProviderConfig?> _getProviderById(String id) async {
+  Future<List<AiProviderConfig>> getProviders() async {
     final prefs = await SharedPreferences.getInstance();
     final providersRaw = prefs.getString(_kAiProviders);
-    if (providersRaw == null) return null;
+    if (providersRaw == null) return [];
     try {
       final List data = jsonDecode(providersRaw) as List;
-      final providers = data.map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>)).toList();
+      return data.map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<AiProviderConfig?> getProviderById(String id) async {
+    final providers = await getProviders();
+    if (providers.isEmpty) return null;
+    try {
       return providers.firstWhere((p) => p.id == id, orElse: () => providers.first);
     } catch (_) {
       return null;
@@ -279,6 +288,59 @@ class LLMService {
         headers['X-Session-Id'] = sessionId;
       }
 
+      // --- Specialized Agent Providers ---
+      final refinerId = prefs.getString('settings.agent.speechRefinerProviderId');
+      final toolCallerId = prefs.getString('settings.agent.toolCallingProviderId');
+      final deepResearcherId = prefs.getString('settings.agent.deepResearchProviderId');
+
+      if (refinerId != null && refinerId.isNotEmpty) {
+        final refiner = await getProviderById(refinerId);
+        if (refiner != null) {
+          headers['X-Refiner-Model'] = refiner.model;
+          headers['X-Refiner-Api-Key'] = refiner.apiKey;
+          var refinerUrl = refiner.baseUrl;
+          if (refinerUrl.endsWith('/chat/completions')) {
+            refinerUrl = refinerUrl.replaceAll('/chat/completions', '');
+          }
+          if (refinerUrl.endsWith('/')) {
+            refinerUrl = refinerUrl.substring(0, refinerUrl.length - 1);
+          }
+          headers['X-Refiner-Base-Url'] = refinerUrl;
+        }
+      }
+
+      if (toolCallerId != null && toolCallerId.isNotEmpty) {
+        final toolCaller = await getProviderById(toolCallerId);
+        if (toolCaller != null) {
+          headers['X-ToolCaller-Model'] = toolCaller.model;
+          headers['X-ToolCaller-Api-Key'] = toolCaller.apiKey;
+          var toolCallerUrl = toolCaller.baseUrl;
+          if (toolCallerUrl.endsWith('/chat/completions')) {
+            toolCallerUrl = toolCallerUrl.replaceAll('/chat/completions', '');
+          }
+          if (toolCallerUrl.endsWith('/')) {
+            toolCallerUrl = toolCallerUrl.substring(0, toolCallerUrl.length - 1);
+          }
+          headers['X-ToolCaller-Base-Url'] = toolCallerUrl;
+        }
+      }
+
+      if (deepResearcherId != null && deepResearcherId.isNotEmpty) {
+        final deepResearcher = await getProviderById(deepResearcherId);
+        if (deepResearcher != null) {
+          headers['X-Researcher-Model'] = deepResearcher.model;
+          headers['X-Researcher-Api-Key'] = deepResearcher.apiKey;
+          var deepResearcherUrl = deepResearcher.baseUrl;
+          if (deepResearcherUrl.endsWith('/chat/completions')) {
+            deepResearcherUrl = deepResearcherUrl.replaceAll('/chat/completions', '');
+          }
+          if (deepResearcherUrl.endsWith('/')) {
+            deepResearcherUrl = deepResearcherUrl.substring(0, deepResearcherUrl.length - 1);
+          }
+          headers['X-Researcher-Base-Url'] = deepResearcherUrl;
+        }
+      }
+
       try {
         final providersRaw = prefs.getString('settings.ai.providers');
         if (providersRaw != null) {
@@ -323,7 +385,7 @@ class LLMService {
         final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
         
         if (activeVisionId != null && activeVisionId.isNotEmpty) {
-          final visionProvider = await _getProviderById(activeVisionId);
+          final visionProvider = await getProviderById(activeVisionId);
           if (visionProvider != null) {
             headers['X-Vision-Api-Key'] = visionProvider.apiKey;
             
@@ -472,7 +534,7 @@ class LLMService {
   }
 
   Future<String> chatWithProvider(List<Map<String, String>> messages, {String usageType = 'expression', String? providerIdOverride}) async {
-    AiProviderConfig? provider = providerIdOverride != null ? await _getProviderById(providerIdOverride) : await _getActiveProvider();
+    AiProviderConfig? provider = providerIdOverride != null ? await getProviderById(providerIdOverride) : await _getActiveProvider();
     if (provider == null) throw Exception("No active AI provider configured");
 
     final apiKey = provider.apiKey;
@@ -541,7 +603,7 @@ class LLMService {
     String? providerIdOverride,
   }) async {
     AiProviderConfig? provider = providerIdOverride != null
-        ? await _getProviderById(providerIdOverride)
+        ? await getProviderById(providerIdOverride)
         : await _getActiveProvider();
     if (provider == null) throw Exception("No active AI provider configured");
 

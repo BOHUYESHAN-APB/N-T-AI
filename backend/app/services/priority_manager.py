@@ -39,6 +39,7 @@ class PriorityManager:
         self.chat_service = ChatService()
         self.search_service = SearchService()
         self.last_activity_ts = time.time()
+        self.proactive_chat_enabled = False # 默认关闭
         self.is_running = False
         self._initialized = True
 
@@ -62,6 +63,13 @@ class PriorityManager:
         await self.queue.put((priority, task.timestamp, task))
         logger.info(f"Task added to queue: priority={priority}, id={task.id}")
 
+    def set_proactive_chat(self, enabled: bool):
+        """设置主动搭话开关"""
+        self.proactive_chat_enabled = enabled
+        if enabled:
+            self.last_activity_ts = time.time() # 重置计时
+        logger.info(f"Proactive chat {'enabled' if enabled else 'disabled'}")
+
     async def _worker(self):
         while self.is_running:
             try:
@@ -77,10 +85,15 @@ class PriorityManager:
                 
                 # Execute chat service
                 try:
+                    # 确保 kwargs 中包含 tts_mode，如果不存在则默认为 "sentence"
+                    kwargs = task.kwargs.copy()
+                    if "tts_mode" not in kwargs:
+                        kwargs["tts_mode"] = "sentence"
+                        
                     await self.chat_service.process_message(
                         message=task.message,
                         user_id=task.user_id,
-                        **task.kwargs
+                        **kwargs
                     )
                 except Exception as e:
                     logger.error(f"Error processing message in PriorityManager: {e}")
@@ -95,6 +108,11 @@ class PriorityManager:
         """心跳循环，处理空闲主动搭话"""
         while self.is_running:
             try:
+                # 必须开启主动搭话开关才执行
+                if not self.proactive_chat_enabled:
+                    await asyncio.sleep(10)
+                    continue
+
                 # 检查空闲时间
                 idle_sec = time.time() - self.last_activity_ts
                 idle_limit = float(getattr(settings, "PROACTIVE_IDLE_MIN_SEC", 45) or 45)

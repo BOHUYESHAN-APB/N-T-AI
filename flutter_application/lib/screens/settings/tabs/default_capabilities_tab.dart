@@ -111,6 +111,51 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
             (id) => controller.setActiveMotionProvider(id),
           ),
         ),
+        _buildCapabilityTile(
+          context,
+          icon: Icons.construction,
+          title: '工具调用 (Tool Calling)',
+          currentId: settings.activeToolCallingProviderId,
+          controller: controller,
+          onTap: () => _showProviderSelector(
+            context,
+            controller,
+            providers,
+            '选择工具调用服务商',
+            settings.activeToolCallingProviderId,
+            (id) => controller.setActiveToolCallingProvider(id),
+          ),
+        ),
+        _buildCapabilityTile(
+          context,
+          icon: Icons.manage_search,
+          title: '深度研究 (Deep Research)',
+          currentId: settings.activeDeepResearchProviderId,
+          controller: controller,
+          onTap: () => _showProviderSelector(
+            context,
+            controller,
+            providers,
+            '选择深度研究服务商',
+            settings.activeDeepResearchProviderId,
+            (id) => controller.setActiveDeepResearchProvider(id),
+          ),
+        ),
+        _buildCapabilityTile(
+          context,
+          icon: Icons.auto_fix_high,
+          title: '语音修正 (Speech Refine)',
+          currentId: settings.activeSpeechRefinerProviderId,
+          controller: controller,
+          onTap: () => _showProviderSelector(
+            context,
+            controller,
+            providers,
+            '选择语音修正服务商',
+            settings.activeSpeechRefinerProviderId,
+            (id) => controller.setActiveSpeechRefinerProvider(id),
+          ),
+        ),
 
         const Divider(height: 32),
         _buildSectionHeader(context, '数据管理 (Data)'),
@@ -187,9 +232,9 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.smart_toy_outlined),
+            leading: const Icon(Icons.psychology_outlined),
             title: const Text('跟随主脑 (默认)'),
-            subtitle: const Text('使用当前对话的主模型'),
+            subtitle: const Text('使用当前活跃的对话服务商'),
             trailing: currentId == null ? const Icon(Icons.check) : null,
             onTap: () {
               onSelect(null);

@@ -77,6 +77,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
   final Live2DController _live2dController = Live2DController();
   bool _lastEnableTts = false;
   bool _initiativeLoopActive = false;
+  bool _autoMicListeningActive = false; // 是否处于自动麦克风监听状态
+  final AudioRecorder _autoMicRecorder = AudioRecorder(); // 专用于自动监听的录制器
 
   @override
   void initState() {
@@ -234,6 +236,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
     } else {
       _wsService.disconnect();
     }
+    
+    // Auto voice channel listening trigger
+    if (settings.autoVoiceChannelListening && !_isLoopbackCapturing && !_isLoading) {
+      _handleLoopbackVoiceInput(isAuto: true);
+    }
     // logToFile("FireflyScreen.didChangeDependencies completed");
   }
 
@@ -284,6 +291,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
   }
 
   Future<void> _interruptGeneration() async {
+    if (_autoMicListeningActive) {
+      await _stopAutoMicListening();
+    }
     if (_isLoading &&
         _interruptCompleter != null &&
         !_interruptCompleter!.isCompleted) {
@@ -329,6 +339,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _faceController.dispose();
     _focusNode.dispose();
     _floatingControlsHideTimer?.cancel(); // Added back just in case
+    _autoMicRecorder.dispose();
     super.dispose();
   }
 
@@ -641,6 +652,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   Future<void> _handleVoiceInput(String path, {bool fromLoopback = false}) async {
     if (!mounted) return;
+    // 如果是自动监听触发的，确保状态正确
+    if (_autoMicListeningActive) {
+      _autoMicListeningActive = false;
+    }
     setState(() => _isLoading = true);
     var keepFile = false;
     try {
@@ -661,7 +676,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           '语音转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
         );
         _controller.text = text;
-        _sendMessage(uiRole: fromLoopback ? 'stt_heard' : 'user');
+        _sendMessage(uiRole: fromLoopback ? 'stt_heard' : 'user', needsRefinement: true);
       } else {
         keepFile = true;
         logger.error(
@@ -691,20 +706,32 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
-  Future<void> _handleLoopbackVoiceInput() async {
+  Future<void> _handleLoopbackVoiceInput({bool isAuto = false}) async {
     if (!mounted) return;
     if (_isLoading || _isLoopbackCapturing) return;
+    
+    // 如果正在麦克风自动监听，先停止它
+    if (_autoMicListeningActive) {
+      await _stopAutoMicListening();
+    }
+    
+    if (!mounted) return;
+    final settings = SettingsScope.of(context).settings;
+    if (isAuto && !settings.autoVoiceChannelListening) return;
+
     setState(() => _isLoopbackCapturing = true);
     String? path;
     var keepFile = false;
     try {
-      final settings = SettingsScope.of(context).settings;
       final sttProvider = _resolveAudioProvider(AiProviderCategory.stt);
       if (sttProvider == null) {
         throw Exception('未配置 STT 服务');
       }
       if (!settings.enablePythonBackend) {
         throw Exception('未启用 Python 后端');
+      }
+      if (!settings.sttViaBackendLoopback && !isAuto) {
+        throw Exception('未开启回环采集，无法开启手动监听。请先在系统设置中开启“回环采集”。');
       }
 
       String text = '';
@@ -732,6 +759,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
       if (text.isEmpty) {
         if (!mounted) return;
+        
+        // 如果是自动监听模式，且结果为空，则静默重试
+        if (isAuto && settings.autoVoiceChannelListening) {
+          setState(() => _isLoopbackCapturing = false);
+          // 稍微等待一下再重试，避免过度消耗资源
+          await Future.delayed(const Duration(milliseconds: 500));
+          return _handleLoopbackVoiceInput(isAuto: true);
+        }
+
         keepFile = true;
         logger.error(
           '系统回环转写结果为空（已保留音频文件）：provider=${sttProvider.name} device=${settings.sttLoopbackDeviceIndex ?? 'default'} file=$path',
@@ -746,18 +782,77 @@ class _FireflyScreenState extends State<FireflyScreen> {
         '系统回环转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
       );
       _controller.text = text;
-      _sendMessage(uiRole: 'stt_heard');
+      _sendMessage(uiRole: 'stt_heard', needsRefinement: true);
+      
+      // 成功识别并发送后，如果是自动模式，继续下一次监听循环
+      if (isAuto && settings.autoVoiceChannelListening) {
+        setState(() => _isLoopbackCapturing = false);
+        // 稍微等待 1 秒再开始下一次，给 UI 和处理留出时间
+        await Future.delayed(const Duration(seconds: 1));
+        return _handleLoopbackVoiceInput(isAuto: true);
+      }
     } catch (e) {
       if (!mounted) return;
       logger.error('系统回环监听失败', e);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('系统回环监听失败: $e')));
+      if (!isAuto) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('系统回环监听失败: $e')));
+      } else if (settings.autoVoiceChannelListening) {
+        // 自动模式下出错也尝试重试，避免因为单次错误中断监听
+        await Future.delayed(const Duration(seconds: 2));
+        return _handleLoopbackVoiceInput(isAuto: true);
+      }
     } finally {
       if (mounted) setState(() => _isLoopbackCapturing = false);
     }
   }
 
-  void _sendMessage({String uiRole = 'user'}) async {
+  // 开始自动麦克风监听
+  Future<void> _startAutoMicListening() async {
+    if (!mounted || _autoMicListeningActive || _isLoading) return;
+
+    try {
+      if (await _autoMicRecorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path =
+            '${tempDir.path}/auto_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
+        
+        await _autoMicRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.wav),
+          path: path,
+        );
+        
+        setState(() => _autoMicListeningActive = true);
+        logger.info('自动麦克风监听已开启: $path');
+      }
+    } catch (e) {
+      logger.error('开启自动麦克风监听失败', e);
+    }
+  }
+
+  // 停止自动麦克风监听并处理输入
+  Future<void> _stopAutoMicListening() async {
+    if (!_autoMicListeningActive) return;
+
+    try {
+      final path = await _autoMicRecorder.stop();
+      setState(() => _autoMicListeningActive = false);
+      
+      if (path != null) {
+        logger.info('自动麦克风监听已停止，准备处理音频: $path');
+        await _handleVoiceInput(path);
+      }
+    } catch (e) {
+      logger.error('停止自动麦克风监听失败', e);
+      setState(() => _autoMicListeningActive = false);
+    }
+  }
+
+  Future<void> _sendMessage({String uiRole = 'user', bool needsRefinement = false}) async {
+    // 如果正在自动监听，先停止它
+    if (_autoMicListeningActive) {
+      await _stopAutoMicListening();
+    }
     final text = _controller.text.trim();
     if (text.isEmpty && _pendingImageBytes == null) return;
     if (_currentSessionId == null) await _createNewSession();
@@ -901,6 +996,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 enableExpressionAgent: settings.enableExpressionAgent,
                 systemPromptOverride: settings.systemPrompt,
                 sessionId: _currentSessionId,
+                needsRefinement: needsRefinement,
               );
             }
           } catch (_) {
@@ -915,6 +1011,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               enableExpressionAgent: settings.enableExpressionAgent,
               systemPromptOverride: settings.systemPrompt,
               sessionId: _currentSessionId,
+              needsRefinement: needsRefinement,
             );
           }
         } else {
@@ -937,6 +1034,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             systemPromptOverride: settings.systemPrompt,
             providerOverride: provider,
             sessionId: _currentSessionId,
+            needsRefinement: needsRefinement,
           );
 
           if (provider != null && mounted) {
@@ -1004,6 +1102,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
               _brain.speak(displayContent, ttsProvider);
             }
           }
+
+          // 自动监听逻辑
+          if (settings.autoMicListening) {
+            _startAutoMicListening();
+          } else if (settings.autoVoiceChannelListening) {
+            _handleLoopbackVoiceInput(isAuto: true);
+          }
         } else {
           final parts = _splitPersonaText(cleanedResponse);
 
@@ -1050,6 +1155,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
             if (ttsProvider != null) {
               _brain.speakChunks(parts, ttsProvider);
             }
+          }
+
+          // 自动监听逻辑
+          if (settings.autoMicListening) {
+            _startAutoMicListening();
+          } else if (settings.autoVoiceChannelListening) {
+            _handleLoopbackVoiceInput(isAuto: true);
           }
         }
       }
@@ -2080,6 +2192,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     case 'tts_toggle':
                       settingsController.setEnableTts(!settings.enableTts);
                       break;
+                    case 'auto_mic_toggle':
+                      settingsController.setAutoMicListening(!settings.autoMicListening);
+                      break;
+                    case 'auto_loopback_toggle':
+                      settingsController.setAutoVoiceChannelListening(!settings.autoVoiceChannelListening);
+                      break;
                     case 'loopback':
                       await _handleLoopbackVoiceInput();
                       break;
@@ -2094,6 +2212,49 @@ class _FireflyScreenState extends State<FireflyScreen> {
                   final hasMemory = quickActions.contains('memory');
                   final hasExpressionToggle =
                       quickActions.contains('expression_toggle');
+
+                  // 自动监听快捷开关
+                  if (settings.enableStt) {
+                    items.add(
+                      PopupMenuItem(
+                        value: 'auto_mic_toggle',
+                        child: Row(
+                          children: [
+                            Icon(
+                              settings.autoMicListening
+                                  ? Icons.mic
+                                  : Icons.mic_none,
+                              size: 18,
+                              color: settings.autoMicListening ? Colors.green : null,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(settings.autoMicListening ? '关闭麦克风自动监听' : '开启麦克风自动监听'),
+                          ],
+                        ),
+                      ),
+                    );
+                    if (settings.enablePythonBackend) {
+                      items.add(
+                        PopupMenuItem(
+                          value: 'auto_loopback_toggle',
+                          child: Row(
+                            children: [
+                              Icon(
+                                settings.autoVoiceChannelListening
+                                    ? Icons.hearing
+                                    : Icons.hearing_outlined,
+                                size: 18,
+                                color: settings.autoVoiceChannelListening ? Colors.green : null,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(settings.autoVoiceChannelListening ? '关闭语音频道自动监听' : '开启语音频道自动监听'),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    items.add(const PopupMenuDivider());
+                  }
 
                   if (hasAttachImage) {
                     items.add(

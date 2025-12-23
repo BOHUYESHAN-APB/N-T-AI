@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/diagnostics_service.dart';
 import 'base_plugin.dart';
 import 'bilibili_live/bilibili_live_plugin.dart';
+import 'minecraft/minecraft_plugin.dart';
 
 class PluginManager extends ChangeNotifier {
   final Map<String, BasePlugin> _plugins = {};
@@ -21,6 +22,7 @@ class PluginManager extends ChangeNotifier {
 
   Future<void> _registerDefaultPlugins() async {
     await registerPlugin(BilibiliLivePlugin());
+    await registerPlugin(MinecraftPlugin());
   }
 
   Future<void> registerPlugin(BasePlugin plugin) async {

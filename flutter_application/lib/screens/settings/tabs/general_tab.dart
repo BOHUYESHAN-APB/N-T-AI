@@ -205,6 +205,31 @@ class _GeneralTabState extends State<GeneralTab> {
     return items;
   }
 
+  List<DropdownMenuItem<String?>> _buildProviderItems(
+    AiProviderCategory category,
+    String defaultLabel,
+  ) {
+    final providers = SettingsScope.of(context).providers;
+    final items = <DropdownMenuItem<String?>>[
+      DropdownMenuItem<String?>(
+        value: null,
+        child: Text(defaultLabel),
+      ),
+    ];
+
+    for (final p in providers) {
+      if (p.category == category && p.enabled) {
+        items.add(
+          DropdownMenuItem<String?>(
+            value: p.id,
+            child: Text(p.name),
+          ),
+        );
+      }
+    }
+    return items;
+  }
+
   String _formatInputDeviceLabel(Map<String, dynamic> d) {
     final idx = (d['_index'] as int?) ?? -1;
     final nameRaw = (d['name'] ?? '').toString().trim();
@@ -791,6 +816,24 @@ class _GeneralTabState extends State<GeneralTab> {
           );
         },
       ),
+      ListTile(
+        leading: const Icon(Icons.person_outline),
+        title: const Text('重新运行向导 (Onboarding Wizard)'),
+        subtitle: const Text('重置助手人格与系统提示词'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          showDialog(
+            context: context,
+            builder: (context) => FirstRunDialog(
+              settingsController: controller,
+              brain: BrainService(),
+            ),
+          );
+        },
+      ),
+    ];
+
+    final uiSectionChildren = <Widget>[
       SwitchListTile(
         secondary: const Icon(Icons.animation),
         title: Text(l10n.generalEnableLive2D),
@@ -833,6 +876,46 @@ class _GeneralTabState extends State<GeneralTab> {
         value: s.enableTts,
         onChanged: (v) => controller.setEnableTts(v),
       ),
+      if (s.enableTts)
+        ListTile(
+          leading: const Icon(Icons.speed),
+          title: const Text('TTS 响应模式'),
+          subtitle: const Text('“极速流式”通过流式并发提升响应速度，但受限于服务商并发额度'),
+          trailing: DropdownButton<String>(
+            value: s.ttsMode,
+            underline: const SizedBox(),
+            onChanged: (v) {
+              if (v != null) controller.setTtsMode(v);
+            },
+            items: const [
+              DropdownMenuItem(value: 'stream', child: Text('极速流式')),
+              DropdownMenuItem(value: 'sentence', child: Text('标准稳定')),
+            ],
+          ),
+        ),
+      if (s.enableTts)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '提示：使用硅基流动 (SiliconFlow) 时，免费额度通常限制并发数为 1-2。若响应失败，请尝试切换至“标准稳定”模式。',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       SwitchListTile(
         secondary: const Icon(Icons.volume_up),
         title: const Text('TTS 注入到虚拟麦克风（后端播放）'),
@@ -910,6 +993,15 @@ class _GeneralTabState extends State<GeneralTab> {
         value: s.enableStt,
         onChanged: (v) => controller.setEnableStt(v),
       ),
+      if (s.enableStt)
+        SwitchListTile(
+          secondary: const Icon(Icons.mic_none),
+          title: const Text('自动麦克风监听'),
+          subtitle: const Text('在对话结束后自动开启麦克风录音 (运行在前端设备)'),
+          value: s.autoMicListening,
+          onChanged: (v) => controller.setAutoMicListening(v),
+        ),
+      const Divider(height: 1, indent: 72),
       SwitchListTile(
         secondary: const Icon(Icons.headphones),
         title: const Text('从系统声音识别（回环采集）'),
@@ -924,9 +1016,18 @@ class _GeneralTabState extends State<GeneralTab> {
               }
             : null,
       ),
-      if (s.sttViaBackendLoopback)
+      if (s.sttViaBackendLoopback) ...[
+        SwitchListTile(
+          secondary: const Icon(Icons.record_voice_over_outlined),
+          title: const Text('自动语音频道监听'),
+          subtitle: const Text('自动识别语音软件声音 (需回环采集已开启)'),
+          value: s.autoVoiceChannelListening,
+          onChanged: s.enablePythonBackend
+              ? (v) => controller.setAutoVoiceChannelListening(v)
+              : null,
+        ),
         ListTile(
-          leading: const Icon(Icons.headphones),
+          leading: const Icon(Icons.headphones_outlined),
           title: const Text('回环监听设备（输出设备）'),
           subtitle: _loadingAudioDevices
               ? const Text('正在获取设备列表…')
@@ -952,7 +1053,6 @@ class _GeneralTabState extends State<GeneralTab> {
             ],
           ),
         ),
-      if (s.sttViaBackendLoopback)
         ListTile(
           leading: const Icon(Icons.equalizer),
           title: const Text('测试回环监听（检测电平）'),
@@ -962,7 +1062,6 @@ class _GeneralTabState extends State<GeneralTab> {
               ? _testLoopbackLevel
               : null,
         ),
-      if (s.sttViaBackendLoopback)
         ListTile(
           leading: const Icon(Icons.text_snippet),
           title: const Text('测试回环监听（转写）'),
@@ -972,7 +1071,6 @@ class _GeneralTabState extends State<GeneralTab> {
               ? _testLoopbackTranscribe
               : null,
         ),
-      if (s.sttViaBackendLoopback)
         ListTile(
           leading: const Icon(Icons.timer),
           title: const Text('回环采集时长'),
@@ -993,6 +1091,7 @@ class _GeneralTabState extends State<GeneralTab> {
             ],
           ),
         ),
+      ],
     ];
 
     final appearanceSectionChildren = <Widget>[
@@ -1379,21 +1478,48 @@ class _GeneralTabState extends State<GeneralTab> {
       ),
     ];
 
-    final personaChildren = <Widget>[
+    final agentSectionChildren = <Widget>[
+      SwitchListTile(
+        secondary: const Icon(Icons.auto_fix_high),
+        title: const Text('启用语音修正 (Speech Refinement)'),
+        subtitle: const Text('在发送给主脑前，先由轻量模型修正 STT 的错别字和冗余词'),
+        value: s.enableSpeechRefinement,
+        onChanged: (v) => controller.setEnableSpeechRefinement(v),
+      ),
+      if (s.enableSpeechRefinement)
+        ListTile(
+          leading: const Icon(Icons.psychology_outlined),
+          title: const Text('语音修正专用模型'),
+          subtitle: const Text('建议选择 8B 左右的轻量模型以获得极速响应'),
+          trailing: DropdownButton<String?>(
+            value: s.activeSpeechRefinerProviderId,
+            underline: const SizedBox(),
+            onChanged: (v) => controller.setActiveSpeechRefinerProvider(v),
+            items: _buildProviderItems(AiProviderCategory.llm, '跟随主模型'),
+          ),
+        ),
+      const Divider(height: 1, indent: 72),
       ListTile(
-        leading: const Icon(Icons.person_outline),
-        title: const Text('Restart Onboarding Wizard / 重新运行向导'),
-        subtitle: const Text('Reset assistant persona and system prompt'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () {
-          showDialog(
-            context: context,
-            builder: (context) => FirstRunDialog(
-              settingsController: controller,
-              brain: BrainService(),
-            ),
-          );
-        },
+        leading: const Icon(Icons.construction),
+        title: const Text('工具调用专用模型 (Tool Calling)'),
+        subtitle: const Text('用于处理复杂的函数调用任务，若主模型支持不佳可单独指定'),
+        trailing: DropdownButton<String?>(
+          value: s.activeToolCallingProviderId,
+          underline: const SizedBox(),
+          onChanged: (v) => controller.setActiveToolCallingProvider(v),
+          items: _buildProviderItems(AiProviderCategory.llm, '跟随主模型'),
+        ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.manage_search),
+        title: const Text('深度研究专用模型 (Deep Research)'),
+        subtitle: const Text('用于长时异步搜索与推理任务'),
+        trailing: DropdownButton<String?>(
+          value: s.activeDeepResearchProviderId,
+          underline: const SizedBox(),
+          onChanged: (v) => controller.setActiveDeepResearchProvider(v),
+          items: _buildProviderItems(AiProviderCategory.llm, '跟随主模型'),
+        ),
       ),
     ];
 
@@ -1401,45 +1527,39 @@ class _GeneralTabState extends State<GeneralTab> {
       padding: const EdgeInsets.all(24),
       children: [
         _ExpandableSection(
-          title: l10n.generalBasicSettings,
+          title: '基础与后端配置',
           icon: Icons.settings_outlined,
           children: basicSectionChildren,
         ),
         const SizedBox(height: 12),
         _ExpandableSection(
-          title: '语音合成（TTS）',
+          title: '语音交互配置',
           icon: Icons.record_voice_over,
-          children: ttsSectionChildren,
+          children: [
+            ...ttsSectionChildren,
+            const Divider(height: 32, indent: 16, endIndent: 16),
+            ...sttSectionChildren,
+          ],
         ),
         const SizedBox(height: 12),
         _ExpandableSection(
-          title: '语音识别（STT）',
-          icon: Icons.hearing,
-          children: sttSectionChildren,
+          title: '专家模型 Agent 配置',
+          icon: Icons.support_agent,
+          children: agentSectionChildren,
         ),
         const SizedBox(height: 12),
         _ExpandableSection(
-          title: l10n.generalAppearance,
+          title: '外观与界面配置',
           icon: Icons.palette_outlined,
-          children: appearanceSectionChildren,
-        ),
-        const SizedBox(height: 12),
-        _ExpandableSection(
-          title: l10n.generalFontSettings,
-          icon: Icons.font_download_outlined,
-          children: fontSectionChildren,
-        ),
-        const SizedBox(height: 12),
-        _ExpandableSection(
-          title: l10n.generalQuickActions,
-          icon: Icons.flash_on_outlined,
-          children: quickActionsChildren,
-        ),
-        const SizedBox(height: 12),
-        _ExpandableSection(
-          title: 'Persona & Onboarding',
-          icon: Icons.person_outline,
-          children: personaChildren,
+          children: [
+            ...uiSectionChildren,
+            const Divider(height: 32, indent: 16, endIndent: 16),
+            ...appearanceSectionChildren,
+            const Divider(height: 32, indent: 16, endIndent: 16),
+            ...fontSectionChildren,
+            const Divider(height: 32, indent: 16, endIndent: 16),
+            ...quickActionsChildren,
+          ],
         ),
       ],
     );

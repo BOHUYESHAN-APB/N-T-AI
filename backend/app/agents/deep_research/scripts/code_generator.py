@@ -46,7 +46,7 @@ RULES:
 4. Handle data cleaning if text is messy.
 5. Use Chinese for chart titles and labels if the input is Chinese.
 6. Ensure matplotlib supports Chinese:
-   `plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']`
+   `plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']`
 """
         
         user_prompt = f"""

@@ -670,8 +670,8 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
 
       // Helper to get provider details
       Map<String, dynamic>? getProviderConfig(String? id) {
-        // If id is null (Follow Main Brain), use the active provider
-        final targetId = id ?? settings.activeProviderId;
+        // Fallback chain: Per-role ID -> Global Deep Research Agent ID -> Main Brain ID
+        final targetId = id ?? settings.activeDeepResearchProviderId ?? settings.activeProviderId;
         if (targetId == null) return null;
 
         try {

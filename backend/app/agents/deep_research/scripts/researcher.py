@@ -9,12 +9,13 @@ from app.services.sandbox_service import sandbox_service
 from app.services.rag_service import TempRAGSession
 
 class Researcher:
-    def __init__(self, config: Dict[str, Any], session_id: Optional[str] = None, rag_session: Optional[TempRAGSession] = None):
+    def __init__(self, config: Dict[str, Any], session_id: Optional[str] = None, rag_session: Optional[TempRAGSession] = None, output_dir: Optional[str] = None):
         self.config = config
         self.search_service = SearchService()
         self.code_generator = CodeGenerator(config)
         self.sandbox_session_id = session_id
         self.rag_session = rag_session
+        self.output_dir = output_dir
         
         # Standard matplotlib setup for Chinese support
         self.visualizer_code = """
@@ -134,9 +135,21 @@ plt.rcParams['axes.unicode_minus'] = False
                     # Check for generated images
                     workspace_dir = result.get("workspace")
                     if workspace_dir:
-                        chart_path = os.path.join(workspace_dir, "chart_output.png")
+                        chart_filename = "chart_output.png"
+                        chart_path = os.path.join(workspace_dir, chart_filename)
                         if os.path.exists(chart_path):
-                            output_msg += f"[Generated Chart: {chart_path}]\n"
+                            if self.output_dir:
+                                import shutil
+                                import uuid
+                                # Use unique name to avoid overwriting if multiple charts are generated in different steps
+                                unique_name = f"chart_{uuid.uuid4().hex[:8]}.png"
+                                target_path = os.path.join(self.output_dir, unique_name)
+                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                shutil.copy(chart_path, target_path)
+                                # Add as an <img> tag for the Writer to pick up
+                                output_msg += f"\n[Visual Content: <img src='{target_path}' alt='Analysis Chart'>]\n"
+                            else:
+                                output_msg += f"\n[Generated Chart: {chart_path}]\n"
                     
                     return output_msg
                 else:
@@ -153,8 +166,9 @@ plt.rcParams['axes.unicode_minus'] = False
         # 0. Check for Restricted Sources (CNKI, etc.)
         restricted_keywords = ["CNKI", "知网", "Wanfang", "万方", "VIP", "维普"]
         if any(k in step_description for k in restricted_keywords) or any(k in user_input for k in restricted_keywords):
-             msg = f"Action Required: The requested sources ({', '.join(restricted_keywords)}) usually require manual access or institutional login. Please manually search for '{step_description}' and upload the relevant documents."
-             return msg, {"agent": "Researcher", "error": "Restricted source", "msg": msg}
+             msg = f"注意：请求的来源 ({', '.join(restricted_keywords)}) 通常需要手动访问或机构登录。请手动搜索 '{step_description}' 并上传相关文档，或者继续基于公开信息进行研究。"
+             # We return the message but don't crash, allowing it to be logged.
+             # return msg, {"agent": "Researcher", "error": "Restricted source", "msg": msg}
 
         # 0.5 Check RAG session for existing information
         rag_results_text = ""
@@ -217,7 +231,7 @@ Generate 3 specific follow-up search queries.
 Output format: JSON list of strings ["query1", "query2", "query3"]
 
 Current Results Summary:
-{step_results[:2000]}...
+{step_results[:4000]}...
 """
                     resp = await client.chat.completions.create(
                         model=model,
@@ -257,8 +271,9 @@ Current Results Summary:
         search_results_text = "\n".join(all_results)
 
         # 2. Data Analysis (Optional)
-        # Check if we need to visualize data
-        if "analyze" in step_description.lower() or "visualize" in step_description.lower() or "plot" in step_description.lower():
+        # Check if we need to visualize data (supports English and Chinese keywords)
+        analysis_keywords = ["analyze", "visualize", "plot", "chart", "分析", "可视化", "绘图", "图表", "统计"]
+        if any(k in step_description.lower() for k in analysis_keywords):
              analysis_result = await self.run_data_analysis(search_results_text, step_description)
              search_results_text += f"\n\n{analysis_result}"
         
@@ -274,10 +289,12 @@ Current Results Summary:
         with open(os.path.join(prompts_dir, "researcher.user.txt"), "r", encoding="utf-8") as f:
             user_template = f.read()
 
+        from .utils import truncate_text
+        
         sys_prompt = sys_template.replace("{{current_date}}", current_date)
         user_prompt = user_template.replace("{{step_description}}", step_description)\
                                    .replace("{{user_input}}", user_input)\
-                                   .replace("{{search_results}}", rag_results_text + "\n" + search_results_text)
+                                   .replace("{{search_results}}", truncate_text(rag_results_text + "\n" + search_results_text, 15000))
 
         messages = [
             {"role": "system", "content": sys_prompt},

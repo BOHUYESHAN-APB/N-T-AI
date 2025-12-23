@@ -59,9 +59,11 @@ class Writer:
         with open(os.path.join(prompts_dir, "writer.user.txt"), "r", encoding="utf-8") as f:
             user_template = f.read()
 
+        from .utils import truncate_text
+        
         sys_prompt = sys_template.replace("{{current_date}}", current_date)
         user_prompt = user_template.replace("{{user_input}}", user_input)\
-                                   .replace("{{research_log}}", research_log + "\n" + rag_context)\
+                                   .replace("{{research_log}}", truncate_text(research_log + "\n" + rag_context, 25000))\
                                    .replace("{{requested_formats}}", ", ".join(requested_formats))
 
         messages = [
@@ -114,7 +116,8 @@ class Writer:
                 results.append({
                     "filename": os.path.basename(full_path),
                     "path": full_path,
-                    "type": fmt
+                    "type": fmt,
+                    "content": content
                 })
             except Exception as e:
                 # Log error or add to results with error status

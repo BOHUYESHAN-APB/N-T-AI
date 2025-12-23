@@ -23,6 +23,10 @@ async def startup_plugins() -> None:
     # Register Linux Env
     register_plugin(LinuxEnvPlugin())
 
+    # Register Minecraft
+    from .minecraft import MinecraftPlugin
+    register_plugin(MinecraftPlugin())
+
     # 2. Start them
     for plugin in _plugins.values():
         await plugin.on_startup()

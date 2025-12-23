@@ -2,27 +2,53 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../../services/logger_service.dart';
 
 class WebSocketService {
   WebSocket? _webSocket;
   final StreamController<Map<String, dynamic>> _messageController = StreamController.broadcast();
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   
+  final StreamController<bool> _statusController = StreamController.broadcast();
+  Stream<bool> get statusStream => _statusController.stream;
+  
   bool _isConnected = false;
+  bool get isConnected => _isConnected;
   Timer? _reconnectTimer;
   String? _lastUrl;
   bool _disposed = false;
 
   Future<void> disconnect() async {
     if (_disposed) return;
+    final url = _lastUrl;
     _lastUrl = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
-    try {
-      await _webSocket?.close();
-    } catch (_) {}
-    _webSocket = null;
+    
+    if (_webSocket != null) {
+      try {
+        // 显式检查状态，避免在已关闭或关闭中时再次调用
+        final socket = _webSocket!;
+        _webSocket = null; // 先置空，防止重入
+        
+        // 尝试正常关闭
+        await socket.close().timeout(
+          const Duration(seconds: 1),
+          onTimeout: () => throw TimeoutException('WebSocket close timeout'),
+        );
+        logger.info('WebSocket 连接已主动关闭: $url');
+      } catch (e) {
+        logger.warning('WebSocket 关闭时发生异常 (url: $url): $e');
+      }
+    }
+    
     _isConnected = false;
+    _notifyStatus();
+  }
+
+  void _notifyStatus() {
+    if (_disposed) return;
+    _statusController.add(_isConnected);
   }
 
   void connect(String url) async {
@@ -57,6 +83,7 @@ class WebSocketService {
         return;
       }
       _isConnected = true;
+      _notifyStatus();
       debugPrint('[WebSocket] Connected');
       
       _webSocket!.listen(
@@ -73,16 +100,20 @@ class WebSocketService {
         onDone: () {
           debugPrint('[WebSocket] Disconnected');
           _isConnected = false;
+          _notifyStatus();
           _scheduleReconnect();
         },
         onError: (e) {
           debugPrint('[WebSocket] Error: $e');
           _isConnected = false;
+          _notifyStatus();
           _scheduleReconnect();
         },
       );
     } catch (e) {
       debugPrint('[WebSocket] Connection failed: $e');
+      _isConnected = false;
+      _notifyStatus();
       _scheduleReconnect();
     }
   }
@@ -102,5 +133,6 @@ class WebSocketService {
     _reconnectTimer?.cancel();
     _webSocket?.close();
     _messageController.close();
+    _statusController.close();
   }
 }

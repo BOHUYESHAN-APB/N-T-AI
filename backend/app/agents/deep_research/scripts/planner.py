@@ -112,8 +112,16 @@ class Planner:
                 cleaned = re.sub(r'^((步骤|Step|Step\s+)?\s*\d+[:.]\s*)+', '', step).strip()
                 
                 # Safeguard: If the LLM outputs a refusal message as a step, 
-                # convert it to a clarification request or a default research step.
-                if any(refusal in cleaned for refusal in ["不支持", "无法提供", "抱歉", "限制"]):
+                # convert it to a clarification request.
+                refusal_patterns = [
+                    r"不支持.*(生成|提供|处理)", 
+                    r"无法(提供|完成|生成).*(报告|综述|分析)",
+                    r"抱歉.*(无法|不能).*(满足|提供)",
+                    r"限制.*(生成|提供)"
+                ]
+                is_refusal = any(re.search(pattern, cleaned) for pattern in refusal_patterns)
+                
+                if is_refusal:
                     if "clarification" not in plan_data:
                         plan_data["clarification"] = {
                             "title": "需要更多信息",

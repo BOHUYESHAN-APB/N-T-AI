@@ -460,11 +460,16 @@ class BrainService {
   Future<void> _playTtsBytes(Uint8List bytes, {Uint8List? lipsyncBytes}) async {
     final signal = lipsyncBytes ?? bytes;
 
+    // 确保在主线程（UI线程）执行，因为 Audioplayers 插件通常需要在主线程调用平台通道
+    // 如果是从 isolate 或 compute 中调用的，这里需要确保回到主线程
+    
     final tempDir = await getTemporaryDirectory();
     final ext = _looksLikeWav(bytes) ? 'wav' : 'mp3';
     final tempFile = File('${tempDir.path}/tts_${DateTime.now().millisecondsSinceEpoch}.$ext');
-    await tempFile.writeAsBytes(bytes);
+    
     try {
+      await tempFile.writeAsBytes(bytes);
+      
       _audioPlayer ??= AudioPlayer();
       await _audioPlayer!.setReleaseMode(ReleaseMode.stop);
 
@@ -472,9 +477,12 @@ class BrainService {
         await _audioPlayer!.stop();
       } catch (_) {}
 
+      // 所有的 AudioPlayer 操作都包裹在 try-catch 中
       try {
         await _audioPlayer!.play(DeviceFileSource(tempFile.path));
         _emitTtsSignal(signal);
+        
+        // 等待播放完成或超时
         var wait = _estimateWavDuration(bytes);
         if (wait == null) {
           for (var i = 0; i < 20; i++) {
@@ -485,12 +493,14 @@ class BrainService {
         }
         await Future.delayed((wait ?? const Duration(seconds: 30)) + const Duration(milliseconds: 150));
       } catch (e) {
+        // 回退到 BytesSource
         try {
           await _audioPlayer!.stop();
         } catch (_) {}
         try {
           await _audioPlayer!.play(BytesSource(bytes));
           _emitTtsSignal(signal);
+          
           var wait = _estimateWavDuration(bytes);
           if (wait == null) {
             for (var i = 0; i < 20; i++) {
@@ -1005,6 +1015,39 @@ exit 0
         .trim();
   }
 
+  Future<String> refineUserMessage(String rawMessage, {String? providerId}) async {
+    if (rawMessage.trim().isEmpty) return rawMessage;
+
+    try {
+      final config = providerId != null 
+          ? (await _llmService.getProviders()).firstWhere((p) => p.id == providerId)
+          : await _llmService.getActiveProviderConfig();
+
+      if (config == null) return rawMessage;
+
+      final prompt = """
+你是一个语音识别修正助手。请修正以下用户语音输入的错别字、标点符号，并使其更符合书面或自然的表达。
+注意：
+1. 只输出修正后的文本。
+2. 如果文本已经很清晰，则原样返回。
+3. 保持原意，不要增加多余的内容。
+4. 用户的原始输入可能包含一些语气词（如“呃”、“那个”），请酌情移除。
+
+原始输入："$rawMessage"
+修正后的文本：""";
+
+      final response = await _llmService.chat([
+        {'role': 'user', 'content': prompt}
+      ], usageType: 'agent', providerOverride: config, temperature: 0.3);
+
+      final refined = response.content.trim().replaceAll('"', '');
+      return refined.isNotEmpty ? refined : rawMessage;
+    } catch (e) {
+      debugPrint("[BRAIN] Refine error: $e");
+      return rawMessage;
+    }
+  }
+
   Future<void> _runInitiativeCheck() async {
     _isProcessing = true;
     try {
@@ -1089,23 +1132,35 @@ Based on these comments, do you want to proactively say something to the audienc
     Map<String, dynamic>? sidecarCommands, // concurrent side agents payload
     AiProviderConfig? providerOverride,
     String? sessionId,
+    bool needsRefinement = false,
   }) async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // 语音修正逻辑
+    String processedUserMessage = userMessage;
+    final enableSpeechRefinement = prefs.getBool('settings.agent.speechRefinement.enabled') ?? false;
+    if (needsRefinement && enableSpeechRefinement) {
+      final refinerProviderId = prefs.getString('settings.agent.speechRefinerProviderId');
+      processedUserMessage = await refineUserMessage(userMessage, providerId: refinerProviderId);
+      debugPrint("[BRAIN] Speech Refined: \"$userMessage\" -> \"$processedUserMessage\"");
+    }
+
     _statusController.add("Thinking...");
     
     String finalResponse = "";
     late final AiResponse serverResponse;
     
     // Determine dynamic temperature
-    final dynamicTemperature = _determineTemperature(userMessage);
+    final dynamicTemperature = _determineTemperature(processedUserMessage);
     debugPrint("[BRAIN] Dynamic Temperature: $dynamicTemperature");
     
     // 0. Check Orchestration Mode
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
-    final prefs = await SharedPreferences.getInstance();
-    final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
+    final prefs2 = await SharedPreferences.getInstance();
+    final allowEmojis = prefs2.getBool('settings.ai.allowEmojis') ?? false;
     final suppressInnerMonologue =
-        prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
-    final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
+        prefs2.getBool('settings.chat.suppressInnerMonologue') ?? false;
+    final backendEnabled = prefs2.getBool('settings.backend.enabled') ?? false;
     final isServerMode = backendEnabled;
 
     debugPrint("[BRAIN] Process Message Start");
@@ -1121,7 +1176,7 @@ Based on these comments, do you want to proactively say something to the audienc
           debugPrint("[BRAIN] Triggering early motion request for user input...");
           // Send user message with empty AI response initially, plus context history
           _expressionAgent.requestMotion(
-            userMessage, 
+            processedUserMessage, 
             "", 
             history: List.from(_context), // Pass copy of current history (excluding current msg)
           );
@@ -1132,8 +1187,8 @@ Based on these comments, do you want to proactively say something to the audienc
     }
 
     // 1. Add User Message to Context
-    if (_context.isEmpty || _context.last['content'] != userMessage) {
-       _context.add({'role': 'user', 'content': userMessage});
+    if (_context.isEmpty || _context.last['content'] != processedUserMessage) {
+       _context.add({'role': 'user', 'content': processedUserMessage});
     }
     
     if (_context.length > 200) {
@@ -1144,7 +1199,7 @@ Based on these comments, do you want to proactively say something to the audienc
     _statusController.add(isServerMode ? "Connecting to Neural Backend..." : "Connecting to AI Provider...");
     debugPrint("[BRAIN] Entering ${isServerMode ? 'Server' : 'Client'} Mode");
     debugPrint("[BRAIN] enableBrowser: $enableBrowser");
-    debugPrint("[BRAIN] User message: ${userMessage.length > 50 ? '${userMessage.substring(0, 50)}...' : userMessage}");
+    debugPrint("[BRAIN] User message: ${processedUserMessage.length > 50 ? '${processedUserMessage.substring(0, 50)}...' : processedUserMessage}");
     try {
       List<Map<String, String>> messages = List.from(_context);
       if (!allowEmojis) {

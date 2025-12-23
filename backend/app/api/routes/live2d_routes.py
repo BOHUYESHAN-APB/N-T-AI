@@ -71,6 +71,7 @@ class ScheduleChatRequest(BaseModel):
     enable_backend_tts: bool = True
     enable_thinking: bool = False
     enable_search: bool = False
+    tts_mode: str = "sentence"
 
 class CancelScheduledChatRequest(BaseModel):
     task_id: str
@@ -90,6 +91,14 @@ class VoiceChannelTranscriptRequest(BaseModel):
 # Note: In a real app, use dependency injection
 llm_service = LLMService()
 motion_agent = MotionAgentService(llm_service)
+
+class ProactiveChatRequest(BaseModel):
+    enabled: bool
+
+@router.post("/agent/proactive_chat")
+async def toggle_proactive_chat(request: ProactiveChatRequest):
+    priority_manager.set_proactive_chat(request.enabled)
+    return {"status": "ok", "enabled": request.enabled}
 
 @router.post("/agent/decide")
 async def decide_motion(
@@ -233,7 +242,11 @@ async def live2d_websocket(websocket: WebSocket):
 
     try:
         while True:
-            packet = await websocket.receive()
+            try:
+                packet = await websocket.receive()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            
             if "text" in packet and packet["text"] is not None:
                 data = packet["text"]
                 try:
@@ -524,6 +537,7 @@ async def schedule_chat(request: ScheduleChatRequest):
                 enable_thinking=bool(request.enable_thinking),
                 enable_search=bool(request.enable_search),
                 enable_backend_tts=bool(request.enable_backend_tts),
+                tts_mode=request.tts_mode,
             )
         finally:
             _scheduled_chat_tasks.pop(task_id, None)
@@ -658,6 +672,7 @@ async def voice_channel_transcript(request: VoiceChannelTranscriptRequest):
             enable_thinking=False,
             enable_search=False,
             enable_backend_tts=True,
+            tts_mode="sentence",
         )
 
     return {"status": "ok", "clients": len(manager.active_connections)}
