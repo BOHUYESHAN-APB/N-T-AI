@@ -1029,6 +1029,26 @@ class ChatService:
                     ensure_ascii=False,
                 )
 
+            async def play_minecraft_tool() -> str:
+                goal = kwargs.get("goal")
+                if not goal:
+                    return "Error: Missing 'goal' argument."
+                from app.plugins import get_plugin
+                minecraft = get_plugin("minecraft")
+                if not minecraft:
+                    return "Error: Minecraft plugin not found or not registered."
+                
+                # Check if it's active
+                if not getattr(minecraft, "is_active", False):
+                    return "Error: Minecraft AI is not currently running. Please enable it in the plugin settings first."
+
+                print(f"[AGENT] Executing play_minecraft: {goal}")
+                # We send an event to the plugin
+                res = await minecraft.handle_event("minecraft_command", {"goal": goal})
+                if res and res.get("status") == "received":
+                    return f"Minecraft AI has received the task: {goal}. It is now working on it in the background."
+                return f"Failed to send task to Minecraft AI: {res}"
+
             tool_map = {
                 "web_search": web_search_tool,
                 "visit_page": visit_page_tool,
@@ -1036,6 +1056,7 @@ class ChatService:
                 "generate_ppt": generate_ppt_tool,
                 "generate_doc": generate_doc_tool,
                 "generate_sheet": generate_sheet_tool,
+                "play_minecraft": play_minecraft_tool,
             }
 
             tool = tool_map.get(tool_name)

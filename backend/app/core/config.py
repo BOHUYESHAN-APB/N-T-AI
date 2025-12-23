@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MODEL: str = "gpt-3.5-turbo"
+    LLM_EMBEDDING_MODEL: str = "text-embedding-ada-002"
 
     # TTS Configuration (SiliconFlow)
     TTS_API_KEY: str = ""

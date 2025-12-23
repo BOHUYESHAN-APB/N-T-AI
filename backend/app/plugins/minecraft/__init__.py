@@ -149,8 +149,6 @@ class MinecraftPlugin(BasePlugin):
         if not os.path.exists(node_modules):
             print(f"[{self.name}] node_modules not found, attempting npm install...")
             try:
-                # 使用发现的 node 路径对应的 npm（如果是内置的，可能需要处理）
-                # 简单起见，如果内置 node 存在，尝试使用它同目录的 npm
                 npm_cmd = "npm"
                 if node_cmd == self.node_exe:
                     npm_exe = os.path.join(self.node_dir, "npm.cmd") if os.name == 'nt' else os.path.join(self.node_dir, "bin", "npm")
@@ -163,10 +161,32 @@ class MinecraftPlugin(BasePlugin):
         
         try:
             # 准备环境变量，传递配置
+            from app.core.config import settings as app_settings
             env = os.environ.copy()
+            
+            # 复用主脑配置
+            env["OPENAI_API_KEY"] = app_settings.OPENAI_API_KEY
+            env["OPENAI_BASE_URL"] = app_settings.OPENAI_BASE_URL
+            env["NTAI_BACKEND_URL"] = f"http://localhost:{os.getenv('PORT', '23456')}/v1"
+            
+            # 如果配置了其他的 key 也可以传递
+            # env["GEMINI_API_KEY"] = ...
+            
             settings_json = {
                 "mindserver_port": self.config.get("mindserver_port", 8080),
-                "auto_open_ui": False, # 我们由前端控制打开
+                "auto_open_ui": False,
+                "host": self.config.get("mc_host", "127.0.0.1"),
+                "port": self.config.get("mc_port", 25565),
+                "auth": self.config.get("mc_auth", "offline"),
+                "username": self.config.get("mc_user", ""),
+                "password": self.config.get("mc_pass", ""),
+                "base_profile": self.config.get("mc_base_profile", "assistant"),
+                "language": self.config.get("mc_language", "zh"),
+                "minecraft_version": self.config.get("mc_version", "auto"),
+                "allow_vision": self.config.get("allow_vision", False),
+                "allow_insecure_coding": self.config.get("allow_insecure_coding", False),
+                "chat_ingame": self.config.get("chat_ingame", True),
+                "speak": self.config.get("speak", False),
             }
             env["SETTINGS_JSON"] = json.dumps(settings_json)
 
@@ -255,8 +275,26 @@ class MinecraftPlugin(BasePlugin):
 
     async def handle_event(self, event_type: str, data: Any) -> Optional[Any]:
         if event_type == "minecraft_command":
-            # Example: Send command to the bot if it supports stdin or a socket
-            # This is a placeholder for actual interaction
-            print(f"[{self.name}] Received command: {data}")
-            return {"status": "received"}
+            goal = data.get("goal")
+            if not goal:
+                return {"status": "error", "message": "Missing goal"}
+            
+            # Try to send the command to the MindCraft server
+            port = self.config.get("mindserver_port", 8080)
+            url = f"http://localhost:{port}/api/command"
+            
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.post(url, json={"goal": goal})
+                    if resp.status_code == 200:
+                        print(f"[{self.name}] Successfully sent goal to MindCraft: {goal}")
+                        return {"status": "received"}
+                    else:
+                        print(f"[{self.name}] Failed to send goal: {resp.text}")
+                        return {"status": "error", "message": resp.text}
+            except Exception as e:
+                print(f"[{self.name}] Error sending goal to MindCraft: {e}")
+                return {"status": "error", "message": str(e)}
+                
         return None

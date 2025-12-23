@@ -141,13 +141,21 @@ class LLMService {
       headers['Authorization'] = 'Bearer ${provider.apiKey}';
     }
 
+    // Determine embedding model based on provider
+    String embeddingModel = 'text-embedding-ada-002';
+    final targetBaseUrl = provider.baseUrl.toLowerCase();
+    
+    if (targetBaseUrl.contains('siliconflow')) {
+      embeddingModel = 'BAAI/bge-m3';
+    }
+
     try {
       final response = await http.post(
         Uri.parse(requestUrl),
         headers: headers,
         body: jsonEncode({
           'input': text,
-          'model': 'text-embedding-ada-002',
+          'model': embeddingModel,
         }),
       );
 

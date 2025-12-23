@@ -107,17 +107,16 @@ class LLMService:
             if api_key and base_url:
                 client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
 
-            # Use a standard embedding model or configurable one
-            # Many OpenAI-compatible APIs support text-embedding-ada-002 or similar
-            # If the user didn't specify a model, try to guess based on the provider or use a safe default.
-            # For SiliconFlow/DeepSeek, 'text-embedding-ada-002' might fail.
-            # We'll try the requested model first, then fallback if it's the default.
+            # Use configured embedding model or fallback
+            target_model = model or settings.LLM_EMBEDDING_MODEL
             
-            target_model = model or "text-embedding-ada-002"
-            
-            # Hack: If using SiliconFlow (often has 'siliconflow' in url), default to a known working model if not specified
-            if base_url and 'siliconflow' in base_url and (not model or model == 'text-embedding-ada-002'):
-                 target_model = 'BAAI/bge-m3' 
+            # Provider-specific fallbacks
+            if not model:
+                if base_url and 'siliconflow' in base_url:
+                    target_model = 'BAAI/bge-m3'
+                elif base_url and 'deepseek' in base_url:
+                    # DeepSeek doesn't have an embedding model usually, but some providers might
+                    pass
 
             try:
                 response = await client.embeddings.create(
@@ -125,15 +124,21 @@ class LLMService:
                     model=target_model 
                 )
                 return response.data[0].embedding
-            except openai.NotFoundError:
-                # If 404, it means the model doesn't exist on this provider.
-                # If we were using the default, try a common alternative or just return empty.
+            except Exception as e:
+                print(f"Embedding API error for model {target_model}: {e}")
+                # If we tried text-embedding-ada-002 and failed, try bge-m3 as last resort
                 if target_model == "text-embedding-ada-002":
-                     print(f"Embedding model {target_model} not found. Returning empty embedding.")
-                else:
-                     print(f"Embedding model {target_model} not found.")
+                    try:
+                        print("Falling back to BAAI/bge-m3...")
+                        response = await client.embeddings.create(
+                            input=text,
+                            model="BAAI/bge-m3"
+                        )
+                        return response.data[0].embedding
+                    except:
+                        pass
                 return []
                 
         except Exception as e:
-            print(f"Embedding Error: {e}")
+            print(f"Embedding Service Error: {e}")
             return []

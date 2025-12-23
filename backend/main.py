@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union
@@ -116,6 +116,17 @@ static_dir = os.path.join(os.path.dirname(__file__), "app", "static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    file_path = os.path.join(static_dir, "favicon.ico")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    # Fallback to app_icon.png if favicon.ico doesn't exist yet
+    png_path = os.path.join(static_dir, "app_icon.png")
+    if os.path.exists(png_path):
+        return FileResponse(png_path)
+    return HTTPException(status_code=404)
 
 # --- OpenAI Compatible Models ---
 

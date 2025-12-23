@@ -1,0 +1,5 @@
+{
+    "name": "NTAI-Agent",
+    "model": "main-brain/default",
+    "api": "main-brain"
+}

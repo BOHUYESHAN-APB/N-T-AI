@@ -54,7 +54,8 @@ export const WOOL_COLORS = [
 
 export function initBot(username) {
     const options = {
-        username: username,
+        username: settings.username || username,
+        password: settings.password,
         host: settings.host,
         port: settings.port,
         auth: settings.auth,

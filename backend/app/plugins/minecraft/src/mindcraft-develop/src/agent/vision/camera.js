@@ -1,9 +1,4 @@
-import { Viewer } from 'prismarine-viewer/viewer/lib/viewer.js';
-import { WorldView } from 'prismarine-viewer/viewer/lib/worldView.js';
-import { getBufferFromStream } from 'prismarine-viewer/viewer/lib/simpleUtils.js';
-
 import THREE from 'three';
-import { createCanvas } from 'node-canvas-webgl/lib/index.js';
 import fs from 'fs/promises';
 import { Vec3 } from 'vec3';
 import { EventEmitter } from 'events';
@@ -20,27 +15,53 @@ export class Camera extends EventEmitter {
         this.viewDistance = 12;
         this.width = 800;
         this.height = 512;
-        this.canvas = createCanvas(this.width, this.height);
-        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas });
-        this.viewer = new Viewer(this.renderer);
+        this.canvas = null;
+        this.renderer = null;
+        this.viewer = null;
+        this.enabled = false;
+
         this._init().then(() => {
-            this.emit('ready');
-        })
+            if (this.enabled) {
+                this.emit('ready');
+            }
+        }).catch(err => {
+            console.warn('Camera initialization failed:', err.message);
+        });
     }
   
     async _init () {
-        const botPos = this.bot.entity.position;
-        const center = new Vec3(botPos.x, botPos.y+this.bot.entity.height, botPos.z);
-        this.viewer.setVersion(this.bot.version);
-        // Load world
-        const worldView = new WorldView(this.bot.world, this.viewDistance, center);
-        this.viewer.listen(worldView);
-        worldView.listenToBot(this.bot);
-        await worldView.init(center);
-        this.worldView = worldView;
+        try {
+            const { createCanvas } = await import('node-canvas-webgl/lib/index.js');
+            const { Viewer } = await import('prismarine-viewer/viewer/lib/viewer.js');
+            
+            this.canvas = createCanvas(this.width, this.height);
+            this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas });
+            this.viewer = new Viewer(this.renderer);
+            this.enabled = true;
+
+            const botPos = this.bot.entity.position;
+            const center = new Vec3(botPos.x, botPos.y+this.bot.entity.height, botPos.z);
+            this.viewer.setVersion(this.bot.version);
+            // Load world
+            const { WorldView } = await import('prismarine-viewer/viewer/lib/worldView.js');
+            const worldView = new WorldView(this.bot.world, this.viewDistance, center);
+            this.viewer.listen(worldView);
+            worldView.listenToBot(this.bot);
+            await worldView.init(center);
+            this.worldView = worldView;
+        } catch (err) {
+            this.enabled = false;
+            console.warn('Could not initialize Camera (vision will be disabled):', err.message);
+            if (err.message.includes('canvas')) {
+                console.warn('Tip: This usually means the "canvas" native module is missing or failed to compile on your system.');
+            }
+        }
     }
   
     async capture() {
+        if (!this.enabled) {
+            return "Camera is disabled because of missing dependencies (canvas).";
+        }
         const center = new Vec3(this.bot.entity.position.x, this.bot.entity.position.y+this.bot.entity.height, this.bot.entity.position.z);
         this.viewer.camera.position.set(center.x, center.y, center.z);
         await this.worldView.updatePosition(center);
@@ -57,6 +78,7 @@ export class Camera extends EventEmitter {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `screenshot_${timestamp}`;
 
+        const { getBufferFromStream } = await import('prismarine-viewer/viewer/lib/simpleUtils.js');
         const buf = await getBufferFromStream(imageStream);
         await this._ensureScreenshotDirectory();
         await fs.writeFile(`${this.fp}/${filename}.jpg`, buf);

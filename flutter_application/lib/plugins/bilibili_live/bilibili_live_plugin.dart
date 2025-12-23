@@ -462,6 +462,59 @@ class BilibiliLivePlugin extends BasePlugin {
   }
 
   @override
+  Widget? buildQuickSettings(BuildContext context) {
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          children: [
+            SwitchListTile(
+              title: const Text('启用弹幕窗口'),
+              value: enableDanmakuWindow,
+              onChanged: (v) {
+                setState(() => enableDanmakuWindow = v);
+                _saveLocalConfig();
+              },
+            ),
+            SwitchListTile(
+              title: const Text('启用 SC 窗口'),
+              value: enableScWindow,
+              onChanged: (v) {
+                setState(() => enableScWindow = v);
+                _saveLocalConfig();
+              },
+            ),
+            SwitchListTile(
+              title: const Text('允许 AI 使用表情'),
+              value: allowAiEmojis,
+              onChanged: (v) {
+                setState(() => allowAiEmojis = v);
+                _saveLocalConfig();
+              },
+            ),
+            ListTile(
+              title: const Text('弹幕批量间隔 (秒)'),
+              trailing: SizedBox(
+                width: 150,
+                child: Slider(
+                  value: intervalSeconds.toDouble(),
+                  min: 1,
+                  max: 30,
+                  divisions: 29,
+                  label: intervalSeconds.toString(),
+                  onChanged: (v) {
+                    setState(() => intervalSeconds = v.toInt());
+                    _saveLocalConfig();
+                  },
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
   Widget? buildSettingsWidget(BuildContext context) {
     return StatefulBuilder(
       builder: (context, setState) {
@@ -586,6 +639,45 @@ class BilibiliLivePlugin extends BasePlugin {
                 },
               ),
             ),
+            const Divider(),
+            const ListTile(
+              title: Text('弹幕处理速率控制'),
+              subtitle: Text('设置 AI 处理弹幕的批处理间隔'),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '批处理间隔: ${controller.settings.ai.danmakuBatchInterval} 秒',
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: controller.settings.ai.danmakuBatchInterval.toDouble().clamp(5.0, 300.0),
+                    min: 5.0,
+                    max: 300.0,
+                    divisions: 59,
+                    label: '${controller.settings.ai.danmakuBatchInterval}s',
+                    onChanged: (v) {
+                      setState(() {
+                        controller.setAiDanmakuBatchInterval(v.toInt());
+                      });
+                    },
+                  ),
+                  const Text(
+                    '间隔越短反应越快，但消耗更多 Token。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: TextFormField(

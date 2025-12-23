@@ -53,6 +53,22 @@ export function createMindServer(host_public = false, port = 8080) {
     // Serve static files
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     app.use(express.static(path.join(__dirname, 'public')));
+    app.use(express.json());
+
+    // API to send commands to agents
+    app.post('/api/command', (req, res) => {
+        const { agentName, goal } = req.body;
+        // If no agentName specified, use the first available one
+        const agent = agentName ? agent_connections[agentName] : Object.values(agent_connections)[0];
+        
+        if (agent && agent.socket) {
+            console.log(`[MindServer] Sending command to agent: ${goal}`);
+            agent.socket.emit('send-message', { message: goal });
+            res.json({ success: true, message: `Command sent successfully` });
+        } else {
+            res.status(404).json({ success: false, error: 'Agent not found or not connected' });
+        }
+    });
 
     // Socket.io connection handling
     io.on('connection', (socket) => {

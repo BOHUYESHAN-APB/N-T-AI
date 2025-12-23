@@ -28,8 +28,11 @@ abstract class BasePlugin {
     debugPrint('[$name] Plugin disabled');
   }
 
-  /// Optional: Provide a settings widget for this plugin
+  /// Optional: Provide a settings widget for this plugin (detailed configuration)
   Widget? buildSettingsWidget(BuildContext context) => null;
+
+  /// Optional: Provide a quick settings widget (switches, sliders) to show in the list
+  Widget? buildQuickSettings(BuildContext context) => null;
 
   /// Optional: Provide a widget to be displayed in the main dashboard/overlay
   Widget? buildDashboardWidget(BuildContext context) => null;
