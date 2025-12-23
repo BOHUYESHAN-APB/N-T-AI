@@ -48,6 +48,11 @@
 
 ### 2. 自主智能体系统 (ReAct)
 *   **网络搜索与浏览**：系统可以自主搜索网络（DuckDuckGo, Bing, Baidu）并访问网页以回答复杂问题。
+*   **Minecraft AI 集成**：
+    *   **高阶智能**：集成 **MindCraft**，使 AI 能够具备复杂的面向目标行为在 Minecraft 中进行游戏。
+    *   **视觉 POV 推流**：实时渲染机器人视角的第一人称画面。
+    *   **OBS 专用推流 HUD**：提供纯净的推流页面 (`/plugins/minecraft/stream`)，自带实时 HUD（血量、饥饿、坐标），方便 OBS 捕获。
+    *   **LLM 自动翻译**：利用主模型自动翻译游戏内聊天内容，实现无障碍跨语言交互。
 *   **多引擎回退**：
     *   **搜索**：如果结果不足或受阻，自动按 DuckDuckGo -> Bing -> Baidu 顺序回退。
     *   **图片搜索**：实时验证图片 URL（检查 403/404 错误）并重试不同引擎，确保图片有效显示。
@@ -125,16 +130,10 @@
 
 ## 🛠️ 架构
 
-### 双模式运行 (Dual-Mode Operation)
+### 后端代理运行
+N-T-AI 目前主要通过后端代理模式运行，以平衡性能、隐私与功能：
 
-N-T-AI 支持两种运行模式，由 `Enable Python Backend` 设置控制：
-
-1.  **直连模式 (Client-Only)**：
-    *   Flutter 应用直接连接到 LLM API (OpenAI, DeepSeek 等)。
-    *   轻量级，无需本地服务器。
-    *   *限制*：高级功能如记忆、情感分析和网络搜索在此模式下目前不可用。
-
-2.  **后端代理模式 (推荐)**：
+*   **后端代理模式 (推荐)**：
     *   Flutter 应用发送请求到本地 Python 后端 (`localhost:8000`)。
     *   **动态配置**：前端通过 HTTP Headers (`X-Target-Api-Key`, `X-Target-Base-Url` 等) 将 API 密钥和模型选择传递给后端。
     *   **全功能**：启用 ReAct Agent、视觉回退、记忆系统和强大的图片搜索验证。
@@ -230,6 +229,7 @@ flutter build apk --release
 - [ ] **[最高优先级] 极速响应语音链路**：LLM 流式输出 → 分段 → TTS 尽快播放（暂时搁置）。
 - [x] **部署工具**：完善 Docker 支持与一键启动脚本。
 - [x] **日志增强**：提升前端与后端的错误日志与诊断能力。
+- [x] **Minecraft AI 插件**：实现面向目标的自主行为、实时视角推流及 OBS 专用 HUD。
 - [ ] **极速模式（最小编排）**：默认只走主链路，只有必要时才调用额外 Agent/Service。
 - [ ] **语音情绪参数联动**：将表情/情绪推理映射到 TTS 风格或参数，优先评估 omni 类模型。
 - [ ] **语音聊天软件接入**：虚拟麦克风注入、自动收音与快捷配置（Discord/KOOK 等）。
@@ -282,14 +282,19 @@ flutter build apk --release
 本项目站在巨人的肩膀上。我们衷心感谢以下开源项目与工具提供的灵感与支持。
 
 ### 参考开源项目
-*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**：为 **Live2D 交互逻辑**、**WebRTC 屏幕共享/音频处理** 等模块提供参考。*许可证*: MIT License.
+*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**：参考了其 **Live2D 交互逻辑** 与 **代码实现**。*许可证*: MIT License.
 *   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**：为 **3D 渲染引擎** 的架构设计提供参考。*许可证*: MIT License.
 *   **[Excalidraw](https://github.com/excalidraw/excalidraw)**：内置白板笔记功能基于其离线副本。*许可证*: MIT License.
-*   **[live2d-py](https://github.com/EasyLive2D/live2d-py)**：为 Live2D 集成方案提供参考。*许可证*: MIT License.
+*   **[live2d-py](https://github.com/EasyLive2D/live2d-py)**：为 Live2D 的 **表情深化细节** 提供了重要帮助。*许可证*: MIT License.
 *   **[DeepResearchAgent](https://github.com/SkyworkAI/DeepResearchAgent)**：为分层多智能体架构与 TEA 协议提供启发。*许可证*: MIT License.
 *   **[free-OKC (OK Computer Virtual Machine)](https://github.com/kexinoh/free-OKC)**：为 “HTML 转 PPTX” 与沙箱工具执行概念提供参考。*许可证*: MIT License.
-*   **[OpenManus](https://github.com/FoundationAgents/OpenManus)**：为 “深度研究” 工作流、浏览器自动化策略与 ReAct 模式提供参考。*许可证*: MIT License.
 *   **[Skywork-Super-Agents](https://github.com/Skywork-ai/Skywork-Super-Agents)**：为 MCP Server 实现等内容提供参考。*许可证*: The Unlicense.
+*   **[OpenManus](https://github.com/FoundationAgents/OpenManus)**：为 “深度研究” 工作流、浏览器自动化策略与 ReAct 模式提供参考。*许可证*: MIT License.
+
+### 插件与扩展致谢
+*   **blivechat**: 我们的 Bilibili 直播弹幕显示插件参考了该项目开发。*许可证*: MIT. [仓库](https://github.com/xfgryujk/blivechat/)
+*   **MindCraft**: 用于 Minecraft AI 代理集成，提供高阶 LLM 驱动的智能。*许可证*: MIT. [仓库](https://github.com/mindcraft-bots/mindcraft)
+*   **Mineflayer**: 作为 Minecraft 机器人交互和底层控制的基础引擎。*许可证*: MIT. [仓库](https://github.com/PrismarineJS/mineflayer)
 
 ### 开发工具
 *   **GitHub Copilot**：在开发过程中提供代码辅助能力。
@@ -297,6 +302,13 @@ flutter build apk --release
 *   **Qoder（AI 编程 IDE）**：提供项目 Wiki 生成能力，用作仓库 Wiki 的起点参考。
 
 我们尊重开源社区，并严格遵守这些上游项目的许可条款。
+
+---
+
+## 🧩 扩展与插件
+
+有兴趣开发插件或了解我们如何集成第三方工具？
+请查看我们的 **[插件开发指南](../PLUGIN_DEV_GUIDE.md)**。
 
 ---
 

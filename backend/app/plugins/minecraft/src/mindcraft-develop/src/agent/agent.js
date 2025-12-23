@@ -12,6 +12,7 @@ import { SelfPrompter } from './self_prompter.js';
 import convoManager from './conversation.js';
 import { handleTranslation, handleEnglishTranslation } from '../utils/translator.js';
 import { addBrowserViewer } from './vision/browser_viewer.js';
+import { POVStreamer } from './vision/pov_streamer.js';
 import { serverProxy, sendOutputToServer } from './mindserver_proxy.js';
 import settings from './settings.js';
 import { Task } from './tasks/tasks.js';
@@ -73,9 +74,18 @@ export class Agent {
         this.bot.once('spawn', async () => {
             try {
                 clearTimeout(spawnTimeout);
-                addBrowserViewer(this.bot, count_id);
+                await addBrowserViewer(this.bot, count_id);
                 console.log('Initializing vision intepreter...');
                 this.vision_interpreter = new VisionInterpreter(this, settings.allow_vision);
+
+                // Start POV streaming if enabled
+                if (settings.allow_vision || settings.render_bot_view) {
+                    console.log('Starting POV streamer...');
+                    this.pov_streamer = new POVStreamer(this);
+                    this.pov_streamer.start().catch(err => {
+                        console.warn('Failed to start POV streamer:', err.message);
+                    });
+                }
 
                 // wait for a bit so stats are not undefined
                 await new Promise((resolve) => setTimeout(resolve, 1000));

@@ -226,9 +226,14 @@ export class Prompter {
 
             try {
                 generation = await this.chat_model.sendRequest(messages, prompt);
+                if (generation && typeof generation === 'object' && generation.error) {
+                    console.error('Model error:', generation.message, generation.details);
+                    // Don't throw, just continue to retry or return empty
+                    continue; 
+                }
                 if (typeof generation !== 'string') {
                     console.error('Error: Generated response is not a string', generation);
-                    throw new Error('Generated response is not a string');
+                    continue;
                 }
                 console.log("Generated response:", generation);
                 await this._saveLog(prompt, messages, generation, 'conversation');

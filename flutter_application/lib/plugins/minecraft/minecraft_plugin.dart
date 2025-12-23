@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -16,6 +17,7 @@ class MinecraftPlugin extends BasePlugin {
     mcVersionController = TextEditingController(text: 'auto');
     mcUserController = TextEditingController();
     mcPassController = TextEditingController();
+    mcApiKeyController = TextEditingController();
   }
 
   late TextEditingController mindserverPortController;
@@ -26,6 +28,7 @@ class MinecraftPlugin extends BasePlugin {
   late TextEditingController mcVersionController;
   late TextEditingController mcUserController;
   late TextEditingController mcPassController;
+  late TextEditingController mcApiKeyController;
   
   String mode = 'mindcraft';
   int mindserverPort = 8080;
@@ -34,6 +37,7 @@ class MinecraftPlugin extends BasePlugin {
   String mcAuth = 'offline';
   String mcUser = '';
   String mcPass = '';
+  String mcApiKey = '';
   String mcBaseProfile = 'assistant';
   String mcLanguage = 'zh';
   String mcVersion = 'auto';
@@ -41,8 +45,17 @@ class MinecraftPlugin extends BasePlugin {
   bool allowInsecureCoding = false;
   bool chatInGame = true;
   bool speak = false;
+  bool renderBotView = false;
 
   Webview? _uiWebview;
+  Timer? _syncTimer;
+
+  void _debouncedSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer(const Duration(milliseconds: 1500), () {
+      _syncWithBackend();
+    });
+  }
 
   @override
   String get id => 'minecraft';
@@ -68,6 +81,7 @@ class MinecraftPlugin extends BasePlugin {
     mcAuth = prefs.getString('${prefix}mcAuth') ?? 'offline';
     mcUser = prefs.getString('${prefix}mcUser') ?? '';
     mcPass = prefs.getString('${prefix}mcPass') ?? '';
+    mcApiKey = prefs.getString('${prefix}mcApiKey') ?? '';
     mcBaseProfile = prefs.getString('${prefix}mcBaseProfile') ?? 'assistant';
     mcLanguage = prefs.getString('${prefix}mcLanguage') ?? 'zh';
     mcVersion = prefs.getString('${prefix}mcVersion') ?? 'auto';
@@ -75,6 +89,7 @@ class MinecraftPlugin extends BasePlugin {
     allowInsecureCoding = prefs.getBool('${prefix}allowInsecureCoding') ?? false;
     chatInGame = prefs.getBool('${prefix}chatInGame') ?? true;
     speak = prefs.getBool('${prefix}speak') ?? false;
+    renderBotView = prefs.getBool('${prefix}renderBotView') ?? false;
     
     modeController.text = mode;
     mindserverPortController.text = mindserverPort.toString();
@@ -84,6 +99,7 @@ class MinecraftPlugin extends BasePlugin {
     mcVersionController.text = mcVersion;
     mcUserController.text = mcUser;
     mcPassController.text = mcPass;
+    mcApiKeyController.text = mcApiKey;
   }
 
   @override
@@ -109,6 +125,7 @@ class MinecraftPlugin extends BasePlugin {
             'mc_auth': mcAuth,
             'mc_user': mcUser,
             'mc_pass': mcPass,
+            'mc_api_key': mcApiKey,
             'mc_base_profile': mcBaseProfile,
             'mc_language': mcLanguage,
             'mc_version': mcVersion,
@@ -116,6 +133,7 @@ class MinecraftPlugin extends BasePlugin {
             'allow_insecure_coding': allowInsecureCoding,
             'chat_ingame': chatInGame,
             'speak': speak,
+            'render_bot_view': renderBotView,
           }
         }),
       );
@@ -203,13 +221,17 @@ class MinecraftPlugin extends BasePlugin {
               _buildCommonConnectionSettings(setState),
               const SizedBox(height: 24),
 
+              _buildSectionHeader('3. 环境与兼容性说明', Icons.info_outline),
+              _buildInfoSection(),
+              const SizedBox(height: 24),
+
               if (mode == 'mindcraft') ...[
-                _buildSectionHeader('3. MindCraft 高级 AI 配置', Icons.psychology),
+                _buildSectionHeader('4. MindCraft 高级 AI 配置', Icons.psychology),
                 _buildMindCraftSettings(setState),
               ],
               
               if (mode == 'mineflayer') ...[
-                _buildSectionHeader('3. Mineflayer 基础机器人配置', Icons.smart_toy),
+                _buildSectionHeader('4. Mineflayer 基础机器人配置', Icons.smart_toy),
                 _buildMineflayerSettings(setState),
               ],
 
@@ -220,6 +242,48 @@ class MinecraftPlugin extends BasePlugin {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildInfoSection() {
+    return Card(
+      elevation: 0,
+      color: Colors.orange.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: Colors.orange.withValues(alpha: 0.2)),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _InfoRow(
+              icon: Icons.history,
+              title: '版本配置',
+              content: '支持 1.8.x 至 1.21.x。建议设为 "auto" 以自动识别服务器版本。',
+            ),
+            Divider(height: 24),
+            _InfoRow(
+              icon: Icons.extension,
+              title: 'MoD 支持与扩展',
+              content: '1. 协议兼容：支持 Forge/Fabric 服务器（需确保服务端未开启强校验）。\n2. 功能扩展：MindCraft 模式通过“预设配置文件”实现类似 MoD 的行为定制（如生存、建筑、助手等）。\n3. 插件系统：底层 Mineflayer 支持加载第三方 JS 插件来扩展机器人的基础能力。',
+            ),
+            Divider(height: 24),
+            _InfoRow(
+              icon: Icons.coffee,
+              title: 'Java 依赖',
+              content: '机器人基于 Node.js 运行，不内置 Java。如果您在本地运行 MC 服务端，请确保系统已自行安装 Java 环境。',
+            ),
+            Divider(height: 24),
+            _InfoRow(
+              icon: Icons.bug_report,
+              title: '常见问题',
+              content: '1. 若提示 "canvas.node" 缺失，请尝试在插件目录运行 npm install。\n2. 若提示 "EADDRINUSE"，说明 8080 端口被占用，请修改管理端口。',
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -293,6 +357,7 @@ class MinecraftPlugin extends BasePlugin {
                 ),
                 onChanged: (val) {
                   mcHost = val;
+                  mcHostController.text = val;
                   _saveSettings();
                 },
               ),
@@ -448,6 +513,21 @@ class MinecraftPlugin extends BasePlugin {
           },
         ),
         const SizedBox(height: 16),
+        TextField(
+          controller: mcApiKeyController,
+          decoration: const InputDecoration(
+            labelText: 'OpenAI API Key (可选)',
+            hintText: '留空则复用主脑配置',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.vpn_key),
+          ),
+          obscureText: true,
+          onChanged: (val) {
+            mcApiKey = val;
+            _saveSettings();
+          },
+        ),
+        const SizedBox(height: 16),
         _buildQuickSwitches(setState),
         const SizedBox(height: 16),
         SizedBox(
@@ -519,6 +599,15 @@ class MinecraftPlugin extends BasePlugin {
               _saveSettings();
             },
           ),
+          SwitchListTile(
+            title: const Text('显示机器人视图 (Browser)'),
+            subtitle: const Text('在浏览器中开启 3D 实时视角 (localhost:3000+)'),
+            value: renderBotView,
+            onChanged: (val) {
+              setState(() => renderBotView = val);
+              _saveSettings();
+            },
+          ),
         ],
       ),
     );
@@ -550,6 +639,7 @@ class MinecraftPlugin extends BasePlugin {
     await prefs.setString('${prefix}mcAuth', mcAuth);
     await prefs.setString('${prefix}mcUser', mcUser);
     await prefs.setString('${prefix}mcPass', mcPass);
+    await prefs.setString('${prefix}mcApiKey', mcApiKey);
     await prefs.setString('${prefix}mcBaseProfile', mcBaseProfile);
     await prefs.setString('${prefix}mcLanguage', mcLanguage);
     await prefs.setString('${prefix}mcVersion', mcVersion);
@@ -557,6 +647,10 @@ class MinecraftPlugin extends BasePlugin {
     await prefs.setBool('${prefix}allowInsecureCoding', allowInsecureCoding);
     await prefs.setBool('${prefix}chatInGame', chatInGame);
     await prefs.setBool('${prefix}speak', speak);
+    await prefs.setBool('${prefix}renderBotView', renderBotView);
+    
+    // 自动同步到后端，延迟 1.5s 触发，避免连续点击导致频繁重启
+    _debouncedSync();
   }
 
   @override
@@ -595,6 +689,45 @@ class MinecraftPlugin extends BasePlugin {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String content;
+
+  const _InfoRow({
+    required this.icon,
+    required this.title,
+    required this.content,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: Colors.orange),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                content,
+                style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

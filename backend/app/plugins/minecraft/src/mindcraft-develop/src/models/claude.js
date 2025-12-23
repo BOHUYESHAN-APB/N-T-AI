@@ -49,9 +49,9 @@ export class Claude {
         }
         catch (err) {
             if (err.message.includes("does not support image input")) {
-                res = "Vision is only supported by certain models.";
-            } else {
-                res = "My brain disconnected, try again.";
+                res = "Vision is only supported by certain models.";} else {
+                console.error(err);
+                res = { error: true, message: 'Claude brain disconnected', details: err.message };
             }
             console.log(err);
         }

@@ -115,8 +115,18 @@ class MinecraftPlugin(BasePlugin):
 
     def _stop_process(self):
         if self._process:
-            print(f"[{self.name}] Stopping Minecraft subprocess...")
-            self._process.terminate()
+            print(f"[{self.name}] Stopping Minecraft subprocess (PID: {self._process.pid})...")
+            if os.name == 'nt':
+                # Windows: Use taskkill to kill the process tree
+                try:
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(self._process.pid)], 
+                                 capture_output=True, check=False)
+                except Exception as e:
+                    print(f"[{self.name}] Error using taskkill: {e}")
+                    self._process.terminate()
+            else:
+                self._process.terminate()
+                
             try:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -164,10 +174,20 @@ class MinecraftPlugin(BasePlugin):
             from app.core.config import settings as app_settings
             env = os.environ.copy()
             
-            # 复用主脑配置
-            env["OPENAI_API_KEY"] = app_settings.OPENAI_API_KEY
+            # 复用主脑配置，如果没有则提供默认占位符防止 MindCraft 崩溃
+            api_key = self.config.get("mc_api_key") or app_settings.OPENAI_API_KEY
+            if not api_key:
+                api_key = "sk-ntai-placeholder"
+            
+            env["OPENAI_API_KEY"] = api_key
             env["OPENAI_BASE_URL"] = app_settings.OPENAI_BASE_URL
-            env["NTAI_BACKEND_URL"] = f"http://localhost:{os.getenv('PORT', '23456')}/v1"
+            env["NTAI_BACKEND_URL"] = f"http://localhost:{os.getenv('PORT', '23456')}{app_settings.API_V1_STR}"
+            
+            # 解决翻译组件 SSL 证书验证失败的问题 (UNABLE_TO_VERIFY_LEAF_SIGNATURE)
+            env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+            
+            # 确保端口一致性
+            env["MINDSERVER_PORT"] = str(self.config.get("mindserver_port", 8080))
             
             # 如果配置了其他的 key 也可以传递
             # env["GEMINI_API_KEY"] = ...
@@ -187,6 +207,7 @@ class MinecraftPlugin(BasePlugin):
                 "allow_insecure_coding": self.config.get("allow_insecure_coding", False),
                 "chat_ingame": self.config.get("chat_ingame", True),
                 "speak": self.config.get("speak", False),
+                "render_bot_view": self.config.get("render_bot_view", False),
             }
             env["SETTINGS_JSON"] = json.dumps(settings_json)
 
@@ -198,7 +219,7 @@ class MinecraftPlugin(BasePlugin):
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                shell=True,
+                shell=False,  # 修改为 False 以便直接管理进程
                 env=env
             )
             self._start_log_thread()
@@ -249,7 +270,7 @@ class MinecraftPlugin(BasePlugin):
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                shell=True
+                shell=False
             )
             self._start_log_thread()
             self.is_active = True

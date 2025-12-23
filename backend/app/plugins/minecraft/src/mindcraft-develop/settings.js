@@ -53,7 +53,7 @@ const settings = {
     "narrate_behavior": true, // chat simple automatic actions ('Picking up item!')
     "chat_bot_messages": true, // publicly chat messages to other bots
 
-    "spawn_timeout": 30, // num seconds allowed for the bot to spawn before throwing error. Increase when spawning takes a while.
+    "spawn_timeout": 300, // 增加到 300 秒（5 分钟），给 Microsoft 登录输入 code 留足时间
     "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
   
     "log_all_prompts": false, // log ALL prompts to file

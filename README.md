@@ -50,6 +50,11 @@ If you find this project helpful, please consider supporting us:
 
 ### 2. Autonomous Agent System (ReAct)
 *   **Web Search & Browsing**: The system can autonomously search the web (DuckDuckGo, Bing, Baidu) and visit webpages to answer complex questions.
+*   **Minecraft AI Integration**: 
+    *   **High-Level Intelligence**: Integrated with **MindCraft**, enabling the AI to play Minecraft with complex goal-oriented behaviors.
+    *   **Visual POV Streaming**: Real-time first-person perspective rendering from the bot's eyes.
+    *   **OBS Stream HUD**: Dedicated pure-stream view (`/plugins/minecraft/stream`) with real-time HUD (Health, Food, Position) for OBS capture.
+    *   **LLM Translation**: Automatic translation of in-game chat using the main LLM for seamless cross-language interaction.
 *   **Multi-Engine Fallback**: Automatically switches search engines if results are insufficient.
 *   **Voice Interaction (Beta)**:
     *   **Cloud STT/TTS**: Supports Speech-to-Text and Text-to-Speech via cloud APIs (e.g., SiliconFlow).
@@ -83,6 +88,20 @@ If you find this project helpful, please consider supporting us:
 
 ---
 
+## 🏷️ Project & Naming
+
+To avoid ambiguity in documentation and communication, please note the following terms:
+
+*   **N-T-AI (System)**: The overall project name, referring to the complete application suite (Flutter frontend + Python backend).
+*   **Astra-Me**: Specifically refers to the **Python Backend** service (FastAPI). It is the "soul" or "system layer" of the project, handling complex logic, memory, and tool calls.
+*   **Firefly (流萤)**: Refers to the **Agent** logic or default persona within the app.
+
+> **Disclaimer**: The default AI persona name "Firefly" is a code name and has no direct affiliation with the character of the same name from the game "Honkai: Star Rail". All game names and related terms mentioned are the property of their respective owners (HoYoverse / MiHoYo).
+
+---
+
+---
+
 ## 🏗️ Architecture & Design
 
 N-T-AI adopts a **Client-Server** architecture to balance performance, privacy, and capability.
@@ -106,9 +125,8 @@ N-T-AI adopts a **Client-Server** architecture to balance performance, privacy, 
 ### 3. Why this separation?
 This design allows the "Brain" (Backend) to be deployed anywhere—on your local PC, a home server, or a cloud VPS—while the "Body" (App) runs smoothly on your mobile device or laptop. It also prepares the path for a future "Standalone Mode" where the backend logic is ported to Dart for a purely local experience.
 
-### Dual-Mode Operation
-- Client-Only: The app connects directly to LLM providers (OpenAI, DeepSeek, etc.) without a local server for lightweight usage.
-- Backend Proxy (recommended): The app talks to the local Python backend, which enables ReAct Agents, memory, vision fallback, and advanced tools. The client sends per-request target configs via headers like `X-Target-Api-Key`, `X-Target-Base-Url`, and `X-Target-Model`. The backend remains stateless and uses HTTPS for secure transport.
+### Backend Proxy Operation
+The app talks to the local Python backend, which enables ReAct Agents, memory, vision fallback, and advanced tools. The client sends per-request target configs via headers like `X-Target-Api-Key`, `X-Target-Base-Url`, and `X-Target-Model`. The backend remains stateless and uses HTTPS for secure transport.
 
 ---
 
@@ -167,6 +185,40 @@ chmod +x run_server.sh
 
 ---
 
+## 🧠 Recommended Models
+
+We recommend **[SiliconFlow](https://cloud.siliconflow.cn/i/oiWI8xjZ)** for a good balance between performance and cost.
+
+| Feature | Recommended Model | Description |
+| :--- | :--- | :--- |
+| **LLM** | `DeepSeek-V3` / `Qwen-2.5` | High intelligence, low cost |
+| **STT** | `SenseVoiceSmall` | Fast, accurate, multi-language |
+| **TTS** | `CosyVoice2-0.5B` | Natural emotions, realistic voice |
+
+---
+
+## 🔨 Build & Compilation
+
+### Windows (MSIX)
+```bash
+cd flutter_application
+flutter clean
+flutter pub get
+dart run msix:create
+```
+*Output: flutter_application/build/windows/x64/runner/Release/*
+
+### Android (APK)
+```bash
+cd flutter_application
+flutter clean
+flutter pub get
+flutter build apk --release
+```
+*Output: flutter_application/build/app/outputs/flutter-apk/app-release.apk*
+
+---
+
 ## 🔐 Configuration & Security
 
 ### Secure Configuration
@@ -211,6 +263,7 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [x] **Deployment Tools**: Docker support and One-click startup scripts.
 - [x] **Stateless Backend**: Per-request target configuration via headers (`X-Target-*`), no server-side key storage.
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
+- [x] **Minecraft AI Plugin**: Goal-oriented AI behavior, real-time POV streaming, and OBS-ready HUD.
 - [ ] **Fast Mode (Minimal Orchestration)**: Default to the main loop; only invoke extra agents/services when required.
 - [ ] **Emotion-Aware Voice**: Bind expression/emotion signals to TTS styles/parameters; prefer evaluating omni-class models.
 - [ ] **Voice Chat Integration**: Virtual microphone injection, auto-capture, and fast routing presets for Discord/KOOK-like apps.
@@ -242,8 +295,9 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 N-T-AI stands on the shoulders of many great open-source projects and tools.
 
 ### Referenced Open-Source Projects
-- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Live2D interaction logic, emotive parameter layering, WebRTC/audio utilities inspiration. *License*: MIT. [Repository](https://github.com/BOHUYESHAN-APB/N.E.K.O.)
+- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Reference for Live2D interaction logic and code implementation. *License*: MIT. [Repository](https://github.com/BOHUYESHAN-APB/N.E.K.O.)
 - **dlp3d.ai**: 3D rendering and scene management architecture inspiration. *License*: MIT. [Repository](https://github.com/dlp3d/dlp3d.ai)
+- **live2d-py**: Provided help for deepening Live2D expression details and integration. *License*: MIT. [Repository](https://github.com/EasyLive2D/live2d-py)
 - **DeepResearchAgent**: Hierarchical multi-agent architecture and TEA protocol inspiration. *License*: MIT. [Repository](https://github.com/SkyworkAI/DeepResearchAgent)
 - **free-OKC (OK Computer Virtual Machine)**: HTML-to-PPTX generation logic and sandboxed tool execution inspiration. *License*: MIT. [Repository](https://github.com/kexinoh/free-OKC)
 - **OpenManus**: Deep Research planning workflows, browser automation strategies, and ReAct patterns inspiration. *License*: MIT. [Repository](https://github.com/FoundationAgents/OpenManus)

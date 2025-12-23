@@ -13,8 +13,8 @@ export class Camera extends EventEmitter {
         this.bot = bot;
         this.fp = fp;
         this.viewDistance = 12;
-        this.width = 800;
-        this.height = 512;
+        this.width = process.env.MC_POV_WIDTH ? parseInt(process.env.MC_POV_WIDTH) : 1280;
+        this.height = process.env.MC_POV_HEIGHT ? parseInt(process.env.MC_POV_HEIGHT) : 720;
         this.canvas = null;
         this.renderer = null;
         this.viewer = null;

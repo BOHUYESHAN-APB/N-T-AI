@@ -41,7 +41,8 @@ export class MainBrain {
         }
         catch (err) {
             console.error('Main Brain Error:', err.message);
-            res = 'My connection to the Main Brain was lost.';
+            // Return a special error object instead of a string to avoid accidental chatting
+            res = { error: true, message: 'Main Brain connection lost', details: err.message };
         }
         return res;
     }

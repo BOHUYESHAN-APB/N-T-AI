@@ -52,7 +52,7 @@ export class GPT {
                 res = 'Vision is only supported by certain models.';
             } else {
                 console.log(err);
-                res = 'My brain disconnected, try again.';
+                res = { error: true, message: 'GPT brain disconnected', details: err.message };
             }
         }
         return res;

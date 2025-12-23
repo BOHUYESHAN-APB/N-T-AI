@@ -133,4 +133,24 @@ export function sendBotChatToServer(agentName, json) {
 // for sending general output to server for display
 export function sendOutputToServer(agentName, message) {
     serverProxy.getSocket().emit('bot-output', agentName, message);
+    
+    // Also notify the main N-T-AI backend if configured
+    const backendUrl = process.env.NTAI_BACKEND_URL;
+    if (backendUrl) {
+        try {
+            // backendUrl is something like http://localhost:23456/api/v1
+            // we want to send to /chat/events or similar
+            fetch(`${backendUrl}/plugins/minecraft/event`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'chat',
+                    agent: agentName,
+                    message: message
+                })
+            }).catch(err => {}); // ignore errors for background notification
+        } catch (err) {
+            // console.error('Failed to notify N-T-AI backend:', err.message);
+        }
+    }
 }

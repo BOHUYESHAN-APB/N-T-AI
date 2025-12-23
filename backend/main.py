@@ -14,7 +14,7 @@ from app.models.database import create_db_and_tables
 from app.services.chat_service import ChatService
 from app.core.logger import logger
 from app.core.logger import get_recent_errors, set_recent_error_max
-from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes, deep_research_routes, linux_routes
+from app.api.routes import memory_routes, model_routes, live2d_routes, audio_routes, deep_research_routes, linux_routes, minecraft_routes
 from app.plugins import startup_plugins, shutdown_plugins, get_plugin
 from app.plugins.bilibili_live import BilibiliLivePlugin
 from app.services.sandbox_service import sandbox_service
@@ -110,6 +110,9 @@ app.include_router(deep_research_routes.router, prefix="/api/deep-research", tag
 
 # Virtual Linux Environment Routes
 app.include_router(linux_routes.router, prefix="/api/linux", tags=["linux"])
+
+# Minecraft Plugin Routes
+app.include_router(minecraft_routes.router, prefix=settings.API_V1_STR, tags=["minecraft"])
 
 # Mount static files for Live2D/3D renderer
 static_dir = os.path.join(os.path.dirname(__file__), "app", "static")

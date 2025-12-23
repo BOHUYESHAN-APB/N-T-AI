@@ -98,12 +98,8 @@ export class Gemini {
             res = await result.text;
             console.log('Received.');
         } catch (err) {
-            console.log(err);
-            if (err.message.includes("Image input modality is not enabled for models/")) {
-                res = "Vision is only supported by certain models.";
-            } else {
-                res = "An unexpected error occurred, please try again.";
-            }
+            console.error(err);
+            res = { error: true, message: 'Gemini brain error', details: err.message };
         }
         return res;
     }

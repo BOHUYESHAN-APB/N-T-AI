@@ -44,7 +44,7 @@ export class DeepSeek {
                 return await this.sendRequest(turns.slice(1), systemMessage, stop_seq);
             } else {
                 console.log(err);
-                res = 'My brain disconnected, try again.';
+                res = { error: true, message: 'DeepSeek brain disconnected', details: err.message };
             }
         }
         return res;

@@ -1,5 +1,25 @@
 # 更新日志 (Changelog)
 
+## [0.3.11-beta] - 2025-12-23
+
+### 新增 (Added)
+- **Minecraft 插件重大更新**:
+    - **LLM 翻译系统**: 彻底移除 Google Translate，改用主模型进行游戏内聊天翻译，解决 SSL 校验及稳定性问题。
+    - **前端深度集成**: Minecraft 消息现在带 `【Minecraft】` 前缀显示在 Flutter 界面，并能正确触发 TTS 语音。
+    - **OBS 专场支持**: 新增推流专用页面 (`/plugins/minecraft/stream`)，包含实时 HUD（血量、饥饿、坐标）。
+    - **高清采样**: 支持环境变量配置 720P@24FPS 画面采样。
+- **外部研究环境**: 预置 `Neuro` 与 `AIRI` 参考项目于 `other-Repository` 文件夹。
+
+### 优化 (Changed)
+- **自动化同步机制**: Minecraft 插件保存设置后支持自动防抖重启，无需手动干预。
+- **文档体系**: 
+    - 统一了中英文 README 特性描述。
+    - 移除了“直连模式”相关描述，明确后端代理架构。
+    - 修正了 `NEKO` 与 `live2d-py` 的致谢详情。
+
+### 修复 (Fixed)
+- **代码诊断**: 清理了 `firefly_screen.dart` 中所有的 Linter 错误及潜在逻辑诊断警告。
+
 ## [0.3.10-beta] - 2025-12-22
 
 ### 优化 (Changed)

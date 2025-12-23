@@ -59,6 +59,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       []; // {role: user/assistant, content: text, created_at: DateTime}
   bool _isLoading = false;
   bool _isLoopbackCapturing = false;
+  bool _showMinecraftPOV = false;
   Completer<void>? _interruptCompleter;
 
   StreamSubscription? _historySubscription;
@@ -343,11 +344,22 @@ class _FireflyScreenState extends State<FireflyScreen> {
     super.dispose();
   }
 
+  String? _latestMinecraftPOV;
+  String? _minecraftAgentName;
+
   void _handleWebSocketMessage(Map<String, dynamic> msg) {
     if (!mounted) return;
     
     final type = msg['type'];
     final data = msg['data'];
+    
+    if (type == 'minecraft_pov') {
+      setState(() {
+        _latestMinecraftPOV = msg['image'];
+        _minecraftAgentName = msg['agent'];
+      });
+      return;
+    }
     
     String? role;
     String? content;
@@ -356,9 +368,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
     // Backend sends: type="chat_message", text="...", sender="chat_normal"/"chat_sc"
     if (type == 'chat_message') {
        final sender = msg['sender'];
-       if (sender == 'chat_normal' || sender == 'chat_sc') {
-           role = sender;
+       if (sender == 'chat_normal' || sender == 'chat_sc' || sender == 'minecraft') {
+           role = sender == 'minecraft' ? 'assistant' : sender;
            content = msg['text'] ?? msg['content'];
+           
+           // If it's from Minecraft, prepend the agent name if needed
+           if (sender == 'minecraft' && msg['senderName'] != null) {
+              content = "【Minecraft】${msg['senderName']}: $content";
+           }
        }
     } else if (type == 'chat_normal' || type == 'chat_sc') {
         // Legacy or direct format
@@ -402,9 +419,109 @@ class _FireflyScreenState extends State<FireflyScreen> {
               });
             });
             _scrollToBottom();
+
+            // Trigger TTS for Minecraft messages
+            if (msg['sender'] == 'minecraft') {
+              try {
+                final rootSettings = SettingsScope.of(context).settings;
+                if (rootSettings.enableTts) {
+                  final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+                  if (ttsProvider != null) {
+                    // We speak the content but maybe without the 【Minecraft】 prefix for better TTS?
+                    // Let's speak the original text if available
+                    final textToSpeak = msg['text'] ?? content;
+                    _brain.speak(textToSpeak, ttsProvider);
+                  }
+                }
+              } catch (e) {
+                debugPrint("[Minecraft WS] TTS Error: $e");
+              }
+            }
           }
   }
 
+  Widget _buildMinecraftPOVOverlay(BuildContext context) {
+    if (!_showMinecraftPOV || _latestMinecraftPOV == null) return const SizedBox.shrink();
+
+    return Positioned(
+      bottom: 120, // Positioned above input area
+      right: 16,
+      child: Container(
+        width: 320,
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+            width: 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 10,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            Image.memory(
+              base64Decode(_latestMinecraftPOV!),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              gaplessPlayback: true,
+            ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'LIVE: ${_minecraftAgentName ?? 'Bot'}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                onPressed: () => setState(() => _showMinecraftPOV = false),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   Widget _buildDanmakuSummaryCard(BuildContext context) {
     return AnimatedBuilder(
       animation: globalPluginManager,
@@ -1401,6 +1518,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               ),
               if (settings.enableLive2D && settings.showLive2DMiniWindow)
                 _buildLive2DMiniWindowOverlay(context, settings),
+              _buildMinecraftPOVOverlay(context),
             ],
           ),
         ),
@@ -1584,6 +1702,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
               ),
             ),
             onSelected: (value) {
+              if (value == 'minecraft_pov') {
+                setState(() => _showMinecraftPOV = !_showMinecraftPOV);
+                return;
+              }
               // Mutually exclusive logic: Disable all first
               settingsController.setShowExpressionFace(false);
               settingsController.setShowLive2D(false);
@@ -1666,6 +1788,22 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 ),
                 const SizedBox(width: 12),
                 const Text('Live2D 应用内小窗'),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'minecraft_pov',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.videogame_asset,
+                  color: _showMinecraftPOV
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                const Text('Minecraft 第一视角'),
               ],
             ),
           ),
