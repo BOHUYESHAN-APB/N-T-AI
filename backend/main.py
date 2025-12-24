@@ -162,6 +162,7 @@ class OpenAIResponse(BaseModel):
 class EmbeddingRequest(BaseModel):
     input: Union[str, List[str]]
     model: str = "text-embedding-ada-002"
+    encoding_format: Optional[str] = None
 
 chat_service = ChatService()
 _frontend_recent_errors = []
@@ -200,20 +201,38 @@ class FrontendLogs(BaseModel):
     errors: list[FrontendLogItem] = []
     max: int | None = None
 
+_last_emb_err_time = 0
+_emb_err_throttle = 60 # Seconds between error logs
+
 @app.post("/v1/embeddings")
 @app.post(f"{settings.API_V1_STR}/embeddings")
 async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
+    global _last_emb_err_time
     target_api_key = raw_request.headers.get("X-Target-Api-Key")
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
+    target_model = raw_request.headers.get("X-Target-Model")
+    
+    # Fallback: Authorization: Bearer <key>
+    auth_header = raw_request.headers.get("Authorization")
+    if not target_api_key and auth_header and auth_header.startswith("Bearer "):
+        target_api_key = auth_header.replace("Bearer ", "").strip()
+        if target_api_key == "sk-ntai-internal":
+            target_api_key = None # Use default key from env if it's the internal placeholder
     
     text_input = request.input
     if isinstance(text_input, list):
         text_input = text_input[0] 
         
-    embedding = await chat_service.llm.get_embedding(text_input, api_key=target_api_key, base_url=target_base_url)
+    embedding = await chat_service.llm.get_embedding(text_input, api_key=target_api_key, base_url=target_base_url, model=target_model)
     
     if not embedding:
-        raise HTTPException(status_code=500, detail="Failed to generate embedding")
+        # Fallback to a zero vector to avoid 500 error and keep the client running
+        # Most models use 1536 (ada) or 1024 (bge). Using 1536 as a safe default for compatibility.
+        now = time.time()
+        if (now - _last_emb_err_time) > _emb_err_throttle:
+            logger.warning(f"Embedding generation failed for input: {text_input[:50]}... Returning zero vector (Throttled).")
+            _last_emb_err_time = now
+        embedding = [0.0] * 1536
 
     return {
         "object": "list",
@@ -230,6 +249,27 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
             "total_tokens": 0
         }
     }
+
+
+@app.get(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/status")
+async def get_plugin_status(plugin_id: str):
+    plugin = get_plugin(plugin_id)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    
+    status = {
+        "is_active": getattr(plugin, "is_active", True),
+    }
+    
+    # 特殊处理 minecraft 插件
+    if (plugin_id == "minecraft" or plugin_id == "Minecraft-mindcraft") and hasattr(plugin, "logs"):
+        status.update({
+            "logs": plugin.logs,
+            "ms_auth_code": plugin.ms_auth_code,
+            "ms_auth_url": plugin.ms_auth_url
+        })
+        
+    return status
 
 
 @app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/config")

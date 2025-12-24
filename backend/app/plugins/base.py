@@ -12,6 +12,11 @@ class BasePlugin(ABC):
         self.is_active = False
 
     @property
+    def id(self) -> str:
+        """Return the unique ID of the plugin. Defaults to name."""
+        return self.name
+
+    @property
     @abstractmethod
     def name(self) -> str:
         """Return the unique name of the plugin."""

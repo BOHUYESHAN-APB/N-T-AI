@@ -172,7 +172,7 @@ class AgentConfig {
   );
 }
 
-enum AiProviderCategory { llm, tts, stt, motion, image, video }
+enum AiProviderCategory { llm, tts, stt, motion, image, video, embedding }
 
 class AiProviderConfig {
   final String id;
@@ -428,6 +428,7 @@ class AppSettings {
   final bool enableSpeechRefinement; // 启用语音修正
   final String? activeToolCallingProviderId; // 工具调用专用模型服务商
   final String? activeDeepResearchProviderId; // 深度研究专用模型服务商
+  final String? activeEmbeddingProviderId; // 嵌入模型服务商
 
   const AppSettings({
     this.themeMode = ThemeModeOption.system,
@@ -454,6 +455,7 @@ class AppSettings {
     this.activeSpeechRefinerProviderId,
     this.activeToolCallingProviderId,
     this.activeDeepResearchProviderId,
+    this.activeEmbeddingProviderId,
     this.live2dModelPath = '',
     this.rotationEnabled = false,
     this.agentEnabled = true,
@@ -529,6 +531,7 @@ class AppSettings {
     String? activeSpeechRefinerProviderId,
     String? activeToolCallingProviderId,
     String? activeDeepResearchProviderId,
+    String? activeEmbeddingProviderId,
     String? live2dModelPath,
     bool? rotationEnabled,
     bool? agentEnabled,
@@ -609,6 +612,8 @@ class AppSettings {
         activeToolCallingProviderId ?? this.activeToolCallingProviderId,
     activeDeepResearchProviderId:
         activeDeepResearchProviderId ?? this.activeDeepResearchProviderId,
+    activeEmbeddingProviderId:
+        activeEmbeddingProviderId ?? this.activeEmbeddingProviderId,
     live2dModelPath: live2dModelPath ?? this.live2dModelPath,
     rotationEnabled: rotationEnabled ?? this.rotationEnabled,
     agentEnabled: agentEnabled ?? this.agentEnabled,

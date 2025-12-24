@@ -143,7 +143,7 @@ class FloatingWindowWindows implements FloatingWindowService {
         configuration: CreateConfiguration(
           windowWidth: width.toInt(),
           windowHeight: height.toInt(),
-          title: 'Live2D',
+          title: '', // 设置为空标题，减少标题栏布局压力
           titleBarTopPadding: 0,
           titleBarHeight: 0, // 标题栏高度为0
         ),

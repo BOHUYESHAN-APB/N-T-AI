@@ -39,7 +39,18 @@ import httpx
 import random
 
 class ChatService:
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(ChatService, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
+        if self._initialized:
+            return
+            
         self.llm = LLMService()
         self.person_service = PersonService()
         self.mood_service = MoodService()
@@ -48,6 +59,7 @@ class ChatService:
         self.search_service = SearchService()
         self.audio_service = AudioService() # Initialize Audio Service
         self.meme_service = MemeService()
+        self._initialized = True
 
     def _sanitize_text_for_tts(self, text: str) -> str:
         """Removes mental/action descriptions and special tokens for TTS."""

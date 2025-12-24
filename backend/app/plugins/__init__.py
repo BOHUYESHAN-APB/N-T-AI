@@ -6,10 +6,10 @@ from .linux_env.plugin import LinuxEnvPlugin
 _plugins: Dict[str, BasePlugin] = {}
 
 def register_plugin(plugin: BasePlugin):
-    _plugins[plugin.name] = plugin
+    _plugins[plugin.id] = plugin
 
-def get_plugin(name: str) -> BasePlugin | None:
-    return _plugins.get(name)
+def get_plugin(id: str) -> BasePlugin | None:
+    return _plugins.get(id)
 
 async def startup_plugins() -> None:
     # 1. Initialize Plugins
@@ -23,9 +23,14 @@ async def startup_plugins() -> None:
     # Register Linux Env
     register_plugin(LinuxEnvPlugin())
 
-    # Register Minecraft
-    from .minecraft import MinecraftPlugin
-    register_plugin(MinecraftPlugin())
+    # Register Minecraft MindCraft
+    try:
+        import importlib
+        # 使用 importlib 加载带中划线的目录名
+        mc_module = importlib.import_module(".Minecraft-mindcraft", package="app.plugins")
+        register_plugin(mc_module.get_plugin())
+    except Exception as e:
+        print(f"Error registering Minecraft-mindcraft plugin: {e}")
 
     # 2. Start them
     for plugin in _plugins.values():

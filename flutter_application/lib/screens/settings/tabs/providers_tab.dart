@@ -90,6 +90,14 @@ class _ProvidersTabState extends State<ProvidersTab> {
       'category': AiProviderCategory.llm,
     },
     {
+      'name': 'SiliconFlow (Embedding)',
+      'kind': AiProvider.custom,
+      'baseUrl': 'https://api.siliconflow.cn/v1',
+      'model': 'Qwen/Qwen3-Embedding-0.6B',
+      'helpUrl': 'https://cloud.siliconflow.cn/account/ak',
+      'category': AiProviderCategory.embedding,
+    },
+    {
       'name': 'OpenRouter',
       'kind': AiProvider.custom,
       'baseUrl': 'https://openrouter.ai/api/v1',
@@ -322,6 +330,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
       case AiProviderCategory.motion: return 'Motion (动作驱动)';
       case AiProviderCategory.image: return 'Image (图像生成)';
       case AiProviderCategory.video: return 'Video (视频生成)';
+      case AiProviderCategory.embedding: return 'Embedding (向量嵌入)';
     }
   }
   
@@ -333,6 +342,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
       case AiProviderCategory.motion: return Icons.directions_run;
       case AiProviderCategory.image: return Icons.image;
       case AiProviderCategory.video: return Icons.videocam;
+      case AiProviderCategory.embedding: return Icons.hub;
     }
   }
 
@@ -456,6 +466,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
           decoration: const InputDecoration(labelText: '功能分类', border: OutlineInputBorder()),
           items: const [
             DropdownMenuItem(value: AiProviderCategory.llm, child: Text('LLM (主脑/对话)')),
+            DropdownMenuItem(value: AiProviderCategory.embedding, child: Text('Embedding (向量嵌入)')),
             DropdownMenuItem(value: AiProviderCategory.tts, child: Text('TTS (语音合成)')),
             DropdownMenuItem(value: AiProviderCategory.stt, child: Text('STT (语音识别)')),
             DropdownMenuItem(value: AiProviderCategory.motion, child: Text('Motion (动作驱动)')),
@@ -766,6 +777,16 @@ class _ProvidersTabState extends State<ProvidersTab> {
         'black-forest-labs/FLUX.1-schnell',
         'stabilityai/stable-diffusion-3-medium',
         'stabilityai/stable-diffusion-xl-base-1.0',
+      ];
+    }
+    
+    if (category == AiProviderCategory.embedding) {
+      return const [
+        'Qwen/Qwen3-Embedding-0.6B',
+        'Alibaba-NLP/gte-Qwen2-7B-instruct',
+        'BAAI/bge-m3',
+        'openai/text-embedding-3-small',
+        'openai/text-embedding-3-large',
       ];
     }
     

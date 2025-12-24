@@ -522,14 +522,15 @@ class BilibiliLivePlugin extends BasePlugin {
         final providers = controller.providers;
         final currentProviderId = agentProviderId ?? 'follow_main';
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ListTile(
-              leading: Icon(icon),
-              title: const Text('Bilibili Live 配置'),
-              subtitle: const Text('房间号、Open Platform 密钥、弹幕汇总 Agent'),
-            ),
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                leading: Icon(icon),
+                title: const Text('Bilibili Live 配置'),
+                subtitle: const Text('房间号、Open Platform 密钥、弹幕汇总 Agent'),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: TextFormField(
@@ -937,10 +938,11 @@ class BilibiliLivePlugin extends BasePlugin {
               ),
             ),
           ],
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   @override
   Widget? buildDashboardWidget(BuildContext context) {

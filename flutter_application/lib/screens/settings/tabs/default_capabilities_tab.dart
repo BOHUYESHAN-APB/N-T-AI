@@ -143,6 +143,21 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
         ),
         _buildCapabilityTile(
           context,
+          icon: Icons.hub,
+          title: '向量嵌入 (Embedding)',
+          currentId: settings.activeEmbeddingProviderId,
+          controller: controller,
+          onTap: () => _showProviderSelector(
+            context,
+            controller,
+            providers,
+            '选择 Embedding 服务商',
+            settings.activeEmbeddingProviderId,
+            (id) => controller.updateActiveEmbeddingProviderId(id),
+          ),
+        ),
+        _buildCapabilityTile(
+          context,
           icon: Icons.auto_fix_high,
           title: '语音修正 (Speech Refine)',
           currentId: settings.activeSpeechRefinerProviderId,

@@ -107,10 +107,19 @@ class LLMService {
   }
 
   Future<List<double>> getEmbedding(String text) async {
-    final provider = await _getActiveProvider();
+    final prefs = await SharedPreferences.getInstance();
+    final embeddingId = prefs.getString('settings.agent.embeddingProviderId');
+    
+    AiProviderConfig? provider;
+    if (embeddingId != null) {
+      provider = await getProviderById(embeddingId);
+    }
+    
+    // 如果没有配置独立的 Embedding 服务商，则使用活跃的主服务商
+    provider ??= await _getActiveProvider();
+    
     if (provider == null) throw Exception("No active AI provider configured");
 
-    final prefs = await SharedPreferences.getInstance();
     final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
 
@@ -119,9 +128,21 @@ class LLMService {
       'Content-Type': 'application/json',
     };
 
+    // Determine embedding model based on provider
+    String embeddingModel = provider.model;
+    if (embeddingModel.isEmpty) {
+      embeddingModel = 'text-embedding-ada-002';
+      final targetBaseUrl = provider.baseUrl.toLowerCase();
+      
+      if (targetBaseUrl.contains('siliconflow')) {
+        embeddingModel = 'BAAI/bge-m3';
+      }
+    }
+
     if (enablePythonBackend) {
       requestUrl = '$backendUrl/v1/embeddings';
       headers['X-Target-Api-Key'] = provider.apiKey;
+      headers['X-Target-Model'] = embeddingModel;
       
       var targetBaseUrl = provider.baseUrl;
       if (targetBaseUrl.endsWith('/chat/completions')) {
@@ -141,14 +162,6 @@ class LLMService {
       headers['Authorization'] = 'Bearer ${provider.apiKey}';
     }
 
-    // Determine embedding model based on provider
-    String embeddingModel = 'text-embedding-ada-002';
-    final targetBaseUrl = provider.baseUrl.toLowerCase();
-    
-    if (targetBaseUrl.contains('siliconflow')) {
-      embeddingModel = 'BAAI/bge-m3';
-    }
-
     try {
       final response = await http.post(
         Uri.parse(requestUrl),
@@ -158,7 +171,7 @@ class LLMService {
           'model': embeddingModel,
         }),
       );
-
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         

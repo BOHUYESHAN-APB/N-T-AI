@@ -82,6 +82,7 @@ class SettingsController extends ChangeNotifier {
   static const _kEnableSpeechRefinement = 'settings.agent.speechRefinement.enabled';
   static const _kToolCallingProviderId = 'settings.agent.toolCallingProviderId';
   static const _kDeepResearchProviderId = 'settings.agent.deepResearchProviderId';
+  static const _kEmbeddingProviderId = 'settings.agent.embeddingProviderId';
   // Legacy font mode key (for migration only)
   static const _kFontMode = 'settings.ui.fontMode';
   // New font settings keys
@@ -155,6 +156,8 @@ class SettingsController extends ChangeNotifier {
     // final live2dModelPath = _prefs.getString(_kLive2dModelPath) ?? '';
     final rotationEnabled = _prefs.getBool(_kAiRotationEnabled) ?? false;
     final activeVisionId = _prefs.getString(_kAiActiveVisionId);
+    final activeMotionId = _prefs.getString(_kMotionProviderId);
+    final live2dModelPath = _prefs.getString(_kLive2dModelPath) ?? '';
     final useMainVisionIfCapable =
         _prefs.getBool(_kUseMainVisionIfCapable) ?? true;
     // final visionFallbackAgent = _prefs.getBool(_kVisionFallbackAgent) ?? true;
@@ -544,6 +547,8 @@ class SettingsController extends ChangeNotifier {
       visionMaxLength: visionMaxLen,
       activeExpressionProviderId: activeExpressionProviderId,
       activeSearchProviderId: activeSearchProviderId,
+      activeMotionProviderId: activeMotionId,
+      live2dModelPath: live2dModelPath,
       quickActions: quickActions,
       systemPrompt: systemPrompt,
       assistantName: assistantName,
@@ -565,6 +570,7 @@ class SettingsController extends ChangeNotifier {
       enableSpeechRefinement: _prefs.getBool(_kEnableSpeechRefinement) ?? false,
       activeToolCallingProviderId: _prefs.getString(_kToolCallingProviderId),
       activeDeepResearchProviderId: _prefs.getString(_kDeepResearchProviderId),
+      activeEmbeddingProviderId: _prefs.getString(_kEmbeddingProviderId),
     );
     notifyListeners();
 
@@ -723,6 +729,24 @@ class SettingsController extends ChangeNotifier {
   Future<void> setLive2dDebug(bool v) async {
     _settings = _settings.copyWith(live2dDebug: v);
     await _prefs.setBool(_kLive2dDebug, v);
+    notifyListeners();
+  }
+
+  Future<void> setLive2dModelPath(String path) async {
+    if (_settings.live2dModelPath == path) return;
+    _settings = _settings.copyWith(live2dModelPath: path);
+    await _prefs.setString(_kLive2dModelPath, path);
+    notifyListeners();
+  }
+
+  Future<void> setActiveMotionProviderId(String? id) async {
+    if (_settings.activeMotionProviderId == id) return;
+    _settings = _settings.copyWith(activeMotionProviderId: id);
+    if (id == null) {
+      await _prefs.remove(_kMotionProviderId);
+    } else {
+      await _prefs.setString(_kMotionProviderId, id);
+    }
     notifyListeners();
   }
 
@@ -906,7 +930,18 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setLive2dModelPath(String path) async {
+  Future<void> updateActiveEmbeddingProviderId(String? id) async {
+    if (id == _settings.activeEmbeddingProviderId) return;
+    _settings = _settings.copyWith(activeEmbeddingProviderId: id);
+    notifyListeners();
+    if (id == null) {
+      await _prefs.remove(_kEmbeddingProviderId);
+    } else {
+      await _prefs.setString(_kEmbeddingProviderId, id);
+    }
+  }
+
+  Future<void> updateLive2dModelPath(String path) async {
     await _prefs.setString(_kLive2dModelPath, path);
     _settings = _settings.copyWith(live2dModelPath: path);
     notifyListeners();

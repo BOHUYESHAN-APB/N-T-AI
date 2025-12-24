@@ -1,37 +1,25 @@
-"""
-Serve script for Astra-Me backend with optional self-signed certificate generation.
-Usage:
-  - Set environment variable USE_HTTPS=true to enable HTTPS (or edit app.core.config.Settings)
-  - Run: python serve.py
-
-This script will generate certs at the configured paths if they don't exist.
-"""
+# Astra-Me Serve Script
+import sys
+print("Astra-Me Backend initializing runtime...", flush=True)
 
 import os
-import sys
 import logging
 import warnings
+
 # Suppress websockets deprecation warning
 warnings.filterwarnings("ignore", category=DeprecationWarning, message="remove second argument of ws_handler")
 
-from datetime import datetime, timedelta
-
-from app.core.config import settings
-
-CRYPTO_AVAILABLE = True
-try:
-    from cryptography import x509
-    from cryptography.x509.oid import NameOID
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
-except Exception:
-    CRYPTO_AVAILABLE = False
-
-
 def ensure_certs(cert_path: str, key_path: str, hostnames=("localhost", "127.0.0.1")):
-    if not CRYPTO_AVAILABLE:
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
+    except Exception:
         raise RuntimeError("cryptography not available")
+
+    from datetime import datetime, timedelta
 
     cert_dir = os.path.dirname(os.path.abspath(cert_path))
     if not os.path.exists(cert_dir):
@@ -85,6 +73,7 @@ def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30)
     """Rotate certs if older than rotate_days. Keep previous certs with timestamp suffix.
        Returns True if certs are valid/generated, False if generation failed.
     """
+    from datetime import datetime
     try:
         if not os.path.exists(cert_path) or not os.path.exists(key_path):
             ensure_certs(cert_path, key_path)
@@ -111,23 +100,20 @@ def rotate_certs_if_needed(cert_path: str, key_path: str, rotate_days: int = 30)
 
 
 def main():
-    import uvicorn
-    import traceback
+    print("Astra-Me Backend Loader starting...")
     import socket
     import urllib.request
     import ssl
-    import json # Add json import
+    import json
+    import time
+    
+    # Deferred heavy imports
+    print("Loading core configuration...")
+    from app.core.config import settings
 
     try:
-        try:
-            from main import app as asgi_app
-        except Exception:
-            print("CRITICAL ERROR: Failed to import ASGI app from main.py")
-            traceback.print_exc()
-            print("\nPress Enter to exit...")
-            input()
-            raise
-
+        # Move heavy imports later
+        print("Checking configuration...")
         is_frozen = bool(getattr(sys, "frozen", False))
 
         if is_frozen:
@@ -203,7 +189,13 @@ def main():
                 print(f"Error writing server_info.json: {e}")
 
         if use_https:
-            if not CRYPTO_AVAILABLE:
+            crypto_available = True
+            try:
+                from cryptography import x509
+            except ImportError:
+                crypto_available = False
+
+            if not crypto_available:
                 print("WARNING: cryptography unavailable. Falling back to HTTP.")
                 use_https = False
             else:
@@ -215,6 +207,15 @@ def main():
                 if certs_ok and os.path.exists(cert_path) and os.path.exists(key_path):
                     print(f"Starting server with HTTPS at https://{host}:{port}")
                     _write_server_info("https", probe_host, port)
+                    print("Loading application modules...")
+                    import uvicorn
+                    try:
+                        from main import app as asgi_app
+                    except Exception:
+                        import traceback
+                        print("CRITICAL ERROR: Failed to import ASGI app from main.py")
+                        traceback.print_exc()
+                        sys.exit(1)
                     uvicorn.run(
                         asgi_app,
                         host=host,
@@ -229,6 +230,15 @@ def main():
         if not use_https:
             print(f"Starting server with HTTP at http://{host}:{port}")
             _write_server_info("http", probe_host, port)
+            print("Loading application modules...")
+            import uvicorn
+            try:
+                from main import app as asgi_app
+            except Exception:
+                import traceback
+                print("CRITICAL ERROR: Failed to import ASGI app from main.py")
+                traceback.print_exc()
+                sys.exit(1)
             uvicorn.run(asgi_app, host=host, port=port)
         else:
             pass
