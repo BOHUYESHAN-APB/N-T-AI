@@ -17,8 +17,7 @@ async def startup_plugins() -> None:
     from app.core.config import settings
 
     # Register Bilibili
-    if int(getattr(settings, "BILIBILI_ROOM_ID", 0) or 0) > 0:
-        register_plugin(BilibiliLivePlugin(config={"room_id": settings.BILIBILI_ROOM_ID}))
+    register_plugin(BilibiliLivePlugin())
 
     # Register Linux Env
     register_plugin(LinuxEnvPlugin())

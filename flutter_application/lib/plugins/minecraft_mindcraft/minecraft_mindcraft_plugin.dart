@@ -13,19 +13,24 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     portController = TextEditingController();
     initMessageController = TextEditingController();
     minecraftVersionController = TextEditingController();
+    agentNameController = TextEditingController();
     agentModelController = TextEditingController();
+    msEmailController = TextEditingController();
+    msPasswordController = TextEditingController();
+    mindServerPortController = TextEditingController();
   }
 
   late TextEditingController hostController;
   late TextEditingController portController;
   late TextEditingController initMessageController;
   late TextEditingController minecraftVersionController;
+  late TextEditingController agentNameController;
   late TextEditingController agentModelController;
+  late TextEditingController msEmailController;
+  late TextEditingController msPasswordController;
+  late TextEditingController mindServerPortController;
 
   String authMethod = 'offline';
-  String msEmail = ''; // 新增：微软邮箱
-  String msPassword = ''; // 新增：微软密码
-  String mindServerPort = '8080'; // 新增：管理页面端口
   bool loadMemory = false;
   String? agentProviderId;
   String language = 'zh';
@@ -66,11 +71,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     portController.text = prefs.getString('${prefix}port') ?? '-1';
     initMessageController.text = prefs.getString('${prefix}initMessage') ?? '你好！我是你的 AI 助手。';
     minecraftVersionController.text = prefs.getString('${prefix}minecraftVersion') ?? 'auto';
+    agentNameController.text = prefs.getString('${prefix}agentName') ?? 'andy';
     agentModelController.text = prefs.getString('${prefix}agentModel') ?? '';
+    msEmailController.text = prefs.getString('${prefix}msEmail') ?? '';
+    msPasswordController.text = prefs.getString('${prefix}msPassword') ?? '';
+    mindServerPortController.text = prefs.getString('${prefix}mindServerPort') ?? '8080';
     authMethod = prefs.getString('${prefix}authMethod') ?? 'offline';
-    msEmail = prefs.getString('${prefix}msEmail') ?? '';
-    msPassword = prefs.getString('${prefix}msPassword') ?? '';
-    mindServerPort = prefs.getString('${prefix}mindServerPort') ?? '8080';
     loadMemory = prefs.getBool('${prefix}loadMemory') ?? false;
     agentProviderId = prefs.getString('${prefix}agentProviderId');
     language = prefs.getString('${prefix}language') ?? 'zh';
@@ -87,11 +93,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setString('${prefix}port', portController.text);
     await prefs.setString('${prefix}initMessage', initMessageController.text);
     await prefs.setString('${prefix}minecraftVersion', minecraftVersionController.text);
+    await prefs.setString('${prefix}agentName', agentNameController.text);
     await prefs.setString('${prefix}agentModel', agentModelController.text);
+    await prefs.setString('${prefix}msEmail', msEmailController.text);
+    await prefs.setString('${prefix}msPassword', msPasswordController.text);
+    await prefs.setString('${prefix}mindServerPort', mindServerPortController.text);
     await prefs.setString('${prefix}authMethod', authMethod);
-    await prefs.setString('${prefix}msEmail', msEmail);
-    await prefs.setString('${prefix}msPassword', msPassword);
-    await prefs.setString('${prefix}mindServerPort', mindServerPort);
     await prefs.setBool('${prefix}loadMemory', loadMemory);
     await prefs.setString('${prefix}language', language);
     if (agentProviderId != null) {
@@ -132,13 +139,14 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "host": hostController.text,
       "port": int.tryParse(portController.text) ?? -1,
       "auth": authMethod,
-      "ms_email": msEmail,
-      "ms_password": msPassword,
-      "mindserver_port": mindServerPort,
+      "ms_email": msEmailController.text,
+      "ms_password": msPasswordController.text,
+      "mindserver_port": mindServerPortController.text,
       "minecraft_version": minecraftVersionController.text,
       "load_memory": loadMemory,
       "init_message": initMessageController.text,
       "language": language,
+      "agent_name": agentNameController.text,
       "agent_model": effectiveModel,
       "agent_api_key": agentApiKey,
       "agent_base_url": agentBaseUrl,
@@ -237,8 +245,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
-                      onChanged: (v) => _updateState(() => mindServerPort = v),
-                      decoration: InputDecoration(labelText: '管理端口', hintText: mindServerPort),
+                      controller: mindServerPortController,
+                      decoration: const InputDecoration(labelText: '管理端口', hintText: '8080'),
                     ),
                   ),
                 ],
@@ -258,15 +266,15 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   children: [
                     Expanded(
                       child: TextField(
-                        onChanged: (v) => _updateState(() => msEmail = v),
-                        decoration: InputDecoration(labelText: '微软邮箱 (可选)', hintText: msEmail),
+                        controller: msEmailController,
+                        decoration: const InputDecoration(labelText: '微软邮箱 (可选)', hintText: 'example@outlook.com'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
-                        onChanged: (v) => _updateState(() => msPassword = v),
-                        decoration: InputDecoration(labelText: '密码 (可选)', hintText: msPassword),
+                        controller: msPasswordController,
+                        decoration: const InputDecoration(labelText: '密码 (可选)', hintText: '******'),
                         obscureText: true,
                       ),
                     ),
@@ -288,6 +296,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   ...providers.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))),
                 ],
                 onChanged: (v) => _updateState(() => agentProviderId = v),
+              ),
+              TextField(
+                controller: agentNameController,
+                decoration: const InputDecoration(labelText: 'AI 代理名称 (必须与游戏内角色名一致)', hintText: 'andy'),
               ),
               TextField(
                 controller: agentModelController,
@@ -331,7 +343,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                     ),
                     icon: const Icon(Icons.open_in_browser),
-                    label: const Text('管理页面 (8080)'),
+                    label: const Text('管理页面'),
                   ),
                 ],
               ),
@@ -425,7 +437,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
               ElevatedButton.icon(
                 onPressed: () => _openWebUI(),
                 icon: const Icon(Icons.open_in_browser),
-                label: const Text('打开 MindCraft 管理界面 (8080)'),
+                label: const Text('打开 MindCraft 管理界面'),
               ),
             ],
           ),
@@ -458,7 +470,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     
     // 提取后端的主机地址，使用配置的端口
     final backendUri = Uri.parse(backendUrl);
-    final uri = Uri.parse('http://${backendUri.host}:$mindServerPort');
+    final uri = Uri.parse('http://${backendUri.host}:${mindServerPortController.text}');
     
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);

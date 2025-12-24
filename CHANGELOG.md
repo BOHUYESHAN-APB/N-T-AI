@@ -1,5 +1,26 @@
 # 更新日志 (Changelog)
 
+## [0.3.13-beta] - 2025-12-25
+
+### 新增 (Added)
+- **Minecraft-mindcraft 插件深度集成**:
+    - **核心升级**: 采用 `mindcraft-develop` 最新核心，支持更复杂的生存逻辑与自动化。
+    - **AI 名称配置**: 前端新增“AI 代理名称”配置项，支持动态覆盖 Minecraft 角色名，有效防止 AI “自言自语”问题。
+    - **全平台 API 桥接**: 自动将 `agent_api_key` 映射至 OpenAI, Gemini, Anthropic, DeepSeek 等 10+ 种主流模型服务商环境变量。
+    - **微软登录增强**: 实现了微软 OAuth 验证码的实时捕获与前端 UI 同步显示。
+
+### 修复 (Fixed)
+- **进程残留彻底清理**: 在 Windows 下引入 `taskkill /F /T` 强制杀死整个 Node.js 进程树，解决了关闭插件后 MindServer 进程依然滞留的问题。
+- **Bilibili 插件 404 故障**: 优化了后端插件注册机制，确保 Bilibili 插件在任何配置下都能正确响应配置接口，修复了动态开启时的 404 错误。
+- **Windows 依赖兼容性**: 
+    - 移除了导致 Windows 编译失败的 `canvas` 和 `node-canvas-webgl` 强依赖，采用优雅降级处理。
+    - 修复了 `eslint` 模块在生产环境下不可用的 `ERR_MODULE_NOT_FOUND` 错误。
+- **依赖路径修正**: 修复了 `mineflayer` 的本地路径依赖问题，统一使用 npm 托管版本以提升跨环境兼容性。
+
+### 优化 (Changed)
+- **UI 细节优化**: 移除了 Bilibili 配置页按钮上硬编码的端口显示，界面更加简洁。
+- **日志净化**: 修复了 `mindserver.js` 中因 `agentName` 未初始化导致的 "undefined restart" 异常日志。
+
 ## [0.3.12-beta] - 2025-12-24
 
 ### 新增 (Added)

@@ -61,6 +61,10 @@ class MinecraftMindcraftPlugin(BasePlugin):
         if self.is_active:
             return True
         
+        # 清除旧的验证码
+        self.ms_auth_code = None
+        self.ms_auth_url = None
+        
         try:
             # 将配置通过环境变量传递
             env = os.environ.copy()
@@ -74,20 +78,56 @@ class MinecraftMindcraftPlugin(BasePlugin):
             # 合并来自后端的实时配置
             combined_config.update(self.config)
             
-            # 特殊处理 API Keys (如果提供了)
+            # 处理 AI 名称映射
+            if combined_config.get("agent_name"):
+                # 离线模式下，使用 agent_name 作为游戏内名称
+                if combined_config.get("auth") == "offline":
+                    combined_config["username"] = combined_config["agent_name"]
+            
+            # 处理微软登录配置映射
+            if combined_config.get("auth") == "microsoft":
+                if combined_config.get("ms_email"):
+                    combined_config["username"] = combined_config["ms_email"]
+                if combined_config.get("ms_password"):
+                    combined_config["password"] = combined_config["ms_password"]
+
+            # 特殊处理 API Keys
             if combined_config.get("agent_api_key"):
-                # 我们可以创建一个临时 keys.json 或者直接通过环境变量/代码修改
-                # MindCraft 默认读取 keys.json，我们需要确保它能拿到 key
                 keys_path = os.path.join(self.src_dir, "keys.json")
                 keys_data = {}
                 if os.path.exists(keys_path):
-                    with open(keys_path, 'r') as f:
-                        keys_data = json.load(f)
+                    try:
+                        with open(keys_path, 'r') as f:
+                            keys_data = json.load(f)
+                    except:
+                        pass
                 
-                # 简单映射：目前我们先支持通用 provider 逻辑
-                # 这里可以根据 provider 进一步细化
-                keys_data["OPENAI_API_KEY"] = combined_config["agent_api_key"]
-                # ... 其他 key 映射
+                # 映射到 MindCraft 支持的所有环境变量
+                api_key = combined_config["agent_api_key"]
+                keys_data["OPENAI_API_KEY"] = api_key
+                keys_data["ANTHROPIC_API_KEY"] = api_key
+                keys_data["GEMINI_API_KEY"] = api_key
+                keys_data["GOOGLE_API_KEY"] = api_key
+                keys_data["MISTRAL_API_KEY"] = api_key
+                keys_data["GROQ_API_KEY"] = api_key
+                keys_data["GROQCLOUD_API_KEY"] = api_key
+                keys_data["DEEPSEEK_API_KEY"] = api_key
+                keys_data["XAI_API_KEY"] = api_key
+                keys_data["QWEN_API_KEY"] = api_key
+                keys_data["REPLICATE_API_KEY"] = api_key
+                keys_data["HUGGINGFACE_API_KEY"] = api_key
+                keys_data["NOVITA_API_KEY"] = api_key
+                keys_data["OPENROUTER_API_KEY"] = api_key
+                keys_data["GHLF_API_KEY"] = api_key
+                keys_data["HYPERBOLIC_API_KEY"] = api_key
+                keys_data["CEREBRAS_API_KEY"] = api_key
+                keys_data["MERCURY_API_KEY"] = api_key
+                
+                # 如果提供了 Base URL，也尝试映射（虽然 MindCraft 主要是通过模型前缀判断，但有些自定义模型可能需要）
+                if combined_config.get("agent_base_url"):
+                    # MindCraft 的某些模型实现支持从 keys.json 读取 base_url
+                    # 这里暂存一下，具体取决于模型实现
+                    pass
                 
                 with open(keys_path, 'w') as f:
                     json.dump(keys_data, f, indent=4)
@@ -120,12 +160,22 @@ class MinecraftMindcraftPlugin(BasePlugin):
     async def deactivate(self):
         """停止插件进程"""
         if self._process:
-            self._process.terminate()
+            pid = self._process.pid
             try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
+                if os.name == 'nt':
+                    # Windows 下强制杀死进程树
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                else:
+                    self._process.terminate()
+                    try:
+                        self._process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        self._process.kill()
+            except Exception as e:
+                logger.error(f"停止 Minecraft-mindcraft 进程 {pid} 失败: {e}")
+            
             self._process = None
+        
         self.is_active = False
         logger.info("Minecraft-mindcraft 插件已停止")
         return True

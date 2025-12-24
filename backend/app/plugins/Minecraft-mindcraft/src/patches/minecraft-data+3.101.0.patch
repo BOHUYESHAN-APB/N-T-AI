@@ -1,0 +1,82 @@
+diff --git a/node_modules/minecraft-data/data.js b/node_modules/minecraft-data/data.js
+index 89b0744..7c712b0 100644
+--- a/node_modules/minecraft-data/data.js
++++ b/node_modules/minecraft-data/data.js
+@@ -1639,6 +1639,33 @@ module.exports =
+       get version () { return require("./minecraft-data/data/pc/1.21.8/version.json") },
+       get windows () { return require("./minecraft-data/data/pc/1.16.1/windows.json") },
+       proto: __dirname + '/minecraft-data/data/pc/latest/proto.yml'
++    },
++    '1.21.11': {
++      get attributes () { return require("./minecraft-data/data/pc/1.21.8/attributes.json") },
++      get blockCollisionShapes () { return require("./minecraft-data/data/pc/1.21.8/blockCollisionShapes.json") },
++      get blocks () { return require("./minecraft-data/data/pc/1.21.8/blocks.json") },
++      get blockLoot () { return require("./minecraft-data/data/pc/1.20/blockLoot.json") },
++      get biomes () { return require("./minecraft-data/data/pc/1.21.8/biomes.json") },
++      get commands () { return require("./minecraft-data/data/pc/1.20.3/commands.json") },
++      get effects () { return require("./minecraft-data/data/pc/1.21.8/effects.json") },
++      get enchantments () { return require("./minecraft-data/data/pc/1.21.8/enchantments.json") },
++      get entities () { return require("./minecraft-data/data/pc/1.21.8/entities.json") },
++      get entityLoot () { return require("./minecraft-data/data/pc/1.20/entityLoot.json") },
++      get foods () { return require("./minecraft-data/data/pc/1.21.8/foods.json") },
++      get instruments () { return require("./minecraft-data/data/pc/1.21.8/instruments.json") },
++      get items () { return require("./minecraft-data/data/pc/1.21.8/items.json") },
++      get language () { return require("./minecraft-data/data/pc/1.21.8/language.json") },
++      get loginPacket () { return require("./minecraft-data/data/pc/1.21.3/loginPacket.json") },
++      get mapIcons () { return require("./minecraft-data/data/pc/1.20.2/mapIcons.json") },
++      get materials () { return require("./minecraft-data/data/pc/1.21.8/materials.json") },
++      get particles () { return require("./minecraft-data/data/pc/1.21.8/particles.json") },
++      get protocol () { return require("./minecraft-data/data/pc/1.21.8/protocol.json") },
++      get recipes () { return require("./minecraft-data/data/pc/1.21.8/recipes.json") },
++      get sounds () { return require("./minecraft-data/data/pc/1.21.8/sounds.json") },
++      get tints () { return require("./minecraft-data/data/pc/1.21.8/tints.json") },
++      get version () { return require("./minecraft-data/data/pc/1.21.11/version.json") },
++      get windows () { return require("./minecraft-data/data/pc/1.16.1/windows.json") },
++      proto: __dirname + '/minecraft-data/data/pc/latest/proto.yml'
+     }
+   },
+   'bedrock': {
+diff --git a/node_modules/minecraft-data/minecraft-data/data/pc/1.21.11/version.json b/node_modules/minecraft-data/minecraft-data/data/pc/1.21.11/version.json
+new file mode 100644
+index 0000000..93c7df1
+--- /dev/null
++++ b/node_modules/minecraft-data/minecraft-data/data/pc/1.21.11/version.json
+@@ -0,0 +1,6 @@
++{
++  "version": 774,
++  "minecraftVersion": "1.21.11",
++  "majorVersion": "1.21",
++  "releaseType": "release"
++}
+diff --git a/node_modules/minecraft-data/minecraft-data/data/pc/1.21.6/protocol.json b/node_modules/minecraft-data/minecraft-data/data/pc/1.21.6/protocol.json
+index 7713e07..ee96ff7 100644
+--- a/node_modules/minecraft-data/minecraft-data/data/pc/1.21.6/protocol.json
++++ b/node_modules/minecraft-data/minecraft-data/data/pc/1.21.6/protocol.json
+@@ -9036,7 +9036,7 @@
+             },
+             {
+               "name": "checksum",
+-              "type": "i8"
++              "type": "u8"
+             }
+           ]
+         ],
+diff --git a/node_modules/minecraft-data/minecraft-data/data/pc/common/protocolVersions.json b/node_modules/minecraft-data/minecraft-data/data/pc/common/protocolVersions.json
+index 48dfb47..0806b4f 100644
+--- a/node_modules/minecraft-data/minecraft-data/data/pc/common/protocolVersions.json
++++ b/node_modules/minecraft-data/minecraft-data/data/pc/common/protocolVersions.json
+@@ -63,6 +63,14 @@
+     "majorVersion": "1.21",
+     "releaseType": "snapshot"
+   },
++  {
++    "minecraftVersion": "1.21.11",
++    "version": 774,
++    "dataVersion": 4556,
++    "usesNetty": true,
++    "majorVersion": "1.21",
++    "releaseType": "release"
++  },
+   {
+     "minecraftVersion": "1.21.10",
+     "version": 773,

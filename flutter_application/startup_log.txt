@@ -728,3 +728,126 @@
 [2025-12-24T22:56:10.938938] FireflyScreen.build started
 [2025-12-24T22:56:10.999996] FireflyScreen.build started
 [2025-12-24T22:56:34.722341] HomeShell.build
+[2025-12-24T23:00:35.115125] Application Starting...
+[2025-12-24T23:00:35.166534] Logger initialized
+[2025-12-24T23:00:35.214238] Sqflite initialized
+[2025-12-24T23:00:35.220367] Loading Settings...
+[2025-12-24T23:00:35.256632] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:00:35.258643] Initializing BackendService...
+[2025-12-24T23:00:35.334716] BackendService initialized
+[2025-12-24T23:00:35.353347] Running App...
+[2025-12-24T23:00:35.433435] NTApp.build started
+[2025-12-24T23:00:35.711575] HomeShell.build
+[2025-12-24T23:00:35.884938] FireflyScreen.build started
+[2025-12-24T23:00:37.198704] FireflyScreen.build started
+[2025-12-24T23:00:37.291556] FireflyScreen.build started
+[2025-12-24T23:01:02.173369] HomeShell.build
+[2025-12-24T23:01:03.715416] HomeShell.build
+[2025-12-24T23:11:15.078734] Application Starting...
+[2025-12-24T23:11:15.130566] Logger initialized
+[2025-12-24T23:11:15.172185] Sqflite initialized
+[2025-12-24T23:11:15.176858] Loading Settings...
+[2025-12-24T23:11:15.209887] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:11:15.211418] Initializing BackendService...
+[2025-12-24T23:11:15.274454] BackendService initialized
+[2025-12-24T23:11:15.291982] Running App...
+[2025-12-24T23:11:15.366984] NTApp.build started
+[2025-12-24T23:11:15.654830] HomeShell.build
+[2025-12-24T23:11:15.828733] FireflyScreen.build started
+[2025-12-24T23:11:17.115384] FireflyScreen.build started
+[2025-12-24T23:11:17.230112] FireflyScreen.build started
+[2025-12-24T23:11:19.712839] HomeShell.build
+[2025-12-24T23:15:20.681449] Application Starting...
+[2025-12-24T23:15:20.728864] Logger initialized
+[2025-12-24T23:15:20.768678] Sqflite initialized
+[2025-12-24T23:15:20.774749] Loading Settings...
+[2025-12-24T23:15:20.810154] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:15:20.812153] Initializing BackendService...
+[2025-12-24T23:15:20.883242] BackendService initialized
+[2025-12-24T23:15:20.904785] Running App...
+[2025-12-24T23:15:20.983185] NTApp.build started
+[2025-12-24T23:15:21.237491] HomeShell.build
+[2025-12-24T23:15:21.416817] FireflyScreen.build started
+[2025-12-24T23:15:22.912882] FireflyScreen.build started
+[2025-12-24T23:18:34.372222] HomeShell.build
+[2025-12-24T23:20:54.797965] Application Starting...
+[2025-12-24T23:20:54.863039] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:21:01.202970] Application Starting...
+[2025-12-24T23:21:01.269041] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:23:37.566236] Application Starting...
+[2025-12-24T23:23:37.610054] Logger initialized
+[2025-12-24T23:23:37.647834] Sqflite initialized
+[2025-12-24T23:23:37.652688] Loading Settings...
+[2025-12-24T23:23:37.680404] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:23:37.681903] Initializing BackendService...
+[2025-12-24T23:23:37.737723] BackendService initialized
+[2025-12-24T23:23:37.751336] Running App...
+[2025-12-24T23:23:37.816626] NTApp.build started
+[2025-12-24T23:23:38.047593] HomeShell.build
+[2025-12-24T23:23:38.195654] FireflyScreen.build started
+[2025-12-24T23:23:39.309404] FireflyScreen.build started
+[2025-12-24T23:23:39.416750] Application Starting...
+[2025-12-24T23:23:39.504884] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:23:44.615670] HomeShell.build
+[2025-12-24T23:36:09.992905] Application Starting...
+[2025-12-24T23:36:10.091990] Logger initialized
+[2025-12-24T23:36:10.199151] Sqflite initialized
+[2025-12-24T23:36:10.213222] Loading Settings...
+[2025-12-24T23:36:10.299623] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:36:10.303718] Initializing BackendService...
+[2025-12-24T23:36:10.542754] BackendService initialized
+[2025-12-24T23:36:10.640538] Running App...
+[2025-12-24T23:36:10.919558] NTApp.build started
+[2025-12-24T23:36:11.600645] HomeShell.build
+[2025-12-24T23:36:11.965800] FireflyScreen.build started
+[2025-12-24T23:36:14.689830] FireflyScreen.build started
+[2025-12-24T23:36:19.089354] HomeShell.build
+[2025-12-24T23:53:05.192634] Application Starting...
+[2025-12-24T23:53:05.275763] Logger initialized
+[2025-12-24T23:53:05.343852] Sqflite initialized
+[2025-12-24T23:53:05.352940] Loading Settings...
+[2025-12-24T23:53:05.414035] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:53:05.417079] Initializing BackendService...
+[2025-12-24T23:53:05.535089] BackendService initialized
+[2025-12-24T23:53:05.565147] Running App...
+[2025-12-24T23:53:05.699728] NTApp.build started
+[2025-12-24T23:53:06.141168] HomeShell.build
+[2025-12-24T23:53:06.402126] FireflyScreen.build started
+[2025-12-24T23:53:08.304102] FireflyScreen.build started
+[2025-12-24T23:53:08.426720] FireflyScreen.build started
+[2025-12-24T23:53:43.355576] HomeShell.build
+[2025-12-24T23:53:47.547699] Application Starting...
+[2025-12-24T23:53:47.658959] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:55:15.077294] Application Starting...
+[2025-12-24T23:55:15.186078] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:55:41.857878] FireflyScreen.build started
+[2025-12-24T23:55:42.994889] FireflyScreen.build started
+[2025-12-24T23:55:43.120476] FireflyScreen.build started
+[2025-12-24T23:55:43.212711] FireflyScreen.build started
+[2025-12-24T23:55:43.307749] FireflyScreen.build started
+[2025-12-24T23:55:43.389439] FireflyScreen.build started
+[2025-12-24T23:57:29.194756] Application Starting...
+[2025-12-24T23:57:29.289854] Logger initialized
+[2025-12-24T23:57:29.360329] Sqflite initialized
+[2025-12-24T23:57:29.369743] Loading Settings...
+[2025-12-24T23:57:29.424027] Settings loaded. Backend URL: http://127.0.0.1:23456
+[2025-12-24T23:57:29.426570] Initializing BackendService...
+[2025-12-24T23:57:31.532116] BackendService initialized
+[2025-12-24T23:57:31.551070] Running App...
+[2025-12-24T23:57:31.678873] NTApp.build started
+[2025-12-24T23:57:32.115774] HomeShell.build
+[2025-12-24T23:57:32.426833] FireflyScreen.build started
+[2025-12-24T23:57:34.402791] FireflyScreen.build started
+[2025-12-24T23:57:34.497197] FireflyScreen.build started
+[2025-12-24T23:57:34.597306] Application Starting...
+[2025-12-24T23:57:34.701618] Exiting due to WebViewTitleBarWidget
+[2025-12-24T23:57:38.885176] FireflyScreen.build started
+[2025-12-24T23:57:42.618210] FireflyScreen.build started
+[2025-12-24T23:57:44.180030] FireflyScreen.build started
+[2025-12-24T23:57:45.985477] FireflyScreen.build started
+[2025-12-24T23:57:47.846905] FireflyScreen.build started
+[2025-12-24T23:57:51.306106] HomeShell.build
+[2025-12-24T23:57:55.583501] Application Starting...
+[2025-12-24T23:57:55.703397] Exiting due to WebViewTitleBarWidget
+[2025-12-25T00:02:57.122003] Application Starting...
+[2025-12-25T00:02:57.235015] Exiting due to WebViewTitleBarWidget
