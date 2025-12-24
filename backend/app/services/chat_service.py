@@ -10,6 +10,7 @@ from app.services.search_service import SearchService
 from app.services.audio_service import AudioService
 from app.services.meme_service import MemeService
 from app.services.live2d_service import manager as live2d_manager
+from app.services.vts_service import vts_service
 from app.core.prompts import (
     FIREFLY_PERSONA_BASIC,
     FIREFLY_PERSONA_ADVANCED,
@@ -276,6 +277,7 @@ class ChatService:
         # Stream LLM Response
         full_response_text = ""
         sentence_buffer = ""
+        first_chunk_received = False
         
         # Define punctuation that marks end of a TTS-able chunk
         if tts_mode == "stream":
@@ -294,6 +296,11 @@ class ChatService:
             enable_thinking=enable_thinking
         ):
             if not chunk: continue
+            
+            if not first_chunk_received:
+                first_chunk_received = True
+                # Trigger a "talking/thinking" expression when we start getting response
+                asyncio.create_task(self._broadcast_expression(self.expression_service.preset_expressions["thinking"]))
             
             full_response_text += chunk
             sentence_buffer += chunk
@@ -346,6 +353,10 @@ class ChatService:
             session.add(Conversation(role="assistant", content=full_response_text, session_id=session_id))
             session.commit()
             
+        # Trigger Expression based on full response text
+        expression_data = self.expression_service.get_expression_from_text(full_response_text)
+        await self._broadcast_expression(expression_data)
+
         if background_tasks:
             background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": full_response_text}], target_api_key, target_base_url, target_model)
             if random.random() < learning_probability:
@@ -420,6 +431,17 @@ class ChatService:
         except Exception as e:
             logger.error(f"[Backend TTS] Error generating audio: {e}", exc_info=True)
 
+
+    async def _broadcast_expression(self, expression_data: Dict[str, Any]):
+        """统一广播表现数据到 Live2D 前端和 VTube Studio"""
+        # 1. 广播到前端 Live2D 渲染器
+        await live2d_manager.broadcast({
+            "type": "expression",
+            "data": expression_data
+        })
+        
+        # 2. 同步到 VTube Studio (后台静默执行)
+        asyncio.create_task(vts_service.sync_live2d_data(expression_data))
 
     async def process_message(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
                             session_id: str = None,
@@ -693,20 +715,14 @@ class ChatService:
                     })
                     
                     # Trigger Live2D Thinking Expression
-                    # Only trigger periodically or on first chunk? 
-                    # Since this is a full response from llm_service (non-streaming in this loop), 
-                    # we get the whole thinking block at once.
-                    await live2d_manager.broadcast({
-                        "type": "expression",
-                        "data": {
-                            "mouth": 0.0,
-                            "eyes": 1.0,
-                            "eyebrow": 0.4,
-                            "blush": 0.0,
-                            "pupilX": 0.0,
-                            "pupilY": 0.6, # Look up
-                            "headTilt": 8.0
-                        }
+                    await self._broadcast_expression({
+                        "mouth": 0.0,
+                        "eyes": 1.0,
+                        "eyebrow": 0.4,
+                        "blush": 0.0,
+                        "pupilX": 0.0,
+                        "pupilY": 0.6, # Look up
+                        "headTilt": 8.0
                     })
                 
                 # Broadcast Tool Calls (Native)
@@ -719,17 +735,14 @@ class ChatService:
                     })
                     
                     # Trigger Live2D Tool/Search Expression
-                    await live2d_manager.broadcast({
-                        "type": "expression",
-                        "data": {
-                            "mouth": 0.2,
-                            "eyes": 1.0,
-                            "eyebrow": 0.2,
-                            "blush": 0.0,
-                            "pupilX": 0.8, # Look side
-                            "pupilY": 0.0,
-                            "headTilt": -5.0
-                        }
+                    await self._broadcast_expression({
+                        "mouth": 0.2,
+                        "eyes": 1.0,
+                        "eyebrow": 0.2,
+                        "blush": 0.0,
+                        "pupilX": 0.8, # Look side
+                        "pupilY": 0.0,
+                        "headTilt": -5.0
                     })
 
             except Exception as e:
@@ -841,6 +854,10 @@ class ChatService:
             ai_msg = Conversation(role="assistant", content=final_response_text, session_id=session_id)
             session.add(ai_msg)
             session.commit()
+
+        # 6.1 Trigger Expression based on Response Text
+        expression_data = self.expression_service.get_expression_from_text(final_response_text)
+        await self._broadcast_expression(expression_data)
 
         try:
             await live2d_manager.broadcast(

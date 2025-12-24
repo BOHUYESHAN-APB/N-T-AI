@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.8%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.12%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Afdian-pink)](https://afdian.com/a/N-T-AI)
@@ -42,49 +42,43 @@ If you find this project helpful, please consider supporting us:
 
 ### 1. Multimodal & Emotional Engine
 *   **Expression Agent**: Real-time emotional inference engine that displays dynamic expressions (Dynamic Island style) based on conversation context.
+*   **VTube Studio (VTS) Integration**: Full support for syncing AI emotions and motions to VTube Studio, driving high-precision 2D/3D models.
 *   **Live2D Integration**: Full support for Live2D models with motion tracking, emotional feedback loops, and smooth animation transitions.
 *   **Vision Capabilities**: 
     *   **Direct Input**: Support for multimodal interactions using GPT-4o, Claude 3.5 Sonnet, Qwen-VL, etc.
     *   **Vision Fallback Agent**: Automatically delegates image understanding to a specialized Vision Agent if the primary model lacks vision support.
-*   **Meme Service**: The AI can proactively send memes based on conversation context to enhance engagement (migrated to Python backend for advanced semantic matching).
+*   **Meme Service**: The AI can proactively send memes based on conversation context to enhance engagement.
 
 ### 2. Autonomous Agent System (ReAct)
 *   **Web Search & Browsing**: The system can autonomously search the web (DuckDuckGo, Bing, Baidu) and visit webpages to answer complex questions.
 *   **Minecraft AI Integration**: 
     *   **High-Level Intelligence**: Integrated with **MindCraft**, enabling the AI to play Minecraft with complex goal-oriented behaviors.
+    *   **RAG Enhancement**: The AI can now retrieve long-term memories, remembering past interactions even while in-game.
     *   **Visual POV Streaming**: Real-time first-person perspective rendering from the bot's eyes.
-    *   **OBS Stream HUD**: Dedicated pure-stream view (`/plugins/minecraft/stream`) with real-time HUD (Health, Food, Position) for OBS capture.
-    *   **LLM Translation**: Automatic translation of in-game chat using the main LLM for seamless cross-language interaction.
-*   **Multi-Engine Fallback**: Automatically switches search engines if results are insufficient.
+    *   **OBS Stream HUD**: Dedicated pure-stream view (`/plugins/minecraft/stream`) with real-time HUD.
+    *   **Zero-Config Sync**: Frontend API keys and URLs are automatically synced to the Minecraft plugin for a seamless out-of-the-box experience.
+*   **Multi-Engine Fallback**: Automatically switches search engines and validates images if results are insufficient.
 *   **Voice Interaction (Beta)**:
-    *   **Cloud STT/TTS**: Supports Speech-to-Text and Text-to-Speech via cloud APIs (e.g., SiliconFlow).
-    *   **FFmpeg Fallback (Backend, Windows Recommended)**: We currently recommend Windows deployments and bundle a prebuilt FFmpeg package from https://github.com/BtbN/FFmpeg-Builds. For other platforms, please provide your own FFmpeg binary and adjust code/config as needed (aggregation-only, no source modification; see https://ffmpeg.org/).
-    *   **Push-to-Talk**: Built-in push-to-talk recording in the chat interface.
-    *   **Virtual Microphone Injection (Optional)**: Inject TTS audio into a “virtual microphone (input device)” for Discord/KOOK-like voice apps.
-    *   **Local Voice Models (Planned)**:
-        *   **TTS**: IndexTTS-2, CosyVoice (prioritize CosyVoice 3.0 for local packaging; cloud providers may not expose new features yet).
-        *   **STT**: Fun-ASR-Nano (Chinese dialect coverage), Fun-ASR-MLT-Nano (multi-language coverage).
-    *   **Emotion Signal Propagation (Planned)**: Normalize TTS style/emotion parameters and STT emotion recognition (e.g., `emotion`/`intensity`/`arousal`/`valence`) and report them to the main brain to understand tone and drive Live2D fine-grained expressions/motions.
+    *   **Cloud STT/TTS**: Supports Speech-to-Text and Text-to-Speech via cloud APIs.
+    *   **Virtual Microphone Injection**: Inject TTS audio into a virtual input device for Discord/KOOK-like voice apps.
 *   **Tool Execution**: Capable of executing defined tools to interact with the environment.
-*   **Claude Skills & MCP Agent Integration**: Leverages advanced "Claude skills" for complex reasoning and "MCP agent" for orchestrating multi-task workflows, enabling the agent to complete more sophisticated tasks by combining these capabilities.
+*   **Claude Skills & MCP Agent Integration**: Leverages advanced "Claude skills" for complex reasoning and "MCP agent" for orchestrating multi-task workflows.
 
-### 3. Memory & Personalization
-*   **Long-term Memory**: Remembers user preferences, facts, and past conversations to build a continuous relationship.
-*   **Persona System**: Customizable system prompts and "Thinking" styles.
-    *   **Basic**: Sets the core identity and name, ideal for low-latency or pure assistant tasks.
-    *   **Advanced**: Adds detailed personality traits, curiosity, and empathy layers.
-    *   **Full (Default)**: The complete "Digital Life" experience, including self-awareness, emotional memory, and autonomous behavior simulation.
+### 3. Memory & Knowledge Base (RAG)
+*   **Retrieval-Augmented Generation (RAG)**:
+    *   **Multi-Source Integration**: Connect text notes, whiteboard exports, and external documents to the memory system.
+    *   **Cross-Plugin Connectivity**: Memory retrieval is now available for plugins like Minecraft, ensuring personality consistency across scenarios.
+*   **Long-term Memory**: Remembers user preferences, facts, and past conversations using a local SQLite-based vector store.
+*   **Persona System**: Customizable system prompts and "Thinking" styles, with auto-generation support via Web Search.
 
-### 4. Cross-Platform Support
+### 4. Notes & Whiteboard
+*   **Text Notes**: Built-in note system with basic Markdown support.
+*   **Whiteboard Notes**: Visual note type powered by an offline copy of [Excalidraw](https://github.com/excalidraw/excalidraw).
+
+### 5. Cross-Platform Support
 *   **Windows**: MSIX installer, portable ZIP, and Docker support.
-*   **Linux**: **Docker** deployment is recommended for self-hosting.
-*   **macOS**: **Docker** deployment is strongly recommended due to signing restrictions.
+*   **Linux/macOS**: **Docker** deployment is strongly recommended for self-hosting.
 *   **Android**: APK installer available.
-
-### 5. Notes, Whiteboard & Knowledge Base
-*   **Text Notes**: Built-in note system with basic Markdown support. Advanced Obsidian-like real-time overlay preview is currently in development (see Roadmap).
-*   **Whiteboard Notes**: Visual note type powered by an offline copy of [Excalidraw](https://github.com/excalidraw/excalidraw), used as a local-only drawing surface for sketches and diagrams.
-*   **RAG-Ready Design (Planned)**: Notes, whiteboard exports, and external documents will be connectable to the memory system as a Retrieval-Augmented Generation (RAG) source to improve answer accuracy and persona consistency.
 
 ---
 
@@ -264,6 +258,7 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [x] **Stateless Backend**: Per-request target configuration via headers (`X-Target-*`), no server-side key storage.
 - [x] **Precision Logging**: Improved error logging and diagnostics across frontend and backend.
 - [x] **Minecraft AI Plugin**: Goal-oriented AI behavior, real-time POV streaming, and OBS-ready HUD.
+- [ ] **[New Plugin] Visual Closed-Loop Minecraft Agent**: Based on the **Plan4MC** reinforcement learning framework, implementing complex task planning and execution with visual feedback loops.
 - [ ] **Fast Mode (Minimal Orchestration)**: Default to the main loop; only invoke extra agents/services when required.
 - [ ] **Emotion-Aware Voice**: Bind expression/emotion signals to TTS styles/parameters; prefer evaluating omni-class models.
 - [ ] **Voice Chat Integration**: Virtual microphone injection, auto-capture, and fast routing presets for Discord/KOOK-like apps.
@@ -307,6 +302,14 @@ N-T-AI stands on the shoulders of many great open-source projects and tools.
 - **blivechat**: Our Bilibili live comment display plugin is developed with reference to this project. *License*: MIT. [Repository](https://github.com/xfgryujk/blivechat/)
 - **MindCraft**: Used for the Minecraft AI agent integration, providing high-level LLM-driven intelligence. *License*: MIT. [Repository](https://github.com/mindcraft-bots/mindcraft)
 - **Mineflayer**: Used as the base engine for Minecraft bot interactions and low-level control. *License*: MIT. [Repository](https://github.com/PrismarineJS/mineflayer)
+- **Neuro**: Referenced for VTube Studio (VTS) related design patterns and integration strategies. *License*: MIT. [Repository](https://github.com/kimjammer/Neuro)
+- **Plan4MC**: A reinforcement learning-based framework for complex task planning in Minecraft. We are currently developing a next-generation visual closed-loop Minecraft plugin based on this project. *License*: MIT. [Repository](https://github.com/PKU-RL/Plan4MC)
+
+### 🌟 Outstanding Similar Projects
+
+We would like to showcase and support other outstanding projects in the community:
+
+- **AIRI**: A high-quality AI VTuber project. Like N-T-AI, it also utilizes headless Minecraft logic for game interaction. We showcase it here to support the developer and promote diversity in the AI companion ecosystem. [Repository](https://github.com/idootp/AIRI)
 
 ### Development Tools
 - **GitHub Copilot**: Code-assist help during development.

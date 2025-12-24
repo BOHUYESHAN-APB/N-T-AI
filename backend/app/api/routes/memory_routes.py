@@ -95,6 +95,27 @@ async def get_memories(user_id: Optional[str] = None, category: Optional[str] = 
             })
         return memories
 
+@router.get("/api/v1/memory/retrieve")
+async def retrieve_memory(
+    query: str, 
+    user_id: str, 
+    api_key: Optional[str] = None, 
+    base_url: Optional[str] = None,
+    limit: int = 5
+):
+    """
+    通用 RAG 检索接口，供插件或其他服务调用。
+    """
+    svc = MemorySystemService()
+    context = await svc.retrieve_context(
+        user_query=query,
+        user_id=user_id,
+        api_key=api_key,
+        base_url=base_url,
+        fast_mode=False
+    )
+    return {"context": context}
+
 @router.delete("/api/memories/{memory_id}")
 async def delete_memory(memory_id: int):
     svc = MemorySystemService()

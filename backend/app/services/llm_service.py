@@ -115,30 +115,49 @@ class LLMService:
                 if base_url and 'siliconflow' in base_url:
                     target_model = 'BAAI/bge-m3'
                 elif base_url and 'deepseek' in base_url:
-                    # DeepSeek doesn't have an embedding model usually, but some providers might
+                    # DeepSeek doesn't have an embedding model usually
                     pass
 
             try:
                 response = await client.embeddings.create(
                     input=text,
-                    model=target_model 
+                    model=target_model,
+                    timeout=30.0 # 增加超时时间到 30s
                 )
                 return response.data[0].embedding
             except Exception as e:
-                print(f"Embedding API error for model {target_model}: {e}")
-                # If we tried text-embedding-ada-002 and failed, try bge-m3 as last resort
-                if target_model == "text-embedding-ada-002":
+                # Check for connection errors specifically
+                err_msg = str(e).lower()
+                is_connection_error = "connection" in err_msg or "timeout" in err_msg or "unreachable" in err_msg
+                
+                if not is_connection_error:
+                    print(f"Embedding API error for model {target_model}: {e}")
+                
+                # 如果是 OpenAI 模型但失败了，或者明确知道不是 OpenAI 的 base_url，尝试使用通用模型
+                # 对于非 OpenAI 渠道，text-embedding-ada-002 往往不可用，尝试回退到 BAAI/bge-m3
+                is_openai = "openai.com" in (base_url or settings.OPENAI_BASE_URL or "")
+                
+                if (target_model == "text-embedding-ada-002" or not is_openai) and not is_connection_error:
                     try:
-                        print("Falling back to BAAI/bge-m3...")
+                        fallback_model = "BAAI/bge-m3"
+                        # 如果是 siliconflow 以外的国产渠道，可能也有自己的模型名，这里先尝试通用的
+                        print(f"Attempting fallback embedding with {fallback_model}...")
                         response = await client.embeddings.create(
                             input=text,
-                            model="BAAI/bge-m3"
+                            model=fallback_model,
+                            timeout=30.0
                         )
                         return response.data[0].embedding
-                    except:
+                    except Exception as fallback_err:
+                        # print(f"Fallback embedding failed: {fallback_err}")
                         pass
+                
+                if is_connection_error:
+                    # Log connection error more cleanly to avoid spam
+                    # You could use a class-level variable to throttle this log
+                    pass
                 return []
                 
         except Exception as e:
-            print(f"Embedding Service Error: {e}")
+            # print(f"Embedding Service Error: {e}")
             return []

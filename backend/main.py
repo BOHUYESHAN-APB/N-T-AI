@@ -201,6 +201,7 @@ class FrontendLogs(BaseModel):
     max: int | None = None
 
 @app.post("/v1/embeddings")
+@app.post(f"{settings.API_V1_STR}/embeddings")
 async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
     target_api_key = raw_request.headers.get("X-Target-Api-Key")
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
@@ -305,6 +306,7 @@ async def plugin_event_stream(websocket: WebSocket, plugin_id: str):
             pass
 
 @app.post("/v1/chat/completions", response_model=OpenAIResponse)
+@app.post(f"{settings.API_V1_STR}/chat/completions", response_model=OpenAIResponse)
 async def chat_completions(request: OpenAIRequest, raw_request: Request, background_tasks: BackgroundTasks):
     logger.info(f"Received chat completion request. Model: {request.model}")
     # Extract the last user message

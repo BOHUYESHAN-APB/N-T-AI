@@ -4,7 +4,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.8%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.12%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-爱发电-pink)](https://afdian.com/a/N-T-AI)
@@ -40,54 +40,42 @@
 
 ### 1. 多模态交互与情感引擎
 *   **情感反馈 (Expression Agent)**：内置实时情感推理引擎，根据对话内容展示动态表情（灵动岛风格）。
+*   **VTube Studio (VTS) 集成**：支持将 AI 的实时情感与动作同步至 VTube Studio，驱动高精度 2D/3D 模型。
 *   **视觉能力 (Vision)**：
     *   **直接输入**：支持 GPT-4o, Claude 3.5 Sonnet, Qwen-VL 等视觉模型进行多模态交互。
-    *   **视觉代理回退 (Vision Fallback)**：如果主模型（如 DeepSeek-Chat）不支持图片，系统会自动调用专用的视觉 Agent（如 Qwen-VL）对图片进行描述，并将描述反馈给主模型，确保无缝的视觉体验。
+    *   **视觉代理回退 (Vision Fallback)**：如果主模型不支持图片，系统会自动调用专用的视觉 Agent 对图片进行语义描述并反馈给主模型。
 *   **拟人化消息流**：模拟真实人类的聊天节奏，将长回复拆分为多条短消息发送。
-*   **表情包服务 (Meme Service)**：AI 可以根据对话上下文主动发送表情包，增强互动的趣味性（已迁移至后端 Python 服务以支持更复杂的语义匹配）。
+*   **表情包服务 (Meme Service)**：AI 可以根据对话上下文主动发送表情包，增强互动的趣味性。
 
 ### 2. 自主智能体系统 (ReAct)
 *   **网络搜索与浏览**：系统可以自主搜索网络（DuckDuckGo, Bing, Baidu）并访问网页以回答复杂问题。
 *   **Minecraft AI 集成**：
     *   **高阶智能**：集成 **MindCraft**，使 AI 能够具备复杂的面向目标行为在 Minecraft 中进行游戏。
+    *   **RAG 增强**：AI 现在可以检索长期记忆，在游戏中也能记得与用户的过往互动。
     *   **视觉 POV 推流**：实时渲染机器人视角的第一人称画面。
-    *   **OBS 专用推流 HUD**：提供纯净的推流页面 (`/plugins/minecraft/stream`)，自带实时 HUD（血量、饥饿、坐标），方便 OBS 捕获。
-    *   **LLM 自动翻译**：利用主模型自动翻译游戏内聊天内容，实现无障碍跨语言交互。
-*   **多引擎回退**：
-    *   **搜索**：如果结果不足或受阻，自动按 DuckDuckGo -> Bing -> Baidu 顺序回退。
-    *   **图片搜索**：实时验证图片 URL（检查 403/404 错误）并重试不同引擎，确保图片有效显示。
+    *   **OBS 专用推流 HUD**：提供纯净的推流页面 (`/plugins/minecraft/stream`)，自带实时 HUD。
+    *   **配置同步**：前端配置的 API 自动同步，实现真正的开箱即用。
+*   **多引擎回退**：搜索与图片验证均具备多级回退逻辑，确保结果的稳定性。
 *   **语音交互 (Beta)**：
-    *   **云端 STT/TTS**：支持通过云端 API（如 SiliconFlow）进行语音转文字/文字转语音。
-    *   **FFmpeg 兜底（后端，暂仅推荐 Windows）**：目前仅推荐 Windows 用户部署，并内置使用来自 https://github.com/BtbN/FFmpeg-Builds 的编译包；其他系统请自行提供 FFmpeg 并按需修改代码/配置（仅聚合使用，不修改源代码；见 https://ffmpeg.org/）。
-    *   **按住说话**：聊天界面集成 Push-to-Talk 功能。
-    *   **虚拟麦克风注入（可选）**：可将 TTS 音频注入到“虚拟麦克风（输入设备）”，用于对接 Discord/KOOK 等语音软件。
-    *   **本地语音模型（计划）**：
-        *   **TTS**：IndexTTS-2、CosyVoice（本地打包时优先接入 CosyVoice 3.0；云端侧可能暂未同步新版本特性）。
-        *   **STT**：Fun-ASR-Nano（更偏中文方言覆盖）、Fun-ASR-MLT-Nano（更偏多语种覆盖）。
-    *   **情感信号回传（计划）**：TTS 的风格/情感参数与 STT 的情感识别结果会归一化（如 `emotion`/`intensity`/`arousal`/`valence`）后上报主脑，用于理解语气与驱动 Live2D 细粒度表情/动作。
+    *   **云端 STT/TTS**：支持通过云端 API 进行语音转文字/文字转语音。
+    *   **虚拟麦克风注入**：可将 TTS 音频注入到虚拟输入设备，用于 Discord/KOOK 等软件。
 *   **工具执行**：能够执行定义的工具来与环境交互。
-*   **Claude Skills 与 MCP Agent 集成**：利用先进的 "Claude 技能" 进行复杂推理，并结合 "MCP Agent" 编排多任务工作流，通过整合这些能力，使 Agent 能够完成更复杂的任务。
-*   **纯前端模式 (计划中)**：未来的更新将直接在 Flutter 前端实现这些 Agent 能力，移除对 Python 后端的依赖。
+*   **Claude Skills 与 MCP Agent 集成**：利用先进的 "Claude 技能" 进行复杂推理，并结合 "MCP Agent" 编排多任务工作流。
 
-### 3. 记忆与个性化
-*   **高度可定制的人设**：
-    *   **首次运行向导**：引导用户自定义助手名称与系统提示词。
-    *   **自动人设生成**：内置 Web Search 工具，可自动搜索角色资料（如萌娘百科）并生成详细的 System Prompt。
-    *   **双语品牌展示**：UI 支持双语标题展示（如 "Firefly / 流萤"），增强沉浸感。
-*   **隐私优先的记忆管理**：
-    *   **统一记忆管理**：原生界面查看、编辑、删除长期记忆。
-    *   **本地优先架构**：所有聊天记录、设置、记忆均存储在本地 SQLite 与 SharedPreferences 中。
-    *   **数据主权**：设置中明确区分 "本地备份" 与 "后端数据"。
+### 3. 记忆与知识库 (RAG)
+*   **检索增强生成 (RAG)**：
+    *   **多源接入**：支持将文本笔记、白板导出及外部文档接入记忆系统。
+    *   **跨插件联动**：记忆系统已开放给 Minecraft 等插件使用，增强跨场景的一致性。
+*   **长期记忆管理**：原生界面查看、编辑、删除长期记忆，所有数据均存储在本地 SQLite 中。
+*   **高度可定制的人设**：支持通过 Web Search 自动生成角色资料并构建 System Prompt。
 
-### 4. 笔记、白板与知识库
-*   **文本笔记**: 内置笔记系统，提供基础 Markdown 支持。高级的 Obsidian 风格实时叠加预览正在开发中（详见路线图）。
-*   **白板笔记**: 基于 [Excalidraw](https://github.com/excalidraw/excalidraw) 离线副本的可视化笔记，用作本地绘图和草图工具。
-*   **RAG 就绪设计 (计划中)**: 笔记、白板导出及外部文档将可接入记忆系统，作为检索增强生成 (RAG) 的数据源，以提升回答准确度和人设一致性。
+### 4. 笔记与白板
+*   **文本笔记**: 内置笔记系统，提供基础 Markdown 支持。
+*   **白板笔记**: 基于 [Excalidraw](https://github.com/excalidraw/excalidraw) 离线副本的可视化绘图工具。
 
 ### 5. 跨平台支持
 *   **Windows**: 提供 MSIX 安装包、便携式 ZIP 包以及 Docker 部署支持。
-*   **Linux**: 推荐使用 **Docker** 进行自托管部署，或从源码编译。
-*   **macOS**: 由于签名限制，强烈推荐使用 **Docker** 部署以获得最佳体验。
+*   **Linux/macOS**: 推荐使用 **Docker** 进行自托管部署。
 *   **Android**: 提供 APK 安装包。
 
 ---
@@ -230,6 +218,7 @@ flutter build apk --release
 - [x] **部署工具**：完善 Docker 支持与一键启动脚本。
 - [x] **日志增强**：提升前端与后端的错误日志与诊断能力。
 - [x] **Minecraft AI 插件**：实现面向目标的自主行为、实时视角推流及 OBS 专用 HUD。
+- [ ] **[新插件] 视觉闭环 Minecraft 智能体**：基于 **Plan4MC** 的强化学习架构，实现具备视觉闭环能力的复杂任务规划与执行。
 - [ ] **极速模式（最小编排）**：默认只走主链路，只有必要时才调用额外 Agent/Service。
 - [ ] **语音情绪参数联动**：将表情/情绪推理映射到 TTS 风格或参数，优先评估 omni 类模型。
 - [ ] **语音聊天软件接入**：虚拟麦克风注入、自动收音与快捷配置（Discord/KOOK 等）。
@@ -295,6 +284,14 @@ flutter build apk --release
 *   **blivechat**: 我们的 Bilibili 直播弹幕显示插件参考了该项目开发。*许可证*: MIT. [仓库](https://github.com/xfgryujk/blivechat/)
 *   **MindCraft**: 用于 Minecraft AI 代理集成，提供高阶 LLM 驱动的智能。*许可证*: MIT. [仓库](https://github.com/mindcraft-bots/mindcraft)
 *   **Mineflayer**: 作为 Minecraft 机器人交互和底层控制的基础引擎。*许可证*: MIT. [仓库](https://github.com/PrismarineJS/mineflayer)
+*   **Neuro**: 参考了其 VTube Studio (VTS) 相关部分的设计与集成思路。*许可证*: MIT. [仓库](https://github.com/kimjammer/Neuro)
+*   **Plan4MC**: 基于强化学习的 Minecraft 复杂任务规划框架。我们正基于此项目开发新一代视觉闭环 Minecraft 插件。*许可证*: MIT. [仓库](https://github.com/PKU-RL/Plan4MC)
+
+### 🌟 同类优秀项目
+
+我们在此展示并支持社区中其他优秀的 AI 伴侣与智能体项目：
+
+*   **AIRI**: 一个高质量的 AI VTuber 项目。与 N-T-AI 类似，它也利用了无头 Minecraft 逻辑进行游戏交互。我们在此展示以支持开发者并促进 AI 伴侣生态的多样性。[仓库](https://github.com/idootp/AIRI)
 
 ### 开发工具
 *   **GitHub Copilot**：在开发过程中提供代码辅助能力。

@@ -11,6 +11,7 @@ import uuid
 from app.services.motion_agent_service import MotionAgentService
 from app.services.llm_service import LLMService
 from app.services.audio_service import AudioService
+from app.services.vts_service import vts_service
 from app.core.config import settings
 import io
 import wave
@@ -99,6 +100,46 @@ class ProactiveChatRequest(BaseModel):
 async def toggle_proactive_chat(request: ProactiveChatRequest):
     priority_manager.set_proactive_chat(request.enabled)
     return {"status": "ok", "enabled": request.enabled}
+
+class VTSHotkeyRequest(BaseModel):
+    hotkey: str
+
+class VTSMoveRequest(BaseModel):
+    x: float
+    y: float
+    size: float = 1.0
+    rotation: float = 0.0
+    time: float = 0.5
+
+class VTSParameterRequest(BaseModel):
+    name: str
+    value: float
+    weight: float = 1.0
+
+@router.post("/vts/connect")
+async def vts_connect():
+    await vts_service.connect()
+    return {"status": "ok", "connected": vts_service.is_connected}
+
+@router.post("/vts/hotkey")
+async def vts_trigger_hotkey(request: VTSHotkeyRequest):
+    await vts_service.trigger_hotkey(request.hotkey)
+    return {"status": "ok"}
+
+@router.post("/vts/move")
+async def vts_move_model(request: VTSMoveRequest):
+    await vts_service.move_model(request.x, request.y, request.size, request.rotation, request.time)
+    return {"status": "ok"}
+
+@router.post("/vts/parameter")
+async def vts_inject_parameter(request: VTSParameterRequest):
+    await vts_service.inject_parameter(request.name, request.value, request.weight)
+    return {"status": "ok"}
+
+@router.get("/vts/hotkeys")
+async def vts_get_hotkeys():
+    await vts_service.refresh_hotkeys()
+    return {"hotkeys": vts_service.hotkey_list}
 
 @router.post("/agent/decide")
 async def decide_motion(
