@@ -377,6 +377,10 @@ class AppSettings {
   final bool showLive2DMiniWindow; // 是否在右上角显示内置小窗
   final bool enableFloatingWindow; // 是否启用独立悬浮窗显示 Live2D
   final bool live2dDebug; // 是否显示 Live2D 调试信息
+  final bool enableScreenCapture; // 是否启用定时屏幕截取
+  final int screenCaptureInterval; // 截取间隔（秒）
+  final String screenAnalysisPrompt; // 屏幕分析提示词
+  final String screenInjectionPrompt; // 消息注入提示词
 
   // Agent Tools Configuration
   final bool enableBrowser; // 启用浏览器工具
@@ -470,6 +474,12 @@ class AppSettings {
     this.showLive2DMiniWindow = false,
     this.enableFloatingWindow = false, // Default to false
     this.live2dDebug = false, // 默认关闭调试信息
+    this.enableScreenCapture = false,
+    this.screenCaptureInterval = 300, // 默认5分钟
+    this.screenAnalysisPrompt =
+        '你现在是我的环境观察员。请仔细观察这张当前的屏幕截图，描述当前屏幕上正在发生的重要事情、打开的应用、正在处理的内容或任何值得注意的变化。请用客观、简洁的语言描述。',
+    this.screenInjectionPrompt =
+        '【环境感知更新】：AI 刚刚观察了你的屏幕，发现如下内容：',
     this.enableBrowser = true,
     this.enableSearchRetry = true,
     this.enableNoteAccess = false,
@@ -548,6 +558,10 @@ class AppSettings {
     bool? showLive2DMiniWindow,
     bool? enableFloatingWindow,
     bool? live2dDebug,
+    bool? enableScreenCapture,
+    int? screenCaptureInterval,
+    String? screenAnalysisPrompt,
+    String? screenInjectionPrompt,
     bool? enableBrowser,
     bool? enableSearchRetry,
     bool? enableNoteAccess,
@@ -633,6 +647,12 @@ class AppSettings {
     showLive2DMiniWindow: showLive2DMiniWindow ?? this.showLive2DMiniWindow,
     enableFloatingWindow: enableFloatingWindow ?? this.enableFloatingWindow,
     live2dDebug: live2dDebug ?? this.live2dDebug,
+    enableScreenCapture: enableScreenCapture ?? this.enableScreenCapture,
+    screenCaptureInterval:
+        screenCaptureInterval ?? this.screenCaptureInterval,
+    screenAnalysisPrompt: screenAnalysisPrompt ?? this.screenAnalysisPrompt,
+    screenInjectionPrompt:
+        screenInjectionPrompt ?? this.screenInjectionPrompt,
     enableBrowser: enableBrowser ?? this.enableBrowser,
     enableSearchRetry: enableSearchRetry ?? this.enableSearchRetry,
     enableNoteAccess: enableNoteAccess ?? this.enableNoteAccess,

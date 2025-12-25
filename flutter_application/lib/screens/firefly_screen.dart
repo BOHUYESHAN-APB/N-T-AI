@@ -28,6 +28,7 @@ import 'first_run_dialog.dart'; // Import FirstRunDialog
 import '../services/floating_window_factory.dart'; // Import FloatingWindowService
 import '../services/floating_window_service.dart'; // Import FloatingWindowService interface
 import '../core/services/websocket_service.dart'; // Import WebSocketService
+import '../core/services/screen_capture_service.dart'; // Import ScreenCaptureService
 import '../plugins/plugin_manager.dart'; // Import PluginManager
 import '../services/logger_service.dart';
 
@@ -43,6 +44,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
   final LLMService _llmService = LLMService();
   final WebSocketService _wsService = WebSocketService();
   final ChatHistoryService _chatHistory = ChatHistoryService();
+  final ScreenCaptureService _screenCaptureService = ScreenCaptureService();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
@@ -98,6 +100,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _historySubscription = _chatHistory.updateStream.listen((_) {
       if (mounted) _loadSessions();
     });
+
+    _screenCaptureService.onAwarenessGenerated = (description) {
+      if (mounted && _currentSessionId != null) {
+        _injectAwarenessMessage(description);
+      }
+    };
 
     _ttsSubscription = _brain.ttsStream.listen((bytes) {
       _handleTtsForLive2D(bytes);
@@ -243,6 +251,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (settings.autoVoiceChannelListening && !_isLoopbackCapturing && !_isLoading) {
       _handleLoopbackVoiceInput(isAuto: true);
     }
+
+    // Screen capture service
+    if (settings.enableScreenCapture) {
+      _screenCaptureService.start(settings);
+    } else {
+      _screenCaptureService.stop();
+    }
     // logToFile("FireflyScreen.didChangeDependencies completed");
   }
 
@@ -292,6 +307,33 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
+  void _injectAwarenessMessage(String content) {
+    if (_currentSessionId == null) return;
+
+    final newMessage = {
+      'role': 'system',
+      'content': content,
+      'created_at': DateTime.now(),
+    };
+
+    setState(() {
+      _messages.add(newMessage);
+    });
+
+    _chatHistory.addMessage(
+      _currentSessionId!,
+      'system',
+      content,
+    );
+    _scrollToBottom();
+    
+    // Notify brain about the new context if needed
+    _brain.setContext(_messages.map((m) => {
+      'role': m['role'] as String,
+      'content': m['content'] as String,
+    }).toList());
+  }
+
   Future<void> _interruptGeneration() async {
     if (_autoMicListeningActive) {
       await _stopAutoMicListening();
@@ -333,6 +375,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _ttsSubscription?.cancel();
     _wsSubscription?.cancel();
     _initiativeSubscription?.cancel();
+    _screenCaptureService.stop();
     _brain.stopInitiativeLoop();
     _wsService.dispose();
     _floatingWindowService?.dispose();

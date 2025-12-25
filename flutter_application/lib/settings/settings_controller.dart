@@ -43,6 +43,10 @@ class SettingsController extends ChangeNotifier {
   static const _kShowLive2DMiniWindow = 'settings.ui.live2dMiniWindow';
   static const _kEnableFloatingWindow = 'settings.ui.enableFloatingWindow';
   static const _kLive2dDebug = 'settings.ui.live2dDebug';
+  static const _kEnableScreenCapture = 'settings.vision.enableScreenCapture';
+  static const _kScreenCaptureInterval = 'settings.vision.screenCaptureInterval';
+  static const _kScreenAnalysisPrompt = 'settings.vision.screenAnalysisPrompt';
+  static const _kScreenInjectionPrompt = 'settings.vision.screenInjectionPrompt';
   static const _kUserNickname = 'settings.user.nickname';
   static const _kLearningProbability = 'settings.user.learningProbability';
   static const _kPalette = 'settings.ui.palette';
@@ -176,6 +180,12 @@ class SettingsController extends ChangeNotifier {
     final enableFloatingWindow =
         _prefs.getBool(_kEnableFloatingWindow) ?? false;
     final live2dDebug = _prefs.getBool(_kLive2dDebug) ?? false;
+    final enableScreenCapture = _prefs.getBool(_kEnableScreenCapture) ?? false;
+    final screenCaptureInterval = _prefs.getInt(_kScreenCaptureInterval) ?? 300;
+    final screenAnalysisPrompt = _prefs.getString(_kScreenAnalysisPrompt) ??
+        '你现在是我的环境观察员。请仔细观察这张当前的屏幕截图，描述当前屏幕上正在发生的重要事情、打开的应用、正在处理的内容或任何值得注意的变化。请用客观、简洁的语言描述。';
+    final screenInjectionPrompt = _prefs.getString(_kScreenInjectionPrompt) ??
+        '【环境感知更新】：AI 刚刚观察了你的屏幕，发现如下内容：';
     final enableBrowser = _prefs.getBool(_kAgentEnableBrowser) ?? false;
     final enableSearchRetry = _prefs.getBool(_kAgentEnableSearchRetry) ?? true;
     final enableNoteAccess = _prefs.getBool(_kEnableNoteAccess) ?? false;
@@ -525,6 +535,10 @@ class SettingsController extends ChangeNotifier {
       showLive2DMiniWindow: showLive2DMiniWindow,
       enableFloatingWindow: enableFloatingWindow,
       live2dDebug: live2dDebug,
+      enableScreenCapture: enableScreenCapture,
+      screenCaptureInterval: screenCaptureInterval,
+      screenAnalysisPrompt: screenAnalysisPrompt,
+      screenInjectionPrompt: screenInjectionPrompt,
       enableBrowser: enableBrowser,
       enableSearchRetry: enableSearchRetry,
       enableNoteAccess: enableNoteAccess,
@@ -735,6 +749,30 @@ class SettingsController extends ChangeNotifier {
   Future<void> setLive2dDebug(bool v) async {
     _settings = _settings.copyWith(live2dDebug: v);
     await _prefs.setBool(_kLive2dDebug, v);
+    notifyListeners();
+  }
+
+  Future<void> setEnableScreenCapture(bool v) async {
+    _settings = _settings.copyWith(enableScreenCapture: v);
+    await _prefs.setBool(_kEnableScreenCapture, v);
+    notifyListeners();
+  }
+
+  Future<void> setScreenCaptureInterval(int v) async {
+    _settings = _settings.copyWith(screenCaptureInterval: v);
+    await _prefs.setInt(_kScreenCaptureInterval, v);
+    notifyListeners();
+  }
+
+  Future<void> setScreenAnalysisPrompt(String v) async {
+    _settings = _settings.copyWith(screenAnalysisPrompt: v);
+    await _prefs.setString(_kScreenAnalysisPrompt, v);
+    notifyListeners();
+  }
+
+  Future<void> setScreenInjectionPrompt(String v) async {
+    _settings = _settings.copyWith(screenInjectionPrompt: v);
+    await _prefs.setString(_kScreenInjectionPrompt, v);
     notifyListeners();
   }
 

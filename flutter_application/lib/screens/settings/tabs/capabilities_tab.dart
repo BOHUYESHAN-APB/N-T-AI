@@ -256,6 +256,90 @@ class CapabilitiesTab extends StatelessWidget {
                     ),
                   ],
                 ),
+                const Divider(height: 24),
+                SwitchListTile(
+                  title: const Text('启用定时屏幕截取'),
+                  subtitle: const Text('每隔一段时间自动截取屏幕并让 AI 分析（环境感知）'),
+                  value: settings.enableScreenCapture,
+                  onChanged: (v) => controller.setEnableScreenCapture(v),
+                  secondary: Icon(
+                    Icons.screen_search_desktop_outlined,
+                    color: settings.enableScreenCapture
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.grey,
+                  ),
+                ),
+                if (settings.enableScreenCapture) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('截取间隔'),
+                            Row(
+                              children: [
+                                if (settings.screenCaptureInterval < 30)
+                                  Text(
+                                    '不推荐 (极高负载) ',
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.error,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                Text('${settings.screenCaptureInterval} 秒'),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: settings.screenCaptureInterval.toDouble(),
+                          min: 5,
+                          max: 1800,
+                          divisions: 359, // (1800 - 5) / 5 = 359 steps of 5s
+                          onChanged: (v) =>
+                              controller.setScreenCaptureInterval(v.toInt()),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: TextEditingController(
+                        text: settings.screenAnalysisPrompt,
+                      ),
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: '屏幕分析提示词',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (v) =>
+                          controller.setScreenAnalysisPrompt(v.trim()),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: TextEditingController(
+                        text: settings.screenInjectionPrompt,
+                      ),
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: '消息注入提示词',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (v) =>
+                          controller.setScreenInjectionPrompt(v.trim()),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton.tonal(
