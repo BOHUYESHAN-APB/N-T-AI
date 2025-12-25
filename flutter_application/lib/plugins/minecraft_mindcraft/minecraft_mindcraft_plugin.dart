@@ -114,26 +114,33 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     final backendUrl = settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
     final providers = controller.providers;
 
-    dynamic selectedProvider;
-    if (agentProviderId != null && agentProviderId!.isNotEmpty) {
-      try {
-        selectedProvider = providers.firstWhere((p) => p.id == agentProviderId);
-      } catch (_) {
-        selectedProvider = controller.activeProviderConfig;
-      }
-    } else {
-      selectedProvider = controller.activeProviderConfig;
-    }
-
     String effectiveModel = agentModelController.text.trim();
     String? agentApiKey;
     String? agentBaseUrl;
 
-    if (selectedProvider != null) {
-      agentApiKey = selectedProvider.apiKey;
-      agentBaseUrl = selectedProvider.baseUrl;
-      if (effectiveModel.isEmpty) {
-        effectiveModel = selectedProvider.model ?? '';
+    if (agentProviderId == 'main-brain') {
+      effectiveModel = 'main-brain';
+      agentApiKey = 'sk-ntai-internal';
+      agentBaseUrl = '$backendUrl/api/v1';
+    } else {
+      // Find the provider config
+      dynamic selectedProvider;
+      if (agentProviderId != null && agentProviderId!.isNotEmpty) {
+        try {
+          selectedProvider = providers.firstWhere((p) => p.id == agentProviderId);
+        } catch (_) {
+          selectedProvider = controller.activeProviderConfig;
+        }
+      } else {
+        selectedProvider = controller.activeProviderConfig;
+      }
+
+      if (selectedProvider != null) {
+        agentApiKey = selectedProvider.apiKey;
+        agentBaseUrl = selectedProvider.baseUrl;
+        if (effectiveModel.isEmpty) {
+          effectiveModel = selectedProvider.model ?? '';
+        }
       }
     }
 
@@ -295,7 +302,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 value: agentProviderId,
                 decoration: const InputDecoration(labelText: 'AI 服务商'),
                 items: [
-                  const DropdownMenuItem(value: null, child: Text('使用系统默认设置')),
+                  const DropdownMenuItem(value: null, child: Text('使用系统当前激活的服务商')),
+                  const DropdownMenuItem(value: 'main-brain', child: Text('主脑 (代理到主系统的 LLM 设置)')),
                   ...providers.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))),
                 ],
                 onChanged: (v) => _updateState(() => agentProviderId = v),

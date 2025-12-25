@@ -8,7 +8,6 @@ import { plugin as collectblock } from 'mineflayer-collectblock';
 import { plugin as autoEat } from 'mineflayer-auto-eat';
 import plugin from 'mineflayer-armor-manager';
 const armorManager = plugin;
-let mc_version = settings.minecraft_version;
 let mcdata = null;
 let Item = null;
 
@@ -66,6 +65,7 @@ export function initBot(username) {
     
     const finalPassword = settings.password || settings.ms_password || null;
 
+    let mc_version = settings.minecraft_version;
     const options = {
         username: finalUsername,
         host: settings.host,
@@ -103,9 +103,9 @@ export function initBot(username) {
     });
 
     bot.once('login', () => {
-        mc_version = bot.version;
-        mcdata = minecraftData(mc_version);
-        Item = prismarine_items(mc_version);
+        const current_version = bot.version;
+        mcdata = minecraftData(current_version);
+        Item = prismarine_items(current_version);
     });
 
     return bot;

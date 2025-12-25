@@ -107,7 +107,13 @@ class MinecraftMindcraftPlugin(BasePlugin):
             logger.info(f"[{self.name}] 插件已经处于激活状态")
             return True
         
-        logger.info(f"[{self.name}] 正在尝试激活插件...")
+        # 获取配置
+        combined_config = self.config.copy()
+        host = combined_config.get("host", "127.0.0.1")
+        port = combined_config.get("port", 25565)
+        
+        logger.info(f"[{self.name}] 正在尝试激活插件... 目标服务器: {host}:{port}")
+        self.logs.append(f"Activating plugin... Target server: {host}:{port}")
         
         # 获取当前事件循环，供后台线程使用
         try:
@@ -332,11 +338,12 @@ class MinecraftMindcraftPlugin(BasePlugin):
                 asyncio.set_event_loop(loop)
 
         for line in iter(self._process.stdout.readline, ''):
-            if not line:
-                break
-            clean_line = line.strip()
-            if clean_line:
-                # 保持日志长度在合理范围内
+                if not line:
+                    break
+                clean_line = line.strip()
+                if clean_line:
+                    logger.debug(f"[MC-Plugin-Raw] {clean_line}")
+                    # 保持日志长度在合理范围内
                 self.logs.append(clean_line)
                 if len(self.logs) > 500:
                     self.logs.pop(0)
@@ -390,11 +397,19 @@ class MinecraftMindcraftPlugin(BasePlugin):
         # 如果前端开启了 TTS，则生成语音并添加到 payload
         if enable_tts:
             try:
-                # 尝试从配置获取 TTS 设置，如果没有则使用默认
-                tts_api_key = self.config.get("agent_api_key") or app_settings.SILICONFLOW_API_KEY
-                tts_base_url = self.config.get("agent_base_url") or "https://api.siliconflow.cn/v1"
+                # 强制使用 SiliconFlow API，因为 DeepSeek 不支持 TTS
+                tts_api_key = app_settings.SILICONFLOW_API_KEY
+                tts_base_url = "https://api.siliconflow.cn/v1"
+                
+                # 如果没有全局 SiliconFlow Key，尝试检查插件配置是否显式指定了 SiliconFlow
+                if not tts_api_key:
+                    plugin_base_url = self.config.get("agent_base_url", "")
+                    if "siliconflow" in plugin_base_url.lower():
+                        tts_api_key = self.config.get("agent_api_key")
+                        tts_base_url = plugin_base_url
                 
                 if tts_api_key:
+                    logger.info(f"[{self.name}] 正在为消息生成 TTS: {message[:20]}... (API: {tts_base_url})")
                     audio_bytes = await self.audio_service.generate_speech(
                         text=message,
                         api_key=tts_api_key,

@@ -9,27 +9,19 @@ import httpx
 from fastapi.responses import HTMLResponse, StreamingResponse
 from app.plugins import get_plugin
 
-router = APIRouter(prefix="/plugins/minecraft", tags=["minecraft"])
-
-@router.get("/config")
-async def get_minecraft_config():
-    """
-    获取 Minecraft 插件的当前配置。
-    """
-    plugin = get_plugin("Minecraft-mindcraft")
-    if not plugin:
-        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
-    
-    return plugin.config
+router = APIRouter(prefix="/plugins/Minecraft-mindcraft", tags=["minecraft"])
 
 @router.post("/config")
-async def update_minecraft_config(config: Dict[str, Any]):
+async def update_minecraft_config(request_data: Dict[str, Any]):
     """
     更新 Minecraft 插件的配置。
     """
     plugin = get_plugin("Minecraft-mindcraft")
     if not plugin:
         raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    # 获取配置数据，处理前端可能发送的 {"config": {...}} 或直接 {...}
+    config = request_data.get("config", request_data)
     
     # 更新插件内存中的配置
     plugin.config.update(config)

@@ -58,12 +58,12 @@ export class SelfPrompter {
             console.warn('Self-prompt loop is already active. Ignoring request.');
             return;
         }
-        console.log('starting self-prompt loop')
+        console.log(`[SelfPrompter] Starting loop for agent ${this.agent.name} with goal: ${this.prompt}`);
         this.loop_active = true;
         let no_command_count = 0;
-        const MAX_NO_COMMAND = 3;
+        const MAX_NO_COMMAND = 5; // Increase max no command count
         while (!this.interrupt) {
-            const msg = `You are self-prompting with the goal: '${this.prompt}'. Your next response MUST contain a command with this syntax: !commandName. Respond:`;
+            const msg = `You are self-prompting with the goal: '${this.prompt}'. Your next response MUST contain a command with this syntax: !commandName. If you are already working towards this goal, you can use !stay or a query command like !nearbyBlocks to check progress. DO NOT respond with a tab or empty message. Respond:`;
             
             let used_command = await this.agent.handleMessage('system', msg, -1);
             if (!used_command) {
@@ -95,7 +95,7 @@ export class SelfPrompter {
                 this.idle_time = 0;
 
             if (this.idle_time >= this.cooldown) {
-                console.log('Restarting self-prompting...');
+                console.log(`[SelfPrompter] Agent ${this.agent.name} has been idle for ${this.idle_time}ms. Restarting loop.`);
                 this.startLoop();
                 this.idle_time = 0;
             }
@@ -132,15 +132,16 @@ export class SelfPrompter {
         this.state = PAUSED;
     }
 
-    shouldInterrupt(is_self_prompt) { // to be called from handleMessage
-        return is_self_prompt && (this.state === ACTIVE || this.state === PAUSED) && this.interrupt;
+    shouldInterrupt(self_prompt) {
+        // interrupt if self-prompting and a message from a user/other bot comes in
+        return this.isActive() && !self_prompt;
     }
 
-    handleUserPromptedCmd(is_self_prompt, is_action) {
-        // if a user messages and the bot responds with an action, stop the self-prompt loop
-        if (!is_self_prompt && is_action) {
+    handleUserPromptedCmd(self_prompt, is_action) {
+        if (!self_prompt && is_action && this.isActive()) {
+            console.log('Self-prompting paused by user action.');
+            this.state = PAUSED;
             this.stopLoop();
-            // this stops it from responding from the handlemessage loop and the self-prompt loop at the same time
         }
     }
 }

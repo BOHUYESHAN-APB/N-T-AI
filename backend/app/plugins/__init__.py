@@ -10,8 +10,8 @@ def register_plugin(plugin: BasePlugin):
     print(f"[PluginManager] Registered plugin: {plugin.id} ({plugin.name})")
 
 def get_plugin(id: str) -> BasePlugin | None:
-    # 兼容处理 ID，前端可能发送 Minecraft-mindcraft 或 minecraft
-    if id == "minecraft":
+    # 兼容处理 ID，前端可能发送 Minecraft-mindcraft 或 minecraft 或 minecraft_mindcraft
+    if id == "minecraft" or id == "minecraft_mindcraft":
         id = "Minecraft-mindcraft"
     return _plugins.get(id)
 

@@ -31,21 +31,26 @@ export class Agent {
         this.npc = new NPCContoller(this);
         this.memory_bank = new MemoryBank();
         this.self_prompter = new SelfPrompter(this);
+        convoManager.initAgent(this);
+        await this.prompter.initExamples();
+
+        // load mem first before doing task
+        let save_data = null;
+        if (load_mem) {
+            save_data = this.history.load();
+        }
+        let taskStart = null;
+        if (save_data) {
+            taskStart = save_data.taskStart;
+        } else {
+            taskStart = Date.now();
+        }
+        this.task = new Task(this, settings.task, taskStart);
+        this.blocked_actions = settings.blocked_actions.concat(this.task.blocked_actions || []);
+        blacklistCommands(this.blocked_actions);
+
         console.log(this.name, 'logging into minecraft...');
         this.bot = initBot(this.name);
-
-        this.bot.on('error', (err) => {
-            console.error('Bot error:', err);
-            let errMsg = err.message || String(err);
-            
-            // Handle Microsoft PPFT error specifically
-            if (errMsg.includes('PPFT')) {
-                errMsg = "Microsoft Login Failed (PPFT error). This usually happens when a password is provided but MFA or other restrictions block it. Please REMOVE the password in settings to use Device Code (browser) login.";
-                console.warn("\x1b[33m%s\x1b[0m", "HINT: To fix PPFT error, clear the 'ms_password' or 'password' field in your settings.");
-            }
-            
-            sendOutputToServer(this.name, "ERROR: " + errMsg);
-        });
 
         initModes(this);
 
@@ -60,14 +65,33 @@ export class Agent {
                 this.bot.chat(`/skin clear`);
         });
 
-        await this.prompter.initExamples();
+        this.bot.on('error', (err) => {
+            console.error('Bot error:', err);
+            let errMsg = err.message || String(err);
+            
+            // Handle common connection errors
+            if (errMsg.includes('ECONNREFUSED')) {
+                const hostPort = errMsg.split(' ').pop();
+                errMsg = `Connection Refused to ${hostPort}. Please check if the Minecraft server is running and the IP/Port in plugin settings is correct.`;
+            } else if (errMsg.includes('ETIMEDOUT')) {
+                errMsg = "Connection Timed Out. The server might be down or the IP address is unreachable. Please verify your network and server IP.";
+            } else if (errMsg.includes('ENOTFOUND')) {
+                errMsg = "Server Address Not Found. Please check if the host IP/domain is correct.";
+            } else if (errMsg.includes('PPFT')) {
+                // Handle Microsoft PPFT error specifically
+                errMsg = "Microsoft Login Failed (PPFT error). This usually happens when a password is provided but MFA or other restrictions block it. Please REMOVE the password in settings to use Device Code (browser) login.";
+                console.warn("\x1b[33m%s\x1b[0m", "HINT: To fix PPFT error, clear the 'ms_password' or 'password' field in your settings.");
+            }
+            
+            sendOutputToServer(this.name, "ERROR: " + errMsg);
+        });
 
-        // load mem first before doing task
-		const spawnTimeoutDuration = settings.spawn_timeout;
+        const spawnTimeoutDuration = settings.spawn_timeout || 300;
         const spawnTimeout = setTimeout(() => {
             console.error(`Bot has not spawned after ${spawnTimeoutDuration} seconds. Exiting.`);
             process.exit(0);
         }, spawnTimeoutDuration * 1000);
+
         this.bot.once('spawn', async () => {
             try {
                 clearTimeout(spawnTimeout);
@@ -140,7 +164,7 @@ export class Agent {
             }
         }
 
-		this.respondFunc = respondFunc;
+        this.respondFunc = respondFunc;
 
         this.bot.on('whisper', respondFunc);
         
@@ -282,10 +306,10 @@ export class Agent {
             let history = this.history.getHistory();
             let res = await this.prompter.promptConvo(history);
 
-            console.log(`${this.name} full response to ${source}: ""${res}""`);
+            console.log(`${this.name} response #${i+1} to ${source}: "${res.substring(0, 100)}${res.length > 100 ? '...' : ''}"`);
 
             if (res.trim().length === 0) {
-                console.warn('no response')
+                console.warn(`${this.name} generated an empty response.`)
                 break; // empty response ends loop
             }
 
@@ -315,32 +339,20 @@ export class Agent {
                         chat_message = `${pre_message}  ${chat_message}`;
                     this.routeResponse(source, chat_message);
                 }
-                else {
-                    // no command at all
-                    let pre_message = res.substring(0, res.indexOf(command_name)).trim();
-                    if (pre_message.trim().length > 0)
-                        this.routeResponse(source, pre_message);
-                }
 
                 let execute_res = await executeCommand(this, res);
-
-                console.log('Agent executed:', command_name, 'and got:', execute_res);
                 used_command = true;
-
                 if (execute_res)
                     this.history.add('system', execute_res);
-                else
-                    break;
+                break;
             }
-            else { // conversation response
+            else {
                 this.history.add(this.name, res);
                 this.routeResponse(source, res);
                 break;
             }
-            
-            this.history.save();
         }
-
+        this.history.save();
         return used_command;
     }
 
@@ -416,7 +428,24 @@ export class Agent {
         });
         // Logging callbacks
         this.bot.on('error' , (err) => {
-            console.error('Error event!', err);
+            console.error('Bot error:', err);
+            let errMsg = err.message || String(err);
+            
+            // Handle common connection errors
+            if (errMsg.includes('ECONNREFUSED')) {
+                const hostPort = errMsg.split(' ').pop();
+                errMsg = `Connection Refused to ${hostPort}. Please check if the Minecraft server is running and the IP/Port in plugin settings is correct.`;
+            } else if (errMsg.includes('ETIMEDOUT')) {
+                errMsg = "Connection Timed Out. The server might be down or the IP address is unreachable. Please verify your network and server IP.";
+            } else if (errMsg.includes('ENOTFOUND')) {
+                errMsg = "Server Address Not Found. Please check if the host IP/domain is correct.";
+            } else if (errMsg.includes('PPFT')) {
+                // Handle Microsoft PPFT error specifically
+                errMsg = "Microsoft Login Failed (PPFT error). This usually happens when a password is provided but MFA or other restrictions block it. Please REMOVE the password in settings to use Device Code (browser) login.";
+                console.warn("\x1b[33m%s\x1b[0m", "HINT: To fix PPFT error, clear the 'ms_password' or 'password' field in your settings.");
+            }
+            
+            sendOutputToServer(this.name, "ERROR: " + errMsg);
         });
         this.bot.on('end', (reason) => {
             console.warn('Bot disconnected! Killing agent process.', reason)
@@ -437,7 +466,7 @@ export class Agent {
                 this.memory_bank.rememberPlace('last_death_position', death_pos.x, death_pos.y, death_pos.z);
                 let death_pos_text = null;
                 if (death_pos) {
-                    death_pos_text = `x: ${death_pos.x.toFixed(2)}, y: ${death_pos.y.toFixed(2)}, z: ${death_pos.x.toFixed(2)}`;
+                    death_pos_text = `x: ${death_pos.x.toFixed(2)}, y: ${death_pos.y.toFixed(2)}, z: ${death_pos.z.toFixed(2)}`;
                 }
                 let dimention = this.bot.game.dimension;
                 this.handleMessage('system', `You died at position ${death_pos_text || "unknown"} in the ${dimention} dimension with the final message: '${message}'. Your place of death is saved as 'last_death_position' if you want to return. Previous actions were stopped and you have respawned.`);
@@ -484,7 +513,6 @@ export class Agent {
     isIdle() {
         return !this.actions.executing;
     }
-    
 
     cleanKill(msg='Killing agent process...', code=1) {
         this.history.add('system', msg);

@@ -5,6 +5,7 @@ print("Astra-Me Backend initializing runtime...", flush=True)
 import os
 import logging
 import warnings
+import traceback
 
 # Suppress websockets deprecation warning
 warnings.filterwarnings("ignore", category=DeprecationWarning, message="remove second argument of ws_handler")
@@ -143,6 +144,22 @@ def main():
 
         probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
         
+        # Helper to write server info
+        def _write_server_info(scheme, host, port):
+            try:
+                info = {
+                    "url": f"{scheme}://{host}:{port}",
+                    "port": port,
+                    "host": host,
+                    "pid": os.getpid(),
+                    "scheme": scheme
+                }
+                with open("server_info.json", "w") as f:
+                    json.dump(info, f)
+                print(f"[SERVER_INFO] {json.dumps(info)}")
+            except Exception as e:
+                print(f"Error writing server_info.json: {e}")
+
         # Try finding an available port if the default is taken
         start_port = port
         max_retries = 10
@@ -172,22 +189,6 @@ def main():
 
         port = actual_port
         
-        # Helper to write server info
-        def _write_server_info(scheme, host, port):
-            try:
-                info = {
-                    "url": f"{scheme}://{host}:{port}",
-                    "port": port,
-                    "host": host,
-                    "pid": os.getpid(),
-                    "scheme": scheme
-                }
-                with open("server_info.json", "w") as f:
-                    json.dump(info, f)
-                print(f"[SERVER_INFO] {json.dumps(info)}")
-            except Exception as e:
-                print(f"Error writing server_info.json: {e}")
-
         if use_https:
             crypto_available = True
             try:
@@ -212,7 +213,6 @@ def main():
                     try:
                         from main import app as asgi_app
                     except Exception:
-                        import traceback
                         print("CRITICAL ERROR: Failed to import ASGI app from main.py")
                         traceback.print_exc()
                         sys.exit(1)
@@ -235,7 +235,6 @@ def main():
             try:
                 from main import app as asgi_app
             except Exception:
-                import traceback
                 print("CRITICAL ERROR: Failed to import ASGI app from main.py")
                 traceback.print_exc()
                 sys.exit(1)

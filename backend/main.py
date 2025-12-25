@@ -213,12 +213,48 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
     target_model = raw_request.headers.get("X-Target-Model")
     
+    # Logic to apply inherited config
+    if target_api_key == "sk-ntai-internal" or target_model == "main-brain":
+        main_config = system_state.get_state("main_brain_config")
+        if main_config:
+            if not target_api_key or target_api_key == "sk-ntai-internal":
+                target_api_key = main_config.get("api_key")
+            
+            # For embeddings, we usually want a specific embedding model
+            # If the main brain model is a chat model (like deepseek), it won't work for embeddings
+            main_model = main_config.get("model", "")
+            if not target_model or target_model == "main-brain":
+                # Check if it's a known chat-only model
+                if "chat" in main_model.lower() or "instruct" in main_model.lower() or "deepseek" in main_model.lower():
+                    # Use a default embedding model instead
+                    target_model = settings.LLM_EMBEDDING_MODEL
+                    logger.info(f"Main brain model {main_model} is likely a chat model. Using default embedding model {target_model} instead.")
+                else:
+                    target_model = main_model
+
+            # Only override base_url if it's pointing back to us or empty
+            if not target_base_url or "127.0.0.1:23456" in target_base_url:
+                target_base_url = main_config.get("base_url")
+        else:
+            # Fallback to backend's own env settings if no main_brain_config exists yet
+            if not target_api_key or target_api_key == "sk-ntai-internal":
+                target_api_key = settings.OPENAI_API_KEY
+            if not target_base_url or "127.0.0.1:23456" in target_base_url:
+                target_base_url = settings.OPENAI_BASE_URL
+            if not target_model or target_model == "main-brain":
+                target_model = settings.LLM_EMBEDDING_MODEL
+            logger.warning("No main_brain_config found for embedding, falling back to environment settings")
+
     # Fallback: Authorization: Bearer <key>
     auth_header = raw_request.headers.get("Authorization")
     if not target_api_key and auth_header and auth_header.startswith("Bearer "):
         target_api_key = auth_header.replace("Bearer ", "").strip()
         if target_api_key == "sk-ntai-internal":
             target_api_key = None # Use default key from env if it's the internal placeholder
+    
+    # Ensure target_api_key is None if it's still the internal placeholder
+    if target_api_key == "sk-ntai-internal":
+        target_api_key = None
     
     text_input = request.input
     if isinstance(text_input, list):
@@ -390,6 +426,44 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     target_api_key = raw_request.headers.get("X-Target-Api-Key")
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
     target_model = raw_request.headers.get("X-Target-Model")
+    
+    # Logic to inherit "Main Brain" config
+    usage_type = raw_request.headers.get("X-Usage-Type", "main")
+    if target_api_key and target_api_key != "sk-ntai-internal":
+        current_main = system_state.get_state("main_brain_config")
+        # If usage is 'main', OR we don't have a main config yet, save this one
+        if usage_type == "main" or not current_main:
+            if not current_main or current_main.get("api_key") != target_api_key or current_main.get("base_url") != target_base_url:
+                logger.info(f"Updating/Initializing main_brain_config from usage_type: {usage_type}")
+                system_state.update_state("main_brain_config", {
+                    "api_key": target_api_key,
+                    "base_url": target_base_url,
+                    "model": target_model
+                })
+    
+    # Logic to apply inherited config
+    if target_api_key == "sk-ntai-internal" or target_model == "main-brain":
+        main_config = system_state.get_state("main_brain_config")
+        if main_config:
+            if not target_api_key or target_api_key == "sk-ntai-internal":
+                target_api_key = main_config.get("api_key")
+            if not target_model or target_model == "main-brain":
+                target_model = main_config.get("model")
+            # Only override base_url if it's pointing back to us or empty
+            if not target_base_url or "127.0.0.1:23456" in target_base_url:
+                target_base_url = main_config.get("base_url")
+        else:
+            # Fallback to backend's own env settings if no main_brain_config exists yet
+            if not target_api_key or target_api_key == "sk-ntai-internal":
+                target_api_key = settings.OPENAI_API_KEY
+            if not target_base_url or "127.0.0.1:23456" in target_base_url:
+                target_base_url = settings.OPENAI_BASE_URL
+            if not target_model or target_model == "main-brain":
+                target_model = settings.LLM_MODEL
+            logger.warning("No main_brain_config found, falling back to environment settings")
+
+    logger.info(f"Final target for {usage_type}: model={target_model}, base_url={target_base_url}")
+
     enable_search_str = raw_request.headers.get("X-Enable-Browser", "false")
     enable_search = enable_search_str.lower() == "true"
     enable_thinking_str = raw_request.headers.get("X-Enable-Thinking", "false")
@@ -507,7 +581,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
         # If usage_type is 'system' or 'memory', bypass the Persona/History/Mood logic
         # and just act as a raw LLM proxy. This prevents the backend from responding
         # as Firefly when the frontend just wants to extract memory or summarize text.
-        if usage_type in ["system", "memory", "tool", "agent"]:
+        if usage_type in ["system", "memory", "tool", "agent", "minecraft"]:
             logger.info(f"Processing system request (type={usage_type}), bypassing persona logic.")
             
             # Convert Pydantic messages to dicts

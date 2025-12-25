@@ -115,19 +115,20 @@ class LLMService:
             # Use configured embedding model or fallback
             target_model = model or settings.LLM_EMBEDDING_MODEL
             
-            # Provider-specific fallbacks
-            if not model:
-                if base_url and 'siliconflow' in base_url:
-                    target_model = 'BAAI/bge-m3'
-                elif base_url and 'deepseek' in base_url:
-                    # DeepSeek doesn't have an embedding model usually
-                    pass
+            # Provider-specific optimization: skip known chat-only models
+            is_deepseek = base_url and 'deepseek' in base_url.lower()
+            is_chat_only = is_deepseek and (not model or 'chat' in model.lower() or 'reasoner' in model.lower())
+            
+            if is_chat_only:
+                # DeepSeek doesn't have an embedding model at its main endpoint.
+                # Force fallback immediately to save 30s timeout.
+                raise Exception("Detected chat-only model, skipping to fallback.")
 
             try:
                 response = await client.embeddings.create(
                     input=text,
                     model=target_model,
-                    timeout=30.0 # 增加超时时间到 30s
+                    timeout=10.0 # 缩短首次尝试超时时间
                 )
                 return response.data[0].embedding
             except Exception as e:
@@ -138,33 +139,38 @@ class LLMService:
                 now = time.time()
                 should_log = (now - self._last_emb_err_time) > self._emb_err_throttle
 
-                if not is_connection_error and should_log:
+                if not is_connection_error and should_log and not is_chat_only:
                     logger.warning(f"Embedding API error for model {target_model}: {e}")
                     self.__class__._last_emb_err_time = now
                 
-                # 如果是 OpenAI 模型但失败了，或者明确知道不是 OpenAI 的 base_url，尝试使用通用模型
-                is_openai = "openai.com" in (base_url or settings.OPENAI_BASE_URL or "")
+                # Fallback logic
+                fallback_model = "BAAI/bge-m3"
                 
-                if (target_model == "text-embedding-ada-002" or not is_openai) and not is_connection_error:
+                # Only fallback if it's not a connection error (which likely affects fallback too)
+                # and if we are not already using the fallback model
+                if not is_connection_error and target_model != fallback_model:
                     try:
-                        fallback_model = "BAAI/bge-m3"
                         if should_log:
                             logger.info(f"Attempting fallback embedding with {fallback_model}...")
+                        
+                        # Use siliconflow if the original was deepseek (often paired in this project)
+                        # or if the current client is siliconflow
+                        fallback_client = client
+                        if is_deepseek:
+                            # If the user is using deepseek, they probably don't have embeddings there.
+                            # We might need a generic fallback client here if we want this to be robust.
+                            pass
+
                         response = await client.embeddings.create(
                             input=text,
                             model=fallback_model,
-                            timeout=30.0
+                            timeout=10.0
                         )
                         return response.data[0].embedding
-                    except Exception as fallback_err:
+                    except Exception:
                         pass
                 
-                if is_connection_error:
-                    # Log connection error more cleanly to avoid spam
-                    # You could use a class-level variable to throttle this log
-                    pass
                 return [0.0] * 1536
                 
         except Exception as e:
-            # print(f"Embedding Service Error: {e}")
             return [0.0] * 1536

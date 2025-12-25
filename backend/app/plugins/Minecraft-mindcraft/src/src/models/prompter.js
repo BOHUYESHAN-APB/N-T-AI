@@ -55,19 +55,33 @@ export class Prompter {
         if (this.profile.max_tokens)
             max_tokens = this.profile.max_tokens;
 
+        // Use frontend settings if available, otherwise fallback to profile
+        let model_to_use = settings.agent_model || this.profile.model;
+        let url_to_use = settings.agent_base_url || this.profile.url;
+        let api_key_to_use = settings.agent_api_key || this.profile.api_key;
+
+        // If no model specified, or we want to use the main brain proxy
+        if (!model_to_use || model_to_use === 'main-brain') {
+            model_to_use = 'main-brain/default';
+            url_to_use = settings.ntai_backend_url || process.env.NTAI_BACKEND_URL || 'http://localhost:23456';
+        }
+
         let chat_model_profile = selectAPI({
-            model: this.profile.model,
-            url: this.profile.url,
-            api_key: this.profile.api_key,
+            model: model_to_use,
+            url: url_to_use,
+            api_key: api_key_to_use,
             params: this.profile.params
         });
         this.chat_model = createModel(chat_model_profile);
 
-        if (this.profile.code_model) {
+        if (this.profile.code_model || settings.agent_model) {
+            let code_model_to_use = settings.agent_model || this.profile.code_model;
+            if (code_model_to_use === 'main-brain') code_model_to_use = 'main-brain/default';
+            
             let code_model_profile = selectAPI({
-                model: this.profile.code_model,
-                url: this.profile.url,
-                api_key: this.profile.api_key,
+                model: code_model_to_use,
+                url: url_to_use,
+                api_key: api_key_to_use,
                 params: this.profile.params
             });
             this.code_model = createModel(code_model_profile);
@@ -76,11 +90,14 @@ export class Prompter {
             this.code_model = this.chat_model;
         }
 
-        if (this.profile.vision_model) {
+        if (this.profile.vision_model || settings.agent_model) {
+            let vision_model_to_use = settings.agent_model || this.profile.vision_model;
+            if (vision_model_to_use === 'main-brain') vision_model_to_use = 'main-brain/default';
+
             let vision_model_profile = selectAPI({
-                model: this.profile.vision_model,
-                url: this.profile.url,
-                api_key: this.profile.api_key,
+                model: vision_model_to_use,
+                url: url_to_use,
+                api_key: api_key_to_use,
                 params: this.profile.params
             });
             this.vision_model = createModel(vision_model_profile);

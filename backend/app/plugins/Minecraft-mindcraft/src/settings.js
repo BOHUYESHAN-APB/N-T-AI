@@ -1,3 +1,10 @@
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const settings = {
     "minecraft_version": "auto", // or specific version like "1.21.6"
     "host": "mc.hypixel.net", // or "localhost", "your.ip.address.here"
@@ -11,19 +18,6 @@ const settings = {
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [
         "./andy.json",
-        // "./profiles/gpt.json",
-        // "./profiles/claude.json",
-        // "./profiles/gemini.json",
-        // "./profiles/llama.json",
-        // "./profiles/qwen.json",
-        // "./profiles/grok.json",
-        // "./profiles/mistral.json",
-        // "./profiles/deepseek.json",
-        // "./profiles/mercury.json",
-        // "./profiles/andy-4.json", // Supports up to 75 messages!
-
-        // using more than 1 profile requires you to /msg each bot indivually
-        // individual profiles override values from the base profile
     ],
 
     "load_memory": false, // load memory from previous session
@@ -65,6 +59,19 @@ if (process.env.SETTINGS_JSON) {
         Object.assign(settings, JSON.parse(process.env.SETTINGS_JSON));
     } catch (err) {
         console.error("Failed to parse SETTINGS_JSON:", err);
+    }
+}
+
+// Load settings.json if it exists
+const settingsPath = join(__dirname, 'settings.json');
+if (existsSync(settingsPath)) {
+    try {
+        const fileData = readFileSync(settingsPath, 'utf8');
+        const jsonSettings = JSON.parse(fileData);
+        Object.assign(settings, jsonSettings);
+        console.log('Loaded configuration from settings.json');
+    } catch (err) {
+        console.error('Error loading settings.json:', err);
     }
 }
 

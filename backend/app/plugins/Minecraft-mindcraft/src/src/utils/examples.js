@@ -26,13 +26,21 @@ export class Examples {
             return;
 
         try {
-            // Load embeddings sequentially to avoid overwhelming the backend
-            for (const example of examples) {
-                const turn_text = this.turnsToText(example);
-                if (this.embeddings[turn_text]) continue;
-                
-                const embedding = await this.model.embed(turn_text);
-                this.embeddings[turn_text] = embedding;
+            // Use batched Promise.all to load embeddings to avoid overwhelming the backend
+            // but still maintain speed.
+            const batchSize = 10;
+            for (let i = 0; i < examples.length; i += batchSize) {
+                const batch = examples.slice(i, i + batchSize);
+                const tasks = batch.map(async (example) => {
+                    const turn_text = this.turnsToText(example);
+                    if (this.embeddings[turn_text]) return;
+                    
+                    const embedding = await this.model.embed(turn_text);
+                    this.embeddings[turn_text] = embedding;
+                    console.log(`Embedding complete for batch item: ${turn_text.substring(0, 30)}...`);
+                });
+                await Promise.all(tasks);
+                console.log(`Completed embedding batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(examples.length/batchSize)}`);
             }
         } catch (err) {
             console.warn('Error with embedding model, using word-overlap instead.');
