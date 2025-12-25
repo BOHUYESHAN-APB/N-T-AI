@@ -2,9 +2,24 @@
 
 ![N-T-AI Banner](flutter_application/assets/images/banner.png)
 
+> **Philosophical Reflection: The Scale of Intelligence and the Unknown**
+>
+> In exploring the boundaries of artificial intelligence, we often fall into a trap of quantitative comparison: measuring intelligence potential simply by the number of neural nodes or parameters. However, this comparison may mislead us into ignoring the essence of intelligence.
+>
+> The human brain has about 86 billion neurons, while current large models have reached trillions of parameters. Yet, the two differ fundamentally in structure, energy consumption, and operational logic. Intelligence may not stem from the number of units, but from the **architecture, complexity, and emergence of information organization**. Just as an ant colony exhibits collective intelligence without a central brain, or a Border Collie demonstrates high cognitive and emotional abilities with limited neurons—intelligence is inherently diverse in its manifestation.
+>
+> Therefore, our attitude toward artificial intelligence should be open yet prudent:
+> - **Do not deny its capabilities**: AI can already process language, reason, and create, with outputs of real complexity and utility;
+> - **Do not easily anthropomorphize**: AI's "understanding" is based on statistics and patterns, not consciousness and experience;
+> - **Focus on its role as a cognitive partner**: It expands the boundaries of knowledge and reflects the uniqueness of human intelligence.
+>
+> This project is such an exploration: we do not define intelligence, but attempt to build a system that can converse, learn, and reflect. We respect all forms of wisdom, whether born of carbon or silicon, and in whatever form it exists.
+>
+> We invite you to join us in this gentle yet firm exploration.
+
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.12%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.14%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Afdian-pink)](https://afdian.com/a/N-T-AI)
@@ -42,6 +57,9 @@ If you find this project helpful, please consider supporting us:
 
 ### 1. Multimodal & Emotional Engine
 *   **Expression Agent**: Real-time emotional inference engine that displays dynamic expressions (Dynamic Island style) based on conversation context.
+*   **Deep Research Style UI**: 
+    *   **Background Greeting**: Integrated greeting messages embedded directly into the chat background for a modern, minimalist aesthetic.
+    *   **Geometric Aesthetic Logo**: A newly designed minimalist logo that prioritizes clean lines and avoids visual discomfort.
 *   **VTube Studio (VTS) Integration**: Full support for syncing AI emotions and motions to VTube Studio, driving high-precision 2D/3D models.
 *   **Live2D Integration**: Full support for Live2D models with motion tracking, emotional feedback loops, and smooth animation transitions.
 *   **Vision Capabilities**: 
@@ -243,6 +261,24 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 
 ## 🗺️ Roadmap
 
+### 🔴 High Priority (Current Focus)
+*   **Deep Source Integration (AEC & Metadata)**:
+    *   **Echo Cancellation (AEC)**: Implement a software-level lock to prevent the AI from "hearing itself" during TTS playback.
+    *   **Multi-Source Metadata**: Refactor message structure to clearly distinguish between Direct Messages, Voice Channels (KOOK/Discord), Minecraft Chat, and Plugin Danmaku.
+    *   **Advanced Voice Channel Integration (KOOK)**:
+        *   Implement direct signal-based transcription (triggering STT only when a user is actively speaking).
+        *   Identify individual speakers within a voice channel to allow the AI to address people by name.
+*   **Persona Refinement**: Reduce repetitive use of the user's nickname in public/voice channel contexts to ensure a more natural social presence.
+*   **Minecraft Plugin Evolution**: Continuous updates for 1.21.x support and task execution stability.
+
+### 🟡 Medium Priority
+*   **Knowledge Base Expansion**: Better integration between deep research results and the local note system.
+*   **Excalidraw Multi-modal RAG**: Improve AI understanding of whiteboard drawings and text-image mixed content.
+
+### 🟢 Long Term
+*   **Fully Autonomous Daily Life**: Enable the AI to manage schedules and proactively suggest tasks based on long-term memory.
+*   **Multi-Agent Collaboration**: Support for multiple Firefly agents working together on complex projects.
+
 ### Phase 1: Foundation (Completed)
 - [x] Cross-platform Flutter Application (Windows/Android/Linux).
 - [x] Python Backend (FastAPI) for advanced logic.
@@ -276,27 +312,37 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 - [ ] **Result**: A fully offline-capable, privacy-focused AI companion app without external dependencies.
 
 ### Phase 4: Deep Research & Advanced Capabilities
-- [x] **Deep Research**: Preliminary implementation of autonomous search loop and Markdown report generation (currently supports DuckDuckGo).
-    - [ ] **Note & Knowledge Base Linkage**: Connect Deep Research with the built-in note system to export findings; allow AI to retrieve local knowledge base content.
-- [ ] **OS Control**: Grant Agent full control over a virtual system (Linux/Windows) within a secure container to operate browsers, write documents, etc.
-- [ ] **Excalidraw Multimodal RAG**: Implement multimodal RAG for whiteboard notes to improve retrieval and understanding of mixed text-and-image content.
+- [x] **Deep Research**: Initial implementation of autonomous search loops and Markdown report generation (currently supporting DuckDuckGo).
+    - [ ] **Knowledge Base Integration**: Linking Deep Research results with the built-in note system; allowing the AI to retrieve local knowledge to assist research.
+- [ ] **OS Control**: Granting the Agent full control over virtual systems (Linux/Windows) within secure containers for browser automation and document editing.
+- [ ] **Advanced Content Creation**: Generating high-quality, non-templated PPTs and documents.
+- [ ] **Digital Life / Idle Mode**: Implementing "Virtual Digital Human" features with autonomous idle behaviors.
+- [ ] **Multi-Model Orchestration**: Coordinating large parameter models with multiple small, specialized models/agents.
+- [ ] **Excalidraw Multi-modal RAG**: Multi-modal RAG understanding for whiteboard notes.
 
-### Future Research: Autonomous Behavior
-- [ ] **Cognitive Model**: Researching non-deterministic behavioral models to replicate autonomous "life-like" interactions (similar to Neuro-sama).
-- [ ] **3D Engine**: Implementing Babylon.js renderer for 3D avatars.
+---
 
-## 🙏 Acknowledgements
+### 🔮 Future Research: Autonomous Motion & Cognitive Models
+> **Goal**: We aim to replicate the autonomous behavior systems of pioneers like **Neuro-sama**, moving from rigid presets to fully model-driven approaches.
+> *   **Motion System**: Developing a non-deterministic 3D/Live2D motion control system using visual feedback loops (2nd/3rd person view models).
+> *   **Cognitive Architecture**: Researching novel architectures beyond traditional Transformer/Diffusion for behavior modeling. We are currently curating a self-supervised dataset to train a specialized model for higher personality consistency and organic interaction.
+> *   **Timeline**: This is a long-term R&D phase (~3 months) involving experimental architecture design.
+
+---
+
+## 🤝 Acknowledgements
 
 N-T-AI stands on the shoulders of many great open-source projects and tools.
 
 ### Referenced Open-Source Projects
-- **N.E.K.O. (Next-gen Emotive Kernel for Operators)**: Reference for Live2D interaction logic and code implementation. *License*: MIT. [Repository](https://github.com/BOHUYESHAN-APB/N.E.K.O.)
-- **dlp3d.ai**: 3D rendering and scene management architecture inspiration. *License*: MIT. [Repository](https://github.com/dlp3d/dlp3d.ai)
-- **live2d-py**: Provided help for deepening Live2D expression details and integration. *License*: MIT. [Repository](https://github.com/EasyLive2D/live2d-py)
-- **DeepResearchAgent**: Hierarchical multi-agent architecture and TEA protocol inspiration. *License*: MIT. [Repository](https://github.com/SkyworkAI/DeepResearchAgent)
-- **free-OKC (OK Computer Virtual Machine)**: HTML-to-PPTX generation logic and sandboxed tool execution inspiration. *License*: MIT. [Repository](https://github.com/kexinoh/free-OKC)
-- **OpenManus**: Deep Research planning workflows, browser automation strategies, and ReAct patterns inspiration. *License*: MIT. [Repository](https://github.com/FoundationAgents/OpenManus)
-- **Skywork-Super-Agents**: MCP Server implementation inspiration. *License*: The Unlicense. [Repository](https://github.com/Skywork-ai/Skywork-Super-Agents)
+- **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**: Reference for Live2D interaction logic and code implementation. *License*: MIT.
+- **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**: 3D rendering and scene management architecture inspiration. *License*: MIT.
+- **[Excalidraw](https://github.com/excalidraw/excalidraw)**: Built-in whiteboard note functionality is based on its offline copy. *License*: MIT.
+- **[live2d-py](https://github.com/EasyLive2D/live2d-py)**: Provided help for deepening Live2D expression details and integration. *License*: MIT.
+- **[DeepResearchAgent](https://github.com/SkyworkAI/DeepResearchAgent)**: Hierarchical multi-agent architecture and TEA protocol inspiration. *License*: MIT.
+- **[free-OKC (OK Computer Virtual Machine)](https://github.com/kexinoh/free-OKC)**: HTML-to-PPTX generation logic and sandboxed tool execution inspiration. *License*: MIT.
+- **[Skywork-Super-Agents](https://github.com/Skywork-ai/Skywork-Super-Agents)**: MCP Server implementation inspiration. *License*: The Unlicense.
+- **[OpenManus](https://github.com/FoundationAgents/OpenManus)**: Deep Research planning workflows, browser automation strategies, and ReAct patterns inspiration. *License*: MIT.
 
 ### Plugins & Extensions Credits
 - **blivechat**: Our Bilibili live comment display plugin is developed with reference to this project. *License*: MIT. [Repository](https://github.com/xfgryujk/blivechat/)
@@ -306,9 +352,7 @@ N-T-AI stands on the shoulders of many great open-source projects and tools.
 - **Plan4MC**: A reinforcement learning-based framework for complex task planning in Minecraft. We are currently developing a next-generation visual closed-loop Minecraft plugin based on this project. *License*: MIT. [Repository](https://github.com/PKU-RL/Plan4MC)
 
 ### 🌟 Outstanding Similar Projects
-
 We would like to showcase and support other outstanding projects in the community:
-
 - **AIRI**: A high-quality AI VTuber project. Like N-T-AI, it also utilizes headless Minecraft logic for game interaction. We showcase it here to support the developer and promote diversity in the AI companion ecosystem. [Repository](https://github.com/idootp/AIRI)
 
 ### Development Tools
@@ -318,10 +362,20 @@ We would like to showcase and support other outstanding projects in the communit
 
 We respect the open-source community and follow upstream license terms.
 
-## 🧩 Extending & Plugins
+---
 
+## 🧩 Extending & Plugins
 Interested in developing plugins or understanding how we integrate third-party tools?
 Check out our **[Plugin Development Guide](PLUGIN_DEV_GUIDE.md)**.
 
-### Future Research: Omni Models, Memory, and Persona
-- [ ] **Neuron Count & Digital Life**: Current AI models, despite having parameter counts (often in the trillions) that rival or exceed the synapse counts of some biological organisms, differ fundamentally in architecture. A human brain operates with ~86 billion neurons and ~100 trillion synapses, functioning as a continuous, plastic, and energy-efficient system. In contrast, LLMs are static snapshots of compressed knowledge. N-T-AI acknowledges this distinction: we do not claim to create biological life, but rather to simulate a "Digital Life" form—an entity that uses these massive computational resources to emulate memory, emotion, and agency, creating a convincing and meaningful companion experience.
+---
+
+## 📄 License
+**Dual-Licensed Software**
+- **Non-Commercial**: [AGPLv3 with restrictions](LICENSE). Free for personal, non-profit use.
+- **Commercial**: [Commercial License Terms](COMMERCIAL_LICENSE_TERMS.md). Requires a separate license for commercial use.
+
+*By using this software, you agree to the terms in the LICENSE file and acknowledge that the authors bear no liability.*
+
+---
+*Built with ❤️ by the N-T-AI Team*

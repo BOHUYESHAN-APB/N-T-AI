@@ -15,6 +15,7 @@ import '../widgets/character_display.dart';
 import '../widgets/live2d_controller.dart';
 import '../widgets/glass.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/scenario_editor.dart';
 import '../data/mock_data.dart'; // Import for ChatMessage
 import '../settings/settings_controller.dart';
 import '../settings/settings_scope.dart';
@@ -420,8 +421,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
             });
             _scrollToBottom();
 
-            // Trigger TTS for Minecraft messages
+            // Trigger Brain processing for Minecraft messages
             if (msg['sender'] == 'minecraft') {
+              // Feed to brain with source tag
+              unawaited(_brain.processMessage(
+                content,
+                source: 'minecraft',
+                agentEnabled: true, // Minecraft context usually implies agent interaction
+              ));
+
               try {
                 final rootSettings = SettingsScope.of(context).settings;
                 if (rootSettings.enableTts) {
@@ -682,11 +690,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
           .toList();
     });
 
-    // If empty, add greeting (but don't save it to DB yet to keep it clean)
-    if (_messages.isEmpty) {
-      _checkApiKey();
-    }
-
     // Update Brain context
     _brain.setContext(
       _messages
@@ -713,28 +716,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
       } else {
         _createNewSession();
       }
-    }
-  }
-
-  Future<void> _checkApiKey() async {
-    final key = await _llmService.getApiKey();
-    if (!mounted) return;
-    final l10n = AppLocalizations.of(context)!;
-    if (key == null || key.isEmpty) {
-      setState(() {
-        _messages.add(<String, dynamic>{
-          'role': 'assistant',
-          'content': l10n.greetingMissingKey,
-        });
-      });
-    } else {
-      // Add initial greeting
-      setState(() {
-        _messages.add(<String, dynamic>{
-          'role': 'assistant',
-          'content': l10n.greetingNormal,
-        });
-      });
     }
   }
 
@@ -793,7 +774,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
           '语音转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
         );
         _controller.text = text;
-        _sendMessage(uiRole: fromLoopback ? 'stt_heard' : 'user', needsRefinement: true);
+        _sendMessage(
+          uiRole: fromLoopback ? 'stt_heard' : 'user', 
+          needsRefinement: true,
+          source: fromLoopback ? 'voice' : 'direct',
+        );
       } else {
         keepFile = true;
         logger.error(
@@ -826,6 +811,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Future<void> _handleLoopbackVoiceInput({bool isAuto = false}) async {
     if (!mounted) return;
     if (_isLoading || _isLoopbackCapturing) return;
+
+    // AEC Logic: If AI is speaking, don't capture or transcribe to avoid "hearing itself"
+    if (_brain.isAnyTtsActive) {
+      if (isAuto) {
+        // Wait and retry
+        await Future.delayed(const Duration(seconds: 1));
+        return _handleLoopbackVoiceInput(isAuto: true);
+      }
+      return;
+    }
     
     // 如果正在麦克风自动监听，先停止它
     if (_autoMicListeningActive) {
@@ -899,7 +894,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         '系统回环转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
       );
       _controller.text = text;
-      _sendMessage(uiRole: 'stt_heard', needsRefinement: true);
+      _sendMessage(uiRole: 'stt_heard', needsRefinement: true, source: 'voice');
       
       // 成功识别并发送后，如果是自动模式，继续下一次监听循环
       if (isAuto && settings.autoVoiceChannelListening) {
@@ -927,6 +922,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
   // 开始自动麦克风监听
   Future<void> _startAutoMicListening() async {
     if (!mounted || _autoMicListeningActive || _isLoading) return;
+
+    // AEC Logic: If AI is speaking, don't start recording
+    if (_brain.isAnyTtsActive) {
+      // For auto-mic, we usually trigger this from a UI action or another loop.
+      // If it's already active, it will be handled in the stop/process logic.
+      return;
+    }
 
     try {
       if (await _autoMicRecorder.hasPermission()) {
@@ -965,7 +967,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
-  Future<void> _sendMessage({String uiRole = 'user', bool needsRefinement = false}) async {
+  Future<void> _sendMessage({
+    String uiRole = 'user', 
+    bool needsRefinement = false,
+    String source = 'direct',
+  }) async {
     // 如果正在自动监听，先停止它
     if (_autoMicListeningActive) {
       await _stopAutoMicListening();
@@ -982,6 +988,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ? (text.isNotEmpty ? '$text\n[已附加图片]' : '[已附加图片]')
             : text,
         'created_at': DateTime.now(),
+        'source': source, // Track source in message history
       });
       _isLoading = true;
       _interruptCompleter = Completer<void>(); // Initialize completer
@@ -1114,6 +1121,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 systemPromptOverride: settings.systemPrompt,
                 sessionId: _currentSessionId,
                 needsRefinement: needsRefinement,
+                source: source,
               );
             }
           } catch (_) {
@@ -1129,6 +1137,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               systemPromptOverride: settings.systemPrompt,
               sessionId: _currentSessionId,
               needsRefinement: needsRefinement,
+              source: source,
             );
           }
         } else {
@@ -1152,6 +1161,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             providerOverride: provider,
             sessionId: _currentSessionId,
             needsRefinement: needsRefinement,
+            source: source,
           );
 
           if (provider != null && mounted) {
@@ -1470,7 +1480,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 children: [
                   _buildHeader(context, settings, titleFontFamily),
                   _buildDanmakuSummaryCard(context),
-                  Expanded(child: _buildMessageList(context, settings)),
+                  Expanded(
+                child: Stack(
+                  children: [
+                    if (_messages.isEmpty) _buildBackgroundGreeting(context),
+                    _buildMessageList(context, settings),
+                  ],
+                ),
+              ),
                   _buildInputArea(
                     context,
                     settings,
@@ -1676,6 +1693,59 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
 
+        // Scenario Context & Objectives Toggle (场景描述)
+        Container(
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (context) => const ScenarioEditor(),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                          ? Icons.assignment
+                          : Icons.assignment_outlined,
+                      size: 20,
+                      color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      "状态描述",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                            ? Colors.green
+                            : Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
         Container(
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
@@ -1788,22 +1858,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 ),
                 const SizedBox(width: 12),
                 const Text('Live2D 应用内小窗'),
-              ],
-            ),
-          ),
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            value: 'minecraft_pov',
-            child: Row(
-              children: [
-                Icon(
-                  Icons.videogame_asset,
-                  color: _showMinecraftPOV
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('Minecraft 第一视角'),
               ],
             ),
           ),
@@ -2141,6 +2195,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
     AppSettings settings,
     String? titleFontFamily,
   ) {
+    final hasScenario = settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty;
+
     return Container(
       height: 80,
       alignment: Alignment.center,
@@ -2148,42 +2204,54 @@ class _FireflyScreenState extends State<FireflyScreen> {
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 48.0,
-                ), // Avoid overlap with menu button
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  horizontal: 12.0,
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      settings.assistantName,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        fontFamily: titleFontFamily,
+                    const SizedBox(width: 48), // Space for menu button
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            settings.assistantName,
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: titleFontFamily,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (hasScenario)
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              Text(
+                                hasScenario ? '场景模式激活' : 'Astra-Me',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  letterSpacing: 1.2,
+                                  color: hasScenario ? Colors.green : Theme.of(context).colorScheme.outline,
+                                  fontFamily: titleFontFamily,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Astra-Me',
-                      style: TextStyle(
-                        fontSize: 10,
-                        letterSpacing: 1.2,
-                        color: Theme.of(context).colorScheme.outline,
-                        fontFamily: titleFontFamily,
-                      ),
-                    ),
-                    Text(
-                      'Project N-T-AI',
-                      style: TextStyle(
-                        fontSize: 8,
-                        letterSpacing: 3.0,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.outline.withValues(alpha: 0.5),
-                        fontFamily: titleFontFamily,
-                      ),
-                    ),
+                    const SizedBox(width: 48), // Space for symmetry or other buttons
                   ],
                 ),
               ),
@@ -2221,6 +2289,108 @@ class _FireflyScreenState extends State<FireflyScreen> {
       },
     );
   }
+
+  Widget _buildBackgroundGreeting(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Logo or Icon
+            Opacity(
+              opacity: 0.15,
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 120,
+                height: 120,
+                errorBuilder: (context, error, stackTrace) => Icon(
+                  Icons.auto_awesome,
+                  size: 80,
+                  color: colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Greeting Title
+            Text(
+              l10n.appTitle,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface.withOpacity(0.4),
+                letterSpacing: 4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Greeting Message
+            FutureBuilder<String?>(
+              future: _llmService.getApiKey(),
+              builder: (context, snapshot) {
+                final hasKey =
+                    snapshot.hasData &&
+                    snapshot.data != null &&
+                    snapshot.data!.isNotEmpty;
+                final message =
+                    hasKey ? l10n.greetingNormal : l10n.greetingMissingKey;
+
+                return Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                    height: 1.6,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 48),
+            // Feature hints
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                _buildFeatureHint(Icons.chat_bubble_outline, "自然对话"),
+                _buildFeatureHint(Icons.extension_outlined, "插件扩展"),
+                _buildFeatureHint(Icons.face_retouching_natural, "Live2D 交互"),
+                _buildFeatureHint(Icons.translate, "语音识别"),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeatureHint(IconData icon, String label) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: colorScheme.primary.withOpacity(0.5)),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+            ),
+          ),
+        ],
+       ),
+     );
+   }
 
   String _formatMessageTimestamp(DateTime time) {
     final now = DateTime.now();

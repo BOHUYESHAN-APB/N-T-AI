@@ -23,6 +23,8 @@ class SettingsController extends ChangeNotifier {
   static const _kAiAllowEmojis = 'settings.ai.allowEmojis';
   static const _kAiProviders = 'settings.ai.providers';
   static const _kAiActiveId = 'settings.ai.activeId';
+  static const _kScenarioContext = 'settings.scenario.context';
+  static const _kScenarioTasks = 'settings.scenario.tasks';
   static const _kAiActiveVisionId = 'settings.ai.activeVisionId';
   static const _kUseMainVisionIfCapable = 'settings.vision.useMainIfCapable';
   static const _kVisionFallbackAgent = 'settings.vision.fallbackAgent';
@@ -125,7 +127,9 @@ class SettingsController extends ChangeNotifier {
     final aiBaseUrl = _prefs.getString(_kAiBaseUrl) ?? '';
     final aiApiKey = _prefs.getString(_kAiApiKey) ?? '';
     final aiModel = _prefs.getString(_kAiModel) ?? '';
-    final aiEnableThinking = _prefs.getBool(_kAiEnableThinking) ?? false;
+    final scenarioContext = _prefs.getString(_kScenarioContext) ?? '';
+    final scenarioTasks = _prefs.getStringList(_kScenarioTasks) ?? [];
+    final aiEnableThinking = _prefs.getBool(_kAiEnableThinking) ?? true;
     final aiInitiativeMode = _prefs.getBool(_kAiInitiativeMode) ?? false;
     final aiDanmakuBatchInterval = _prefs.getInt(_kAiDanmakuBatchInterval) ?? 20;
     final aiAllowEmojis = _prefs.getBool(_kAiAllowEmojis) ?? false;
@@ -555,6 +559,8 @@ class SettingsController extends ChangeNotifier {
       isFirstRun: isFirstRun,
       enableTts: enableTts,
       enableStt: enableStt,
+      scenarioContext: scenarioContext,
+      scenarioTasks: scenarioTasks,
       ttsViaBackendDevice: ttsViaBackendDevice,
       ttsBackendDeviceIndex: ttsBackendDeviceIndex,
       ttsMode: _prefs.getString(_kTtsMode) ?? 'sentence',
@@ -1564,6 +1570,18 @@ class SettingsController extends ChangeNotifier {
   Future<void> setAssistantName(String value) async {
     _settings = _settings.copyWith(assistantName: value);
     await _prefs.setString(_kAssistantName, value);
+    notifyListeners();
+  }
+
+  Future<void> setScenarioContext(String value) async {
+    _settings = _settings.copyWith(scenarioContext: value);
+    await _prefs.setString(_kScenarioContext, value);
+    notifyListeners();
+  }
+
+  Future<void> setScenarioTasks(List<String> value) async {
+    _settings = _settings.copyWith(scenarioTasks: value);
+    await _prefs.setStringList(_kScenarioTasks, value);
     notifyListeners();
   }
 

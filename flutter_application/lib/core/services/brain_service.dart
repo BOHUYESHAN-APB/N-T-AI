@@ -52,6 +52,12 @@ class BrainService {
 
   int _ttsSessionId = 0;
   bool _ttsStopped = false;
+  bool _isSpeaking = false;
+  bool get isSpeaking => _isSpeaking;
+  
+  // 用于追踪后台正在进行的 TTS 任务数量
+  int _activeTtsCount = 0;
+  bool get isAnyTtsActive => _activeTtsCount > 0 || _isSpeaking;
 
   // Context window (Short-term memory)
   // This is now managed by the UI/ChatHistoryService, but we keep a local buffer for the current turn
@@ -537,6 +543,7 @@ class BrainService {
 
     final sessionId = ++_ttsSessionId;
     _ttsStopped = false;
+    _isSpeaking = true;
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -562,52 +569,57 @@ class BrainService {
       if (_ttsStopped || _ttsSessionId != sessionId) return;
 
       if (injectToBackend) {
+        _activeTtsCount++;
         unawaited(() async {
-          Uint8List? injWav;
           try {
-            if (convertBackendBase != null) {
-              if (_looksLikeWav(bytes)) {
-                if (_needsInjectionWavResample(bytes)) {
+            Uint8List? injWav;
+            try {
+              if (convertBackendBase != null) {
+                if (_looksLikeWav(bytes)) {
+                  if (_needsInjectionWavResample(bytes)) {
+                    injWav = await _convertToWavViaBackend(
+                      backendBase: convertBackendBase,
+                      audioBytes: bytes,
+                      targetSampleRate: 48000,
+                      targetChannels: 2,
+                      force: true,
+                    );
+                  } else {
+                    injWav = bytes;
+                  }
+                } else {
                   injWav = await _convertToWavViaBackend(
                     backendBase: convertBackendBase,
                     audioBytes: bytes,
                     targetSampleRate: 48000,
                     targetChannels: 2,
-                    force: true,
                   );
-                } else {
-                  injWav = bytes;
                 }
-              } else {
-                injWav = await _convertToWavViaBackend(
-                  backendBase: convertBackendBase,
-                  audioBytes: bytes,
-                  targetSampleRate: 48000,
-                  targetChannels: 2,
-                );
               }
+
+              injWav ??= await _getInjectionWavBytes(
+                text: cleanText,
+                ttsProvider: ttsProvider,
+                backendBase: convertBackendBase,
+              );
+            } catch (_) {}
+
+            if (injWav == null) {
+              logger.error('TTS 注入失败：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
+              return;
             }
 
-            injWav ??= await _getInjectionWavBytes(
-              text: cleanText,
-              ttsProvider: ttsProvider,
-              backendBase: convertBackendBase,
+            if (_ttsStopped || _ttsSessionId != sessionId) return;
+            final failInfo = await _injectWavToBackend(
+              backendBase: backendBase,
+              wavBytes: injWav,
+              deviceIndex: ttsBackendDeviceIndex,
             );
-          } catch (_) {}
-
-          if (injWav == null) {
-            logger.error('TTS 注入失败：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
-            return;
-          }
-
-          if (_ttsStopped || _ttsSessionId != sessionId) return;
-          final failInfo = await _injectWavToBackend(
-            backendBase: backendBase,
-            wavBytes: injWav,
-            deviceIndex: ttsBackendDeviceIndex,
-          );
-          if (failInfo != null && failInfo.isNotEmpty) {
-            logger.error('TTS 注入失败：$failInfo');
+            if (failInfo != null && failInfo.isNotEmpty) {
+              logger.error('TTS 注入失败：$failInfo');
+            }
+          } finally {
+            _activeTtsCount--;
           }
         }());
       }
@@ -660,52 +672,57 @@ class BrainService {
         if (_ttsStopped || _ttsSessionId != sessionId) break;
 
         if (injectToBackend) {
+          _activeTtsCount++;
           unawaited(() async {
-            Uint8List? injWav;
             try {
-              if (convertBackendBase != null) {
-                if (_looksLikeWav(bytes)) {
-                  if (_needsInjectionWavResample(bytes)) {
+              Uint8List? injWav;
+              try {
+                if (convertBackendBase != null) {
+                  if (_looksLikeWav(bytes)) {
+                    if (_needsInjectionWavResample(bytes)) {
+                      injWav = await _convertToWavViaBackend(
+                        backendBase: convertBackendBase,
+                        audioBytes: bytes,
+                        targetSampleRate: 48000,
+                        targetChannels: 2,
+                        force: true,
+                      );
+                    } else {
+                      injWav = bytes;
+                    }
+                  } else {
                     injWav = await _convertToWavViaBackend(
                       backendBase: convertBackendBase,
                       audioBytes: bytes,
                       targetSampleRate: 48000,
                       targetChannels: 2,
-                      force: true,
                     );
-                  } else {
-                    injWav = bytes;
                   }
-                } else {
-                  injWav = await _convertToWavViaBackend(
-                    backendBase: convertBackendBase,
-                    audioBytes: bytes,
-                    targetSampleRate: 48000,
-                    targetChannels: 2,
-                  );
                 }
+
+                injWav ??= await _getInjectionWavBytes(
+                  text: partText,
+                  ttsProvider: ttsProvider,
+                  backendBase: convertBackendBase,
+                );
+              } catch (_) {}
+
+              if (injWav == null) {
+                logger.error('TTS 注入失败（分段）：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
+                return;
               }
 
-              injWav ??= await _getInjectionWavBytes(
-                text: partText,
-                ttsProvider: ttsProvider,
-                backendBase: convertBackendBase,
+              if (_ttsStopped || _ttsSessionId != sessionId) return;
+              final failInfo = await _injectWavToBackend(
+                backendBase: backendBase,
+                wavBytes: injWav,
+                deviceIndex: ttsBackendDeviceIndex,
               );
-            } catch (_) {}
-
-            if (injWav == null) {
-              logger.error('TTS 注入失败（分段）：无法获取 WAV 音频（可能不支持 wav/pcm 输出）');
-              return;
-            }
-
-            if (_ttsStopped || _ttsSessionId != sessionId) return;
-            final failInfo = await _injectWavToBackend(
-              backendBase: backendBase,
-              wavBytes: injWav,
-              deviceIndex: ttsBackendDeviceIndex,
-            );
-            if (failInfo != null && failInfo.isNotEmpty) {
-              logger.error('TTS 注入失败（分段）：$failInfo');
+              if (failInfo != null && failInfo.isNotEmpty) {
+                logger.error('TTS 注入失败（分段）：$failInfo');
+              }
+            } finally {
+              _activeTtsCount--;
             }
           }());
         }
@@ -713,12 +730,17 @@ class BrainService {
       }
     } catch (e) {
       logger.error('TTS 失败（分段）', e);
+    } finally {
+      if (_ttsSessionId == sessionId) {
+        _isSpeaking = false;
+      }
     }
   }
 
   Future<void> stopSpeaking() async {
     _ttsStopped = true;
     _ttsSessionId++;
+    _isSpeaking = false;
     try {
       if (_audioPlayer != null) {
         await _audioPlayer!.stop();
@@ -1133,6 +1155,7 @@ Based on these comments, do you want to proactively say something to the audienc
     AiProviderConfig? providerOverride,
     String? sessionId,
     bool needsRefinement = false,
+    String source = 'direct', // 'direct', 'voice', 'minecraft', 'danmaku'
   }) async {
     final prefs = await SharedPreferences.getInstance();
     
@@ -1144,6 +1167,17 @@ Based on these comments, do you want to proactively say something to the audienc
       processedUserMessage = await refineUserMessage(userMessage, providerId: refinerProviderId);
       debugPrint("[BRAIN] Speech Refined: \"$userMessage\" -> \"$processedUserMessage\"");
     }
+
+    // 1. 实现信源元数据标记 (Source Tagging)
+    String taggedUserMessage = processedUserMessage;
+    if (source == 'voice') {
+      taggedUserMessage = "[Voice Channel] $processedUserMessage";
+    } else if (source == 'minecraft') {
+      taggedUserMessage = "[Minecraft] $processedUserMessage";
+    } else if (source == 'danmaku') {
+      taggedUserMessage = "[Danmaku] $processedUserMessage";
+    }
+    // 'direct' 不加前缀，保持原有逻辑
 
     _statusController.add("Thinking...");
     
@@ -1158,12 +1192,14 @@ Based on these comments, do you want to proactively say something to the audienc
     final providerConfig = providerOverride ?? await _llmService.getActiveProviderConfig();
     final prefs2 = await SharedPreferences.getInstance();
     final allowEmojis = prefs2.getBool('settings.ai.allowEmojis') ?? false;
+    final scenarioContext = prefs2.getString('settings.scenario.context') ?? '';
+    final scenarioTasks = prefs2.getStringList('settings.scenario.tasks') ?? [];
     final suppressInnerMonologue =
         prefs2.getBool('settings.chat.suppressInnerMonologue') ?? false;
     final backendEnabled = prefs2.getBool('settings.backend.enabled') ?? false;
     final isServerMode = backendEnabled;
 
-    debugPrint("[BRAIN] Process Message Start");
+    debugPrint("[BRAIN] Process Message Start (Source: $source)");
     debugPrint("[BRAIN] Backend Enabled: $backendEnabled");
     debugPrint("[BRAIN] Provider Mode: ${providerConfig?.orchestrationMode}");
     debugPrint("[BRAIN] Selected Mode: ${isServerMode ? 'SERVER' : 'CLIENT'}");
@@ -1174,9 +1210,9 @@ Based on these comments, do you want to proactively say something to the audienc
       unawaited(() async {
         try {
           debugPrint("[BRAIN] Triggering early motion request for user input...");
-          // Send user message with empty AI response initially, plus context history
+          // Send tagged user message with empty AI response initially, plus context history
           _expressionAgent.requestMotion(
-            processedUserMessage, 
+            taggedUserMessage, 
             "", 
             history: List.from(_context), // Pass copy of current history (excluding current msg)
           );
@@ -1186,9 +1222,9 @@ Based on these comments, do you want to proactively say something to the audienc
       }());
     }
 
-    // 1. Add User Message to Context
-    if (_context.isEmpty || _context.last['content'] != processedUserMessage) {
-       _context.add({'role': 'user', 'content': processedUserMessage});
+    // 1. Add Tagged User Message to Context
+    if (_context.isEmpty || _context.last['content'] != taggedUserMessage) {
+       _context.add({'role': 'user', 'content': taggedUserMessage});
     }
     
     if (_context.length > 200) {
@@ -1199,12 +1235,26 @@ Based on these comments, do you want to proactively say something to the audienc
     _statusController.add(isServerMode ? "Connecting to Neural Backend..." : "Connecting to AI Provider...");
     debugPrint("[BRAIN] Entering ${isServerMode ? 'Server' : 'Client'} Mode");
     debugPrint("[BRAIN] enableBrowser: $enableBrowser");
-    debugPrint("[BRAIN] User message: ${processedUserMessage.length > 50 ? '${processedUserMessage.substring(0, 50)}...' : processedUserMessage}");
+    debugPrint("[BRAIN] User message: ${taggedUserMessage.length > 50 ? '${taggedUserMessage.substring(0, 50)}...' : taggedUserMessage}");
     try {
       List<Map<String, String>> messages = List.from(_context);
-      if (!allowEmojis) {
+      
+      // Inject scenario context and tasks into the system prompt
+      String extraSystemInfo = "";
+      if (scenarioContext.isNotEmpty) {
+        extraSystemInfo += "\n[Current Scenario]: $scenarioContext";
+      }
+      if (scenarioTasks.isNotEmpty) {
+        extraSystemInfo += "\n[Current Objectives/Tasks]:\n- ${scenarioTasks.join('\n- ')}";
+      }
+
+      if (!allowEmojis || extraSystemInfo.isNotEmpty) {
+        String sysContent = "";
+        if (!allowEmojis) sysContent += "要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。";
+        if (extraSystemInfo.isNotEmpty) sysContent += extraSystemInfo;
+        
         messages = [
-          {'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'},
+          {'role': 'system', 'content': sysContent},
           ...messages,
         ];
       }

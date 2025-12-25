@@ -424,6 +424,8 @@ class AppSettings {
   final int logMaxErrors; // 最近错误日志条数
   final int? userBubbleColor; // 用户气泡颜色 (ARGB)
   final int? aiBubbleColor; // AI 气泡颜色 (ARGB)
+  final String scenarioContext; // 当前场景说明
+  final List<String> scenarioTasks; // 当前待办任务
   final String? activeSpeechRefinerProviderId; // 语音修正 Agent 服务商
   final bool enableSpeechRefinement; // 启用语音修正
   final String? activeToolCallingProviderId; // 工具调用专用模型服务商
@@ -506,6 +508,8 @@ class AppSettings {
     this.logMaxErrors = 5,
     this.userBubbleColor,
     this.aiBubbleColor,
+    this.scenarioContext = '',
+    this.scenarioTasks = const [],
   });
   AppSettings copyWith({
     ThemeModeOption? themeMode,
@@ -581,6 +585,8 @@ class AppSettings {
     int? logMaxErrors,
     int? userBubbleColor,
     int? aiBubbleColor,
+    String? scenarioContext,
+    List<String>? scenarioTasks,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     locale: locale ?? this.locale,
@@ -673,6 +679,8 @@ class AppSettings {
     logMaxErrors: logMaxErrors ?? this.logMaxErrors,
     userBubbleColor: userBubbleColor ?? this.userBubbleColor,
     aiBubbleColor: aiBubbleColor ?? this.aiBubbleColor,
+    scenarioContext: scenarioContext ?? this.scenarioContext,
+    scenarioTasks: scenarioTasks ?? this.scenarioTasks,
   );
 
   ThemeMode get materialThemeMode => switch (themeMode) {

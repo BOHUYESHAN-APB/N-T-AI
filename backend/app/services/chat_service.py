@@ -629,7 +629,23 @@ class ChatService:
             system_prompt += f"\n\n[Style Instruction]: {style_suggestion}"
 
         if effective_nickname:
-            system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{effective_nickname}。在称呼对方时请自然地使用这个昵称，不要使用“用户”等泛称。"
+            # 检测是否来自公共/语音频道（通过 Flutter 端添加的信源标记）
+            is_voice = "[Voice Channel]" in text_content
+            is_minecraft = "[Minecraft]" in text_content
+            is_danmaku = "[Danmaku]" in text_content
+            is_public_context = is_voice or is_minecraft or is_danmaku
+            
+            if is_public_context:
+                system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{effective_nickname}。注意：当前处于公共/语音频道环境，请尽量**避免频繁提及**用户的昵称。在多人或公共场合中，频繁点名会显得生硬不自然。请以更自然的方式进行交流，仅在必要时称呼对方。"
+                
+                if is_voice:
+                    system_prompt += "\n[Context]: 你当前正在语音频道中与用户交流。请保持回复简洁、口语化，适合语音播放。"
+                elif is_minecraft:
+                    system_prompt += "\n[Context]: 你当前正在 Minecraft 游戏中与用户交流。回复应简短、直接，考虑到用户可能正在操作游戏中。"
+                elif is_danmaku:
+                    system_prompt += "\n[Context]: 你当前正在处理直播弹幕。请保持互动感，回复可以活泼一些。"
+            else:
+                system_prompt += f"\n\n[User Nickname]: 用户的昵称是：{effective_nickname}。在称呼对方时请自然地使用这个昵称，不要使用“用户”等泛称。"
         
         if effective_assistant_name:
              system_prompt += f"\n\n[Assistant Name]: 你的名字是：{effective_assistant_name}。请时刻记住你的名字。"

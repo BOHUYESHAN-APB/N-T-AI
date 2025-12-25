@@ -20,15 +20,17 @@ class MessageBubble extends StatelessWidget {
       if (!enabled) return const SizedBox.shrink();
       final theme = Theme.of(context);
       final cs = theme.colorScheme;
+      final isDark = theme.brightness == Brightness.dark;
+      
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 32),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
           decoration: BoxDecoration(
-            color: const Color(0xFFF0FFF0),
+            color: isDark ? const Color(0xFF1B5E20).withValues(alpha: 0.2) : const Color(0xFFF0FFF0),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: Colors.green.withValues(alpha: 0.45),
+              color: isDark ? Colors.green.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.45),
               width: 1.0,
             ),
             boxShadow: [
@@ -45,14 +47,14 @@ class MessageBubble extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.insights, size: 14, color: Colors.green.withValues(alpha: 0.9)),
+                  Icon(Icons.insights, size: 14, color: isDark ? Colors.green[300] : Colors.green.withValues(alpha: 0.9)),
                   const SizedBox(width: 6),
                   Text(
                     "弹幕总结",
                     style: TextStyle(
                       fontSize: 11, 
                       fontWeight: FontWeight.bold, 
-                      color: Colors.green.withValues(alpha: 0.9),
+                      color: isDark ? Colors.green[300] : Colors.green.withValues(alpha: 0.9),
                       letterSpacing: 1.0
                     )
                   ),
@@ -63,7 +65,7 @@ class MessageBubble extends StatelessWidget {
                 message.text,
                 style: TextStyle(
                   fontSize: 13, 
-                  color: cs.onSurface,
+                  color: isDark ? Colors.green[100] : cs.onSurface,
                   height: 1.4
                 ),
                 textAlign: TextAlign.center,
@@ -75,21 +77,22 @@ class MessageBubble extends StatelessWidget {
     }
 
     if (message.role == 'chat_normal') {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 24),
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.9),
+            color: isDark ? Colors.grey[900]!.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+            border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey.withValues(alpha: 0.3)),
             boxShadow: [
                BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4, offset: const Offset(0, 2)),
             ],
           ),
           child: Text(
             message.text,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
+            style: TextStyle(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87),
             textAlign: TextAlign.center,
           ),
         ),
@@ -97,39 +100,58 @@ class MessageBubble extends StatelessWidget {
     }
 
     if (message.role == 'chat_sc') {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       return Center(
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 24),
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFFFFF3CD), Color(0xFFFFECB3)], // Gold/Yellow
+            gradient: LinearGradient(
+              colors: isDark 
+                ? [const Color(0xFF5D4037), const Color(0xFF3E2723)] // Darker Gold/Brown
+                : [const Color(0xFFFFF3CD), const Color(0xFFFFECB3)], // Gold/Yellow
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFFFEEBA)),
+            border: Border.all(color: isDark ? const Color(0xFF8D6E63) : const Color(0xFFFFEEBA)),
             boxShadow: [
-               BoxShadow(color: Colors.orange.withValues(alpha: 0.2), blurRadius: 6, offset: const Offset(0, 3)),
+               BoxShadow(
+                 color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.orange.withValues(alpha: 0.2), 
+                 blurRadius: 6, 
+                 offset: const Offset(0, 3)
+               ),
             ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-               const Row(
+               Row(
                  mainAxisSize: MainAxisSize.min,
                  children: [
-                   Icon(Icons.star, size: 12, color: Color(0xFF856404)),
-                   SizedBox(width: 4),
-                   Text("SUPER CHAT", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF856404), letterSpacing: 1.5)),
-                   SizedBox(width: 4),
-                   Icon(Icons.star, size: 12, color: Color(0xFF856404)),
+                   Icon(Icons.star, size: 12, color: isDark ? Colors.amber[200] : const Color(0xFF856404)),
+                   const SizedBox(width: 4),
+                   Text(
+                     "SUPER CHAT", 
+                     style: TextStyle(
+                       fontSize: 10, 
+                       fontWeight: FontWeight.bold, 
+                       color: isDark ? Colors.amber[200] : const Color(0xFF856404), 
+                       letterSpacing: 1.5
+                     )
+                   ),
+                   const SizedBox(width: 4),
+                   Icon(Icons.star, size: 12, color: isDark ? Colors.amber[200] : const Color(0xFF856404)),
                  ],
                ),
                const SizedBox(height: 4),
                Text(
                 message.text,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF856404)),
+                style: TextStyle(
+                  fontSize: 14, 
+                  fontWeight: FontWeight.w600, 
+                  color: isDark ? Colors.amber[100] : const Color(0xFF856404)
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -150,6 +172,8 @@ class MessageBubble extends StatelessWidget {
     final userOverride = getColor(settings.userBubbleColor);
     final aiOverride = getColor(settings.aiBubbleColor);
 
+    final isDark = theme.brightness == Brightness.dark;
+
     // Colors
     final bgMine = userOverride ?? chat?.mineBubbleBg ?? theme.colorScheme.primary;
     final bgOther = aiOverride ?? chat?.otherBubbleBg ?? theme.colorScheme.surface;
@@ -166,14 +190,18 @@ class MessageBubble extends StatelessWidget {
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
     final borderColor = switch (kind) {
-      ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.55),
-      ChatMessageKind.user => Colors.blue.withValues(alpha: 0.55),
-      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.55),
-      ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: 0.35),
-      _ => theme.colorScheme.outline.withValues(alpha: 0.25),
+      ChatMessageKind.assistant => Colors.red.withValues(alpha: isDark ? 0.3 : 0.45),
+      ChatMessageKind.user => Colors.blue.withValues(alpha: isDark ? 0.3 : 0.45),
+      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: isDark ? 0.3 : 0.45),
+      ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: isDark ? 0.2 : 0.35),
+      _ => theme.colorScheme.outline.withValues(alpha: isDark ? 0.15 : 0.25),
     };
-    final bubbleBg = isSttHeard ? const Color(0xFFEDE7F6) : (isMine ? bgMine : bgOther);
-    final bubbleTxt = isSttHeard ? theme.colorScheme.onSurface : (isMine ? txtMine : txtOther);
+    final bubbleBg = isSttHeard 
+        ? (isDark ? const Color(0xFF4527A0).withValues(alpha: 0.4) : const Color(0xFFEDE7F6)) 
+        : (isMine ? bgMine : bgOther);
+    final bubbleTxt = isSttHeard 
+        ? (isDark ? Colors.deepPurple[100]! : theme.colorScheme.onSurface) 
+        : (isMine ? txtMine : txtOther);
     final outerPadding = EdgeInsets.fromLTRB(
       8,
       6,
@@ -449,7 +477,11 @@ class MessageBubble extends StatelessWidget {
             ),
             child: Text(
               reasoning,
-              style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.black87),
+              style: TextStyle(
+                fontSize: 12, 
+                fontStyle: FontStyle.italic, 
+                color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.black87
+              ),
             ),
           ),
         ],
@@ -466,22 +498,23 @@ class MessageBubble extends StatelessWidget {
           final func = tool['function'];
           final name = func['name'];
           final args = func['arguments'];
+          final isDark = Theme.of(context).brightness == Brightness.dark;
           return Container(
             margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: Colors.blue.withValues(alpha: 0.1),
+              color: isDark ? Colors.blue[900]!.withValues(alpha: 0.2) : Colors.blue.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+              border: Border.all(color: isDark ? Colors.blue[700]!.withValues(alpha: 0.4) : Colors.blue.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.build, size: 14, color: Colors.blue),
+                Icon(Icons.build, size: 14, color: isDark ? Colors.blue[200] : Colors.blue),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     "Called: $name($args)",
-                    style: const TextStyle(fontSize: 11, color: Colors.blue),
+                    style: TextStyle(fontSize: 11, color: isDark ? Colors.blue[200] : Colors.blue),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),

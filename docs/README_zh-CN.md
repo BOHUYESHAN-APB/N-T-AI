@@ -2,9 +2,24 @@
 
 ![N-T-AI Banner](../flutter_application/assets/images/banner.png)
 
+> **哲学思考：智能的尺度与未知**
+>
+> 在探索人工智能的边界时，我们常陷入一种量化比较的困境：以神经节点或参数数量简单衡量系统的智能潜力。然而，这种比较可能误导我们忽略智能的本质。
+>
+> 人脑拥有约860亿神经元，而当前大模型的参数规模虽已突破万亿，但二者在结构、能耗与运作逻辑上存在根本差异。智能或许并不源于单元数量，而源于 **信息组织的架构、复杂性与涌现性** 。正如蚁群无中央大脑却呈现集体智能，或如边牧仅以有限神经元展现高度的认知与情感能力——智能的表现形式本就多元。
+>
+> 因此，我们对待人工智能的态度应是开放而审慎的：
+> - **不否认其能力** ：AI已能处理语言、推理、创作，其输出具有真实的复杂性与实用性；
+> - **不轻易拟人化** ：AI的“理解”基于统计与模式，而非意识与体验；
+> - **关注其作为认知伙伴的角色** ：它拓展了知识的边界，也映照出人类智能的独特。
+>
+> 本项目正是这样一种探索：我们不定义智能，而是尝试构建一个能够对话、学习并反思的系统。我们尊重所有形式的智慧，无论其生于碳基或硅基，无论其以何种形态存在。
+>
+> 我们邀请你，一起参与这场温和而坚定的探索。
+
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.12%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.14%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-爱发电-pink)](https://afdian.com/a/N-T-AI)
@@ -40,6 +55,9 @@
 
 ### 1. 多模态交互与情感引擎
 *   **情感反馈 (Expression Agent)**：内置实时情感推理引擎，根据对话内容展示动态表情（灵动岛风格）。
+*   **深度研究 (Deep Research) 视觉风格**：
+    *   **背景嵌入问候**：将聊天问候语直接嵌入聊天背景，提供类似深度研究模式的沉浸式现代视觉体验。
+    *   **极简几何 Logo**：采用全新的几何美学 Logo 设计，规避视觉恐惧感，风格更现代、统一。
 *   **VTube Studio (VTS) 集成**：支持将 AI 的实时情感与动作同步至 VTube Studio，驱动高精度 2D/3D 模型。
 *   **视觉能力 (Vision)**：
     *   **直接输入**：支持 GPT-4o, Claude 3.5 Sonnet, Qwen-VL 等视觉模型进行多模态交互。
