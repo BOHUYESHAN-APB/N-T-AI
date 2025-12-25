@@ -64,6 +64,27 @@ class _PluginsTabState extends State<PluginsTab> {
           },
         ),
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.power_settings_new, size: 20),
+                const SizedBox(width: 8),
+                const Text('启动软件时自动开启'),
+                const Spacer(),
+                Switch(
+                  value: plugin.autoStart,
+                  onChanged: (v) async {
+                    await globalPluginManager.toggleAutoStart(plugin.id, v);
+                    // 同步到后端
+                    if (!mounted) return;
+                    await plugin.onSync(context);
+                    setState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
           if (quickSettings != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

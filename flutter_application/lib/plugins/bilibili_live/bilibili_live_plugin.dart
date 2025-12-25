@@ -109,6 +109,7 @@ class BilibiliLivePlugin extends BasePlugin {
     sessDataController.text = prefs.getString('${prefix}sessData') ?? '';
     biliJctController.text = prefs.getString('${prefix}biliJct') ?? '';
     buvid3Controller.text = prefs.getString('${prefix}buvid3') ?? '';
+    autoStart = prefs.getBool('${prefix}autoStart') ?? true; // Bilibili 默认开启
   }
 
   Future<void> _saveLocalConfig() async {
@@ -146,6 +147,7 @@ class BilibiliLivePlugin extends BasePlugin {
     await prefs.setString('${prefix}sessData', sessDataController.text.trim());
     await prefs.setString('${prefix}biliJct', biliJctController.text.trim());
     await prefs.setString('${prefix}buvid3', buvid3Controller.text.trim());
+    await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null && agentProviderId!.isNotEmpty) {
       await prefs.setString('${prefix}agentProviderId', agentProviderId!);
     } else {
@@ -220,6 +222,7 @@ class BilibiliLivePlugin extends BasePlugin {
       config['agent_api_key'] = agentApiKey;
       config['agent_base_url'] = agentBaseUrl;
     }
+    config['auto_start'] = autoStart;
 
     final uri = Uri.parse('$backendUrl/api/v1/plugins/$id/config');
     final body = jsonEncode({
@@ -903,6 +906,19 @@ class BilibiliLivePlugin extends BasePlugin {
                 ),
               ),
             ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: SwitchListTile(
+                title: const Text('启动时自动开启 (Auto Start)'),
+                subtitle: const Text('当后端服务启动时，自动初始化并运行此插件'),
+                value: autoStart,
+                onChanged: (v) {
+                  setState(() {
+                    autoStart = v;
+                  });
+                },
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(

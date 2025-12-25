@@ -21,8 +21,15 @@ export class AgentProcess {
         args.push('-p', this.port);
 
         const agentProcess = spawn('node', args, {
-            stdio: 'inherit',
-            stderr: 'inherit',
+            stdio: ['inherit', 'pipe', 'pipe'], // 修改为 pipe 以便捕获输出
+        });
+
+        agentProcess.stdout.on('data', (data) => {
+            process.stdout.write(data);
+        });
+
+        agentProcess.stderr.on('data', (data) => {
+            process.stderr.write(data);
         });
         
         let last_restart = Date.now();

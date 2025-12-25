@@ -6,7 +6,7 @@ from app.core.logger import logger
 class Live2DConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
-    
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)

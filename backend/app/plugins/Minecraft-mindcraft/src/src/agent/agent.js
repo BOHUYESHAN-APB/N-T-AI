@@ -31,26 +31,21 @@ export class Agent {
         this.npc = new NPCContoller(this);
         this.memory_bank = new MemoryBank();
         this.self_prompter = new SelfPrompter(this);
-        convoManager.initAgent(this);
-        await this.prompter.initExamples();
-
-        // load mem first before doing task
-        let save_data = null;
-        if (load_mem) {
-            save_data = this.history.load();
-        }
-        let taskStart = null;
-        if (save_data) {
-            taskStart = save_data.taskStart;
-        } else {
-            taskStart = Date.now();
-        }
-        this.task = new Task(this, settings.task, taskStart);
-        this.blocked_actions = settings.blocked_actions.concat(this.task.blocked_actions || []);
-        blacklistCommands(this.blocked_actions);
-
         console.log(this.name, 'logging into minecraft...');
         this.bot = initBot(this.name);
+
+        this.bot.on('error', (err) => {
+            console.error('Bot error:', err);
+            let errMsg = err.message || String(err);
+            
+            // Handle Microsoft PPFT error specifically
+            if (errMsg.includes('PPFT')) {
+                errMsg = "Microsoft Login Failed (PPFT error). This usually happens when a password is provided but MFA or other restrictions block it. Please REMOVE the password in settings to use Device Code (browser) login.";
+                console.warn("\x1b[33m%s\x1b[0m", "HINT: To fix PPFT error, clear the 'ms_password' or 'password' field in your settings.");
+            }
+            
+            sendOutputToServer(this.name, "ERROR: " + errMsg);
+        });
 
         initModes(this);
 
@@ -64,6 +59,10 @@ export class Agent {
             else
                 this.bot.chat(`/skin clear`);
         });
+
+        await this.prompter.initExamples();
+
+        // load mem first before doing task
 		const spawnTimeoutDuration = settings.spawn_timeout;
         const spawnTimeout = setTimeout(() => {
             console.error(`Bot has not spawned after ${spawnTimeoutDuration} seconds. Exiting.`);

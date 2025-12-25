@@ -19,6 +19,7 @@ from app.plugins import startup_plugins, shutdown_plugins, get_plugin
 from app.plugins.bilibili_live import BilibiliLivePlugin
 from app.services.sandbox_service import sandbox_service
 from app.services.rag_service import temp_rag_service
+from app.services.system_state import system_state
 
 import logging
 
@@ -272,6 +273,30 @@ async def get_plugin_status(plugin_id: str):
     return status
 
 
+@app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/activate")
+async def activate_plugin(plugin_id: str):
+    plugin = get_plugin(plugin_id)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    
+    success = await plugin.activate()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to activate plugin")
+    return {"status": "ok"}
+
+
+@app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/deactivate")
+async def deactivate_plugin(plugin_id: str):
+    plugin = get_plugin(plugin_id)
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Plugin not found")
+    
+    success = await plugin.deactivate()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to deactivate plugin")
+    return {"status": "ok"}
+
+
 @app.post(f"{settings.API_V1_STR}/plugins/{{plugin_id}}/config")
 async def update_plugin_config(plugin_id: str, payload: PluginConfigUpdate):
     plugin = get_plugin(plugin_id)
@@ -499,6 +524,10 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
         else:
             enable_backend_tts_header = raw_request.headers.get("X-Backend-TTS", "false")
             enable_backend_tts = enable_backend_tts_header.lower() in ["true", "1", "yes", "server"]
+            
+            # 同步全局 TTS 开关状态，供插件使用
+            system_state.update_state("enable_tts", enable_backend_tts)
+            
             if request.stream:
                 async def stream_generator():
                     async for chunk in chat_service.process_message_stream(

@@ -17,7 +17,7 @@
     "port": {
         "type": "number",
         "description": "The minecraft server port to connect to. -1 for auto-detect.",
-        "default": 55916
+        "default": -1
     },
     "auth": {
         "type": "string",
@@ -136,5 +136,45 @@
         "type": "number",
         "description": "Number of seconds allowed for the bot to spawn before throwing an error. Increase when spawning takes a while.",
         "default": 30
+    },
+    "agent_name": {
+        "type": "string",
+        "description": "The name of the character in Minecraft",
+        "default": "_Fire00Fly_"
+    },
+    "agent_model": {
+        "type": "string",
+        "description": "The model to use for the agent",
+        "default": "deepseek-chat"
+    },
+    "agent_api_key": {
+        "type": "string",
+        "description": "The API key for the model",
+        "default": ""
+    },
+    "agent_base_url": {
+        "type": "string",
+        "description": "The base URL for the model API",
+        "default": "https://api.deepseek.com/v1"
+    },
+    "ms_email": {
+        "type": "string",
+        "description": "Microsoft account email for authentication",
+        "default": ""
+    },
+    "ms_password": {
+        "type": "string",
+        "description": "Microsoft account password for authentication",
+        "default": ""
+    },
+    "online_mode": {
+        "type": "boolean",
+        "description": "Whether to enable online mode for the bot",
+        "default": true
+    },
+    "ntai_backend_url": {
+        "type": "string",
+        "description": "The URL of the N-T-AI backend",
+        "default": "http://127.0.0.1:23456"
     }
 }

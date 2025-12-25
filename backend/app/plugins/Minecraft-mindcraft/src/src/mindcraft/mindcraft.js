@@ -1,4 +1,4 @@
-import { createMindServer, registerAgent, numStateListeners } from './mindserver.js';
+import { createMindServer, registerAgent, numStateListeners, setCurrentSettings } from './mindserver.js';
 import { AgentProcess } from '../process/agent_process.js';
 import { getServer } from './mcserver.js';
 import open from 'open';
@@ -9,11 +9,13 @@ let agent_processes = {};
 let agent_count = 0;
 let mindserver_port = 8080;
 
-export async function init(host_public=false, port=8080, auto_open_ui=true) {
+export async function init(host_public=false, port=8080, auto_open_ui=true, settings={}) {
     if (connected) {
         console.error('Already initiliazed!');
         return;
     }
+    console.log(`Initializing MindServer on port ${port}...`);
+    setCurrentSettings(settings);
     mindserver = createMindServer(host_public, port);
     mindserver_port = port;
     connected = true;

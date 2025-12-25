@@ -22,7 +22,7 @@ logger = logging.getLogger('blivedm')
 UID_INIT_URL = 'https://api.bilibili.com/x/web-interface/nav'
 WBI_INIT_URL = UID_INIT_URL
 BUVID_INIT_URL = 'https://www.bilibili.com/'
-ROOM_INIT_URL = 'https://api.live.bilibili.com/room/v1/Room/get_info'
+ROOM_INIT_URL = 'https://api.live.bilibili.com/room/v1/Room/room_init'
 DANMAKU_SERVER_CONF_URL = 'https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo'
 DEFAULT_DANMAKU_SERVER_LIST = [
     {'host': 'broadcastlv.chat.bilibili.com', 'port': 2243, 'wss_port': 443, 'ws_port': 2244}

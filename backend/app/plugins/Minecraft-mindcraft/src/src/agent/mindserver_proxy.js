@@ -33,6 +33,7 @@ class MindServerProxy {
         });
 
         this.connected = true;
+        global.socket = this.socket;
         console.log(name, 'connected to MindServer');
 
         this.socket.on('disconnect', () => {

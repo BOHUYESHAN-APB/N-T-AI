@@ -5,8 +5,8 @@ const settings = {
     "auth": "microsoft", // or "microsoft"
 
     // the mindserver manages all agents and hosts the UI
-    "mindserver_port": 8081,
-    "auto_open_ui": true, // opens UI in browser on startup
+    "mindserver_port": 8080,
+    "auto_open_ui": false, // opens UI in browser on startup
     
     "base_profile": "assistant", // survival, assistant, creative, or god_mode
     "profiles": [

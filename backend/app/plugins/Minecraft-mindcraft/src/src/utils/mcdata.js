@@ -53,26 +53,45 @@ export const WOOL_COLORS = [
 
 
 export function initBot(username) {
+    // 优先从 settings 中获取认证信息
+    const authType = settings.auth || 'offline';
+    
+    // 如果是微软认证，优先使用 ms_email 作为 username
+    let finalUsername = username;
+    if (authType === 'microsoft') {
+        finalUsername = settings.ms_email || settings.username || username;
+    } else {
+        finalUsername = settings.username || username;
+    }
+    
+    const finalPassword = settings.password || settings.ms_password || null;
+
     const options = {
-        username: settings.username || username,
+        username: finalUsername,
         host: settings.host,
         port: settings.port,
-        auth: settings.auth,
+        auth: authType,
         version: mc_version,
         onMsaCode: (data) => {
             console.log('--- MICROSOFT AUTH CODE ---');
             console.log(`Please go to ${data.verification_uri} and enter the code: ${data.user_code}`);
             console.log('---------------------------');
+            // 将验证码发送回 MindServer 供 UI 显示
+            if (global.socket) {
+                // 使用 agent 的显示名称而不是登录邮箱
+                const displayName = settings.profile?.name || finalUsername;
+                global.socket.emit('bot-output', displayName, `Microsoft Auth Required: Go to ${data.verification_uri} and enter code: ${data.user_code}`);
+            }
         }
     }
-    if (settings.password) {
-        options.password = settings.password;
+    if (finalPassword) {
+        options.password = finalPassword;
     }
     if (!mc_version || mc_version === "auto") {
         delete options.version;
     }
 
-    console.log('Creating bot with options:', JSON.stringify({ ...options, password: options.password ? '******' : undefined }, null, 2));
+    console.log(`Creating bot [${finalUsername}] with auth [${authType}] on ${settings.host}:${settings.port}`);
     const bot = createBot(options);
     bot.loadPlugin(pathfinder);
     bot.loadPlugin(pvp);

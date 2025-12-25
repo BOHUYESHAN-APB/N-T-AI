@@ -5,7 +5,11 @@ export class Ollama {
     constructor(model_name, url, params) {
         this.model_name = model_name;
         this.params = params;
-        this.url = url || 'http://127.0.0.1:11434';
+        
+        // 优先使用传入的 url，然后是环境变量，最后是默认值
+        // 支持通过 params 传递 ollama_url
+        this.url = url || (params && params.ollama_url) || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
+        
         this.chat_endpoint = '/api/chat';
         this.embedding_endpoint = '/api/embeddings';
     }
@@ -32,15 +36,24 @@ export class Ollama {
                 if (apiResponse) {
                     res = apiResponse['message']['content'];
                 } else {
-                    res = 'No response data.';
+                    throw new Error('No response data from Ollama');
                 }
             } catch (err) {
                 if (err.message.toLowerCase().includes('context length') && turns.length > 1) {
                     console.log('Context length exceeded, trying again with shorter context.');
                     return await this.sendRequest(turns.slice(1), systemMessage);
                 } else {
-                    console.log(err);
-                    res = 'My brain disconnected, try again.';
+                    console.error('Ollama connection error:', err.message);
+                    // 如果 Ollama 失败，且不是因为上下文长度，尝试回退到 MainBrain
+                    console.warn('Attempting fallback to MainBrain...');
+                    try {
+                        const { MainBrain } = await import('./main_brain.js');
+                        const mainBrain = new MainBrain(this.model_name, null, this.params);
+                        return await mainBrain.sendRequest(turns, systemMessage);
+                    } catch (fallbackErr) {
+                        console.error('Fallback to MainBrain failed:', fallbackErr.message);
+                        res = 'My brain disconnected, and fallback failed. Try again.';
+                    }
                 }
             }
 
@@ -71,8 +84,24 @@ export class Ollama {
     async embed(text) {
         let model = this.model_name || 'embeddinggemma';
         let body = { model: model, input: text };
-        let res = await this.send(this.embedding_endpoint, body);
-        return res['embedding'];
+        try {
+            let res = await this.send(this.embedding_endpoint, body);
+            if (res && res['embedding']) {
+                return res['embedding'];
+            }
+            throw new Error('No embedding data from Ollama');
+        } catch (err) {
+            console.error('Ollama embedding error:', err.message);
+            console.warn('Attempting fallback to MainBrain for embedding...');
+            try {
+                const { MainBrain } = await import('./main_brain.js');
+                const mainBrain = new MainBrain(this.model_name, null, this.params);
+                return await mainBrain.embed(text);
+            } catch (fallbackErr) {
+                console.error('Fallback to MainBrain for embedding failed:', fallbackErr.message);
+                throw err; // Re-throw original error if fallback also fails
+            }
+        }
     }
 
     async send(endpoint, body) {
@@ -89,8 +118,12 @@ export class Ollama {
                 throw new Error(`Ollama Status: ${res.status}`);
             }
         } catch (err) {
-            console.error('Failed to send Ollama request.');
-            console.error(err);
+            // Only log if it's not a connection error, or log a concise message
+            if (err.code === 'ECONNREFUSED') {
+                // Silently ignore connection refused as we have fallbacks
+            } else {
+                console.error(`Ollama request failed: ${err.message}`);
+            }
         }
         return data;
     }

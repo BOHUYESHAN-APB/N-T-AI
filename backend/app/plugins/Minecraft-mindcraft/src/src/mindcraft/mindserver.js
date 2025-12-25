@@ -4,8 +4,13 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as mindcraft from './mindcraft.js';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const PROFILES_DIR = path.join(__dirname, '../../profiles');
+if (!existsSync(PROFILES_DIR)) {
+    mkdirSync(PROFILES_DIR, { recursive: true });
+}
 
 // Mindserver is:
 // - central hub for communication between all agent processes
@@ -32,6 +37,12 @@ class AgentConnection {
     }
 }
 
+let current_settings = {};
+
+export function setCurrentSettings(settings) {
+    current_settings = settings;
+}
+
 export function registerAgent(settings, viewer_port) {
     let agentConnection = new AgentConnection(settings, viewer_port);
     agent_connections[settings.profile.name] = agentConnection;
@@ -44,15 +55,35 @@ export function logoutAgent(agentName) {
     }
 }
 
-// Initialize the server
+    // Initialize the server
 export function createMindServer(host_public = false, port = 8080) {
     const app = express();
     server = http.createServer(app);
-    io = new Server(server);
+    io = new Server(server, {
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"]
+        }
+    });
+
+    // Ensure port is a number
+    const portNum = parseInt(port, 10) || 8080;
 
     // Serve static files
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     app.use(express.static(path.join(__dirname, 'public')));
+
+    // Health check route
+    app.get('/health', (req, res) => res.json({ status: 'ok', port: portNum }));
+    app.get('/ping', (req, res) => res.send('pong'));
+
+    // Config endpoint for UI
+    app.get('/config', (req, res) => {
+        res.json({
+            mindserver_port: portNum,
+            current_settings: current_settings
+        });
+    });
 
     // Socket.io connection handling
     io.on('connection', (socket) => {
@@ -60,6 +91,64 @@ export function createMindServer(host_public = false, port = 8080) {
         console.log('Client connected');
 
         agentsStatusUpdate(socket);
+
+        socket.on('get-current-settings', (callback) => {
+            callback(current_settings);
+        });
+
+        socket.on('update-global-settings', (newSettings, callback) => {
+            try {
+                Object.assign(current_settings, newSettings);
+                const settingsPath = path.join(__dirname, '../../settings.json');
+                writeFileSync(settingsPath, JSON.stringify(current_settings, null, 4));
+                console.log('Global settings updated and saved.');
+                callback({ success: true });
+            } catch (err) {
+                callback({ success: false, error: err.message });
+            }
+        });
+
+        socket.on('list-profiles', (callback) => {
+            try {
+                const files = readdirSync(PROFILES_DIR)
+                    .filter(f => f.endsWith('.json'))
+                    .map(f => f.replace('.json', ''));
+                callback({ success: true, profiles: files });
+            } catch (err) {
+                callback({ success: false, error: err.message });
+            }
+        });
+
+        socket.on('upload-profile', (data, callback) => {
+            try {
+                const { name, content } = data;
+                if (!name || !content) {
+                    return callback({ success: false, error: 'Name and content are required' });
+                }
+                const fileName = name.endsWith('.json') ? name : `${name}.json`;
+                const filePath = path.join(PROFILES_DIR, fileName);
+                
+                writeFileSync(filePath, JSON.stringify(content, null, 4));
+                console.log(`Profile saved: ${filePath}`);
+                callback({ success: true, fileName: fileName });
+            } catch (err) {
+                callback({ success: false, error: err.message });
+            }
+        });
+
+        socket.on('get-profile', (name, callback) => {
+            try {
+                const fileName = name.endsWith('.json') ? name : `${name}.json`;
+                const filePath = path.join(PROFILES_DIR, fileName);
+                if (!existsSync(filePath)) {
+                    return callback({ success: false, error: 'Profile not found' });
+                }
+                const content = JSON.parse(readFileSync(filePath, 'utf8'));
+                callback({ success: true, content: content });
+            } catch (err) {
+                callback({ success: false, error: err.message });
+            }
+        });
 
         socket.on('create-agent', async (settings, callback) => {
             console.log('API create agent...');
@@ -221,6 +310,21 @@ export function createMindServer(host_public = false, port = 8080) {
 		});
 
         socket.on('bot-output', (agentName, message) => {
+            console.log(`[BOT_OUTPUT] ${JSON.stringify({ agentName, message })}`);
+            
+            // 检查是否包含 Microsoft 认证信息
+            if (message.includes('Microsoft Auth Required')) {
+                const match = message.match(/Go to (.*?) and enter code: (.*)/);
+                if (match) {
+                    const data = {
+                        username: agentName,
+                        verification_uri: match[1],
+                        user_code: match[2]
+                    };
+                    io.emit('ms-auth-code', data);
+                }
+            }
+            
             io.emit('bot-output', agentName, message);
         });
 
@@ -230,8 +334,20 @@ export function createMindServer(host_public = false, port = 8080) {
     });
 
     let host = host_public ? '0.0.0.0' : 'localhost';
-    server.listen(port, host, () => {
-        console.log(`MindServer running on port ${port}`);
+    console.log(`Attempting to start MindServer on ${host}:${portNum}...`);
+    
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`ERROR: Port ${portNum} is already in use. Please choose a different port in the plugin settings.`);
+        } else {
+            console.error(`MindServer error:`, err);
+        }
+    });
+
+    server.listen(portNum, host, () => {
+        const addr = server.address();
+        console.log(`MindServer is successfully running on http://${addr.address}:${addr.port}`);
+        console.log(`Management UI available at http://${host === '0.0.0.0' ? 'localhost' : host}:${portNum}`);
     });
 
     return server;

@@ -55,11 +55,21 @@ export class Prompter {
         if (this.profile.max_tokens)
             max_tokens = this.profile.max_tokens;
 
-        let chat_model_profile = selectAPI(this.profile.model);
+        let chat_model_profile = selectAPI({
+            model: this.profile.model,
+            url: this.profile.url,
+            api_key: this.profile.api_key,
+            params: this.profile.params
+        });
         this.chat_model = createModel(chat_model_profile);
 
         if (this.profile.code_model) {
-            let code_model_profile = selectAPI(this.profile.code_model);
+            let code_model_profile = selectAPI({
+                model: this.profile.code_model,
+                url: this.profile.url,
+                api_key: this.profile.api_key,
+                params: this.profile.params
+            });
             this.code_model = createModel(code_model_profile);
         }
         else {
@@ -67,7 +77,12 @@ export class Prompter {
         }
 
         if (this.profile.vision_model) {
-            let vision_model_profile = selectAPI(this.profile.vision_model);
+            let vision_model_profile = selectAPI({
+                model: this.profile.vision_model,
+                url: this.profile.url,
+                api_key: this.profile.api_key,
+                params: this.profile.params
+            });
             this.vision_model = createModel(vision_model_profile);
         }
         else {
@@ -78,8 +93,24 @@ export class Prompter {
         let embedding_model_profile = null;
         if (this.profile.embedding) {
             try {
-                embedding_model_profile = selectAPI(this.profile.embedding);
+                let emb = this.profile.embedding;
+                if (typeof emb === 'string' || emb instanceof String) {
+                    emb = {
+                        model: emb,
+                        url: this.profile.url,
+                        api_key: this.profile.api_key,
+                        params: this.profile.params
+                    };
+                }
+                
+                // 如果是 main-brain，强制使用 N-T-AI 后端 URL，而不是 profile 的通用 URL
+                if (emb.model === 'main-brain' || emb.api === 'main-brain') {
+                    emb.url = settings.ntai_backend_url || process.env.NTAI_BACKEND_URL || 'http://localhost:23456';
+                }
+                
+                embedding_model_profile = selectAPI(emb);
             } catch (e) {
+                console.warn('Failed to select embedding API:', e.message);
                 embedding_model_profile = null;
             }
         }
@@ -91,7 +122,7 @@ export class Prompter {
             this.embedding_model = createModel({
                 api: 'main-brain',
                 model: 'default',
-                url: settings.agent_base_url || process.env.NTAI_BACKEND_URL
+                url: settings.ntai_backend_url || process.env.NTAI_BACKEND_URL || 'http://localhost:23456'
             });
         }
 

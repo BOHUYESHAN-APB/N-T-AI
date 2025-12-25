@@ -10,14 +10,19 @@ export class MainBrain {
     static prefix = 'main-brain';
     static _embeddingCache = new Map(); // 静态缓存，所有实例共享
 
-    constructor(model_name, url, params) {
+    constructor(model_name, url, params, api_key) {
         this.model_name = model_name;
         this.params = params;
 
+        // Ensure the URL has /v1 if it's pointing to the N-T-AI backend
+        let baseURL = url || process.env.NTAI_BACKEND_URL || 'http://127.0.0.1:23456/v1';
+        if (baseURL && !baseURL.endsWith('/v1') && !baseURL.endsWith('/v1/')) {
+            baseURL = baseURL.endsWith('/') ? baseURL + 'v1' : baseURL + '/v1';
+        }
+
         let config = {
-            // Default to the N-T-AI backend URL if not provided
-            baseURL: url || process.env.NTAI_BACKEND_URL || 'http://127.0.0.1:23456/v1',
-            apiKey: getKey('OPENAI_API_KEY') || 'sk-ntai-internal'
+            baseURL: baseURL,
+            apiKey: api_key || getKey('OPENAI_API_KEY') || 'sk-ntai-internal'
         };
 
         this.openai = new OpenAIApi(config);
@@ -31,22 +36,27 @@ export class MainBrain {
             model: this.model_name || "default", // Backend will use its default model if "default"
             messages,
             stop: stop_seq,
+            user: "minecraft_agent", // 使用专用 ID 隔离 RAG 记忆和历史
             ...(this.params || {})
+        };
+
+        const headers = {
+            'X-Usage-Type': 'minecraft'
         };
 
         let res = null;
         try {
             console.log('Awaiting Main Brain response...');
-            let completion = await this.openai.chat.completions.create(pack);
+            let completion = await this.openai.chat.completions.create(pack, { headers });
             console.log('Received.');
             res = completion.choices[0].message.content;
+            return res;
         }
         catch (err) {
             console.error('Main Brain Error:', err.message);
-            // Return a special error object instead of a string to avoid accidental chatting
-            res = { error: true, message: 'Main Brain connection lost', details: err.message };
+            // Return a string instead of an object to prevent crashes in other parts of the code
+            return `Error: Main Brain connection lost. Details: ${err.message}`;
         }
-        return res;
     }
 
     async sendVisionRequest(messages, systemMessage, imageBuffer) {

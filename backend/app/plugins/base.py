@@ -10,6 +10,8 @@ class BasePlugin(ABC):
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.is_active = False
+        # Default auto-start behavior
+        self.auto_start = True
 
     @property
     def id(self) -> str:
@@ -26,6 +28,26 @@ class BasePlugin(ABC):
     def description(self) -> str:
         """Return a brief description of the plugin."""
         return "No description provided."
+
+    async def activate(self) -> bool:
+        """Explicitly activate the plugin."""
+        try:
+            await self.on_startup()
+            self.is_active = True
+            return True
+        except Exception as e:
+            print(f"Error activating plugin {self.id}: {e}")
+            return False
+
+    async def deactivate(self) -> bool:
+        """Explicitly deactivate the plugin."""
+        try:
+            await self.on_shutdown()
+            self.is_active = False
+            return True
+        except Exception as e:
+            print(f"Error deactivating plugin {self.id}: {e}")
+            return False
 
     async def on_startup(self):
         """Called when the application starts or the plugin is enabled."""

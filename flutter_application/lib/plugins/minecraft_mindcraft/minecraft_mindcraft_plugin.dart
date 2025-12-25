@@ -80,6 +80,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     loadMemory = prefs.getBool('${prefix}loadMemory') ?? false;
     agentProviderId = prefs.getString('${prefix}agentProviderId');
     language = prefs.getString('${prefix}language') ?? 'zh';
+    autoStart = prefs.getBool('${prefix}autoStart') ?? false;
 
     if (isEnabled) {
       _startStatusTimer();
@@ -101,6 +102,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setString('${prefix}authMethod', authMethod);
     await prefs.setBool('${prefix}loadMemory', loadMemory);
     await prefs.setString('${prefix}language', language);
+    await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null) {
       await prefs.setString('${prefix}agentProviderId', agentProviderId!);
     }
@@ -136,13 +138,13 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
 
     final config = {
+      "minecraft_version": minecraftVersionController.text,
       "host": hostController.text,
       "port": int.tryParse(portController.text) ?? -1,
       "auth": authMethod,
+      "mindserver_port": int.tryParse(mindServerPortController.text) ?? 8080,
       "ms_email": msEmailController.text,
       "ms_password": msPasswordController.text,
-      "mindserver_port": mindServerPortController.text,
-      "minecraft_version": minecraftVersionController.text,
       "load_memory": loadMemory,
       "init_message": initMessageController.text,
       "language": language,
@@ -150,6 +152,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "agent_model": effectiveModel,
       "agent_api_key": agentApiKey,
       "agent_base_url": agentBaseUrl,
+      "auto_start": autoStart,
     };
 
     try {
@@ -314,6 +317,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 value: loadMemory,
                 onChanged: (v) => _updateState(() => loadMemory = v),
               ),
+              SwitchListTile(
+                title: const Text('启动时自动开启 (Auto Start)'),
+                subtitle: const Text('当后端服务启动时，自动初始化并运行此插件'),
+                value: autoStart,
+                onChanged: (v) => _updateState(() => autoStart = v),
+              ),
               const SizedBox(height: 24),
               Row(
                 children: [
@@ -465,12 +474,9 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   }
 
   Future<void> _openWebUI() async {
-    final prefs = await SharedPreferences.getInstance();
-    String backendUrl = prefs.getString('settings.backend.url') ?? 'http://127.0.0.1:23456';
-    
-    // 提取后端的主机地址，使用配置的端口
-    final backendUri = Uri.parse(backendUrl);
-    final uri = Uri.parse('http://${backendUri.host}:${mindServerPortController.text}');
+    final port = mindServerPortController.text.trim();
+    final effectivePort = port.isEmpty ? '8080' : port;
+    final uri = Uri.parse('http://localhost:$effectivePort/index.html');
     
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);

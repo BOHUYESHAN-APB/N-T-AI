@@ -39,14 +39,16 @@ const argv = yargs(args)
 
 (async () => {
     try {
-        console.log('Connecting to MindServer');
+        console.log(`Connecting to MindServer at localhost:${argv.port} for agent ${argv.name}...`);
         await serverProxy.connect(argv.name, argv.port);
-        console.log('Starting agent');
+        console.log(`Connected to MindServer. Starting agent ${argv.name}...`);
         const agent = new Agent();
         serverProxy.setAgent(agent);
+        console.log(`Initializing components for ${argv.name}...`);
         await agent.start(argv.load_memory, argv.init_message, argv.count_id);
+        console.log(`Agent ${argv.name} started successfully.`);
     } catch (error) {
-        console.error('Failed to start agent process:');
+        console.error(`Failed to start agent process for ${argv.name}:`);
         console.error(error.message);
         console.error(error.stack);
         process.exit(1);

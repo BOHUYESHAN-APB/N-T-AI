@@ -4,7 +4,7 @@ import { strictFormat } from '../utils/text.js';
 
 export class GPT {
     static prefix = 'openai';
-    constructor(model_name, url, params) {
+    constructor(model_name, url, params, api_key) {
         this.model_name = model_name;
         this.params = params;
 
@@ -15,7 +15,7 @@ export class GPT {
         if (hasKey('OPENAI_ORG_ID'))
             config.organization = getKey('OPENAI_ORG_ID');
 
-        config.apiKey = getKey('OPENAI_API_KEY');
+        config.apiKey = api_key || getKey('OPENAI_API_KEY');
 
         this.openai = new OpenAIApi(config);
     }

@@ -5,7 +5,96 @@ from typing import Optional, List, Dict, Any
 from app.services.live2d_service import manager
 from app.core.logger import logger
 
+import httpx
+from fastapi.responses import HTMLResponse, StreamingResponse
+from app.plugins import get_plugin
+
 router = APIRouter(prefix="/plugins/minecraft", tags=["minecraft"])
+
+@router.get("/config")
+async def get_minecraft_config():
+    """
+    获取 Minecraft 插件的当前配置。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    return plugin.config
+
+@router.post("/config")
+async def update_minecraft_config(config: Dict[str, Any]):
+    """
+    更新 Minecraft 插件的配置。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    # 更新插件内存中的配置
+    plugin.config.update(config)
+    
+    # 触发插件的配置更新回调（会自动持久化并重启）
+    await plugin.on_config_updated()
+    
+    return {"status": "ok", "config": plugin.config}
+
+@router.api_route("/ui/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+async def proxy_minecraft_ui(path: str, request: Request):
+    """
+    代理 Minecraft 管理页面的请求。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    # 获取插件配置的端口
+    ms_port = plugin.config.get("mindserver_port", 8080)
+    
+    # 构造目标 URL
+    target_url = f"http://localhost:{ms_port}/{path}"
+    
+    # 转发查询参数
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # 转发请求
+            method = request.method
+            headers = dict(request.headers)
+            # 移除一些可能引起问题的 header
+            headers.pop("host", None)
+            headers.pop("content-length", None) # 避免长度不匹配
+            
+            # 读取请求体（如果是 POST）
+            content = await request.body()
+            
+            # 使用 request 预取响应，然后手动流式传输或返回内容
+            # 对于 UI 页面，通常不需要 StreamingResponse，直接返回内容更稳妥
+            resp = await client.request(
+                method,
+                target_url,
+                headers=headers,
+                content=content,
+                follow_redirects=True,
+                timeout=10.0
+            )
+            
+            from fastapi.responses import Response
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers)
+            )
+        except Exception as e:
+            logger.error(f"Proxy error to {target_url}: {e}")
+            raise HTTPException(status_code=502, detail=f"Could not connect to MindServer on port {ms_port}")
+
+@router.get("/ui", include_in_schema=False)
+async def proxy_minecraft_ui_root(request: Request):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=str(request.url).rstrip('/') + '/')
 
 class MinecraftEvent(BaseModel):
     type: str

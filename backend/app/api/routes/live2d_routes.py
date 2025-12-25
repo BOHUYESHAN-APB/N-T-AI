@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/live2d", tags=["live2d"])
 
 from app.services.priority_manager import priority_manager, ChatPriority
 from app.services.live2d_service import manager
+from app.services.system_state import system_state
 
 # ========== WebSocket 广播管理 ==========
 # Live2DConnectionManager is now in app.services.live2d_service
@@ -350,6 +351,12 @@ async def live2d_websocket(websocket: WebSocket):
                         enable_backend_tts=True,
                     )
                     last_user_activity_ts = time.time()
+                    continue
+
+                if action == "set_tts_enabled":
+                    enabled = bool(message.get("enabled", True))
+                    system_state.update_state("enable_tts", enabled)
+                    print(f"[Live2D WS] Global TTS Enabled set to: {enabled}")
                     continue
 
                 if action == "voice_channel_transcript":

@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Mindcraft</title>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="socket.io/socket.io.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -337,7 +337,22 @@
             </div>
             <div class="modal-body">
                 <div id="createAgentSection">
-                    <div id="profileStatus" style="margin:6px 0;">Profile: Not uploaded</div>
+                    <div class="setting-wrapper" style="margin-bottom: 12px;">
+                        <label>Select Existing Profile:</label>
+                        <select id="profileSelect" style="flex: 1; background: #3d3d3d; color: #fff; border: 1px solid #555; padding: 6px; border-radius: 4px;">
+                            <option value="">-- Select a profile --</option>
+                        </select>
+                    </div>
+                    <div style="text-align: center; margin: 10px 0; color: #888;">- OR -</div>
+                    <div id="profileStatus" style="margin:6px 0; font-weight: bold;">Profile: Not uploaded</div>
+                    <div id="saveProfileContainer" style="margin-bottom: 12px; display: none;">
+                        <label style="display: flex; align-items: center; cursor: pointer; margin-bottom: 6px;">
+                            <input type="checkbox" id="saveProfileCheckbox" style="margin-right: 8px;"> Save profile to server
+                        </label>
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="autoStartCheckbox" style="margin-right: 8px;"> Add to auto-start list
+                        </label>
+                    </div>
                     <div id="settingsForm"></div>
                     <div id="createError" style="color:#f44336;margin-top:10px;"></div>
                     <input type="file" id="profileFileInput" accept=".json,application/json" style="display:none">
@@ -377,7 +392,7 @@
     </div>
 
     <script>
-        const socket = io({ path: window.location.pathname + 'socket.io' })
+        let socket;
         const agentsDiv = document.getElementById('agents');
         let settingsSpec = {};
         let profileData = null;
@@ -400,31 +415,226 @@
             }
         }
         function subscribeToState() {
-            socket.emit('listen-to-agents');
+            if (socket) socket.emit('listen-to-agents');
         }
+
         // Initial status
         updateStatus(false);
-        socket.on('connect', () => {
-            updateStatus(true);
-            subscribeToState();
-            // Clear all cached settings on reconnect
-            Object.keys(agentSettings).forEach(name => delete agentSettings[name]);
-        });
-        socket.on('disconnect', () => {
-            updateStatus(false);
-        });
-        socket.on('connect_error', () => {
-            updateStatus(false);
-        });
 
-        fetch('/settings_spec.json')
-            .then(r => r.json())
-            .then(spec => {
-                settingsSpec = spec;
-                buildSettingsForm();
+        async function init() {
+            try {
+                // 1. 尝试从当前服务器获取配置 (MindServer 直接访问)
+                // 2. 尝试从后端获取配置 (通过 N-T-AI 代理访问)
+                let msPort = window.location.port || 80;
+                
+                try {
+                    console.log('Fetching config from /config...');
+                    const configResp = await fetch('config');
+                    if (configResp.ok) {
+                        const config = await configResp.json();
+                        msPort = config.mindserver_port || msPort;
+                        console.log('Found MindServer port via /config:', msPort);
+                    } else {
+                        throw new Error('Local /config not available');
+                    }
+                } catch (e) {
+                    try {
+                        console.log('Fetching config from /api/plugins/minecraft/config...');
+                        const configResp = await fetch('/api/plugins/minecraft/config');
+                        if (configResp.ok) {
+                            const config = await configResp.json();
+                            msPort = config.mindserver_port || msPort;
+                            console.log('Found MindServer port via backend:', msPort);
+                        }
+                    } catch (e2) {
+                        console.warn('Could not fetch config from any source, using current port:', msPort);
+                    }
+                }
+                
+                console.log('Connecting to MindServer on:', `${window.location.hostname}:${msPort}`);
+                // 连接到正确的端口
+                socket = io(`http://${window.location.hostname}:${msPort}`);
+
+                socket.on('connect', () => {
+                    updateStatus(true);
+                    subscribeToState();
+                    // Clear all cached settings on reconnect
+                    Object.keys(agentSettings).forEach(name => delete agentSettings[name]);
+                });
+                socket.on('disconnect', () => {
+                    updateStatus(false);
+                });
+                socket.on('connect_error', (err) => {
+                    console.error('Socket connection error:', err);
+                    updateStatus(false);
+                });
+
+                setupEventHandlers();
+                
+                // 加载配置规范和当前设置
+                const specResp = await fetch('settings_spec.json');
+                settingsSpec = await specResp.json();
+                
+                if (socket) {
+                    socket.emit('get-current-settings', (currentSettings) => {
+                        console.log('Received current settings:', currentSettings);
+                        buildSettingsForm(currentSettings);
+                    });
+
+                    // Load existing profiles
+                    socket.emit('list-profiles', (res) => {
+                        if (res.success) {
+                            const select = document.getElementById('profileSelect');
+                            if (select) {
+                                // Clear existing options except first
+                                while (select.options.length > 1) select.remove(1);
+                                res.profiles.forEach(name => {
+                                    const opt = document.createElement('option');
+                                    opt.value = name;
+                                    opt.textContent = name;
+                                    select.appendChild(opt);
+                                });
+                            }
+                        }
+                    });
+                }
+
+            } catch (err) {
+                console.error('Initialization failed:', err);
+                // 回退到默认连接
+                socket = io();
+                updateStatus(false);
+            }
+        }
+
+        function updateAgentData(name, st) {
+            const healthEl = document.getElementById(`health-${name}`);
+            if (st && !st.error) {
+                const gp = st.gameplay || {};
+                if (healthEl && typeof gp.health === 'number') {
+                    const hMax = typeof gp.healthMax === 'number' ? gp.healthMax : 20;
+                    healthEl.textContent = `health: ${gp.health}/${hMax}`;
+                }
+                const posEl = document.getElementById(`pos-${name}`);
+                const hunEl = document.getElementById(`hunger-${name}`);
+                const bioEl = document.getElementById(`biome-${name}`);
+                const modeEl = document.getElementById(`mode-${name}`);
+                const itemsEl = document.getElementById(`items-${name}`);
+                const equippedEl = document.getElementById(`equipped-${name}`);
+                const invGrid = document.getElementById(`inventory-${name}`);
+                const actionEl = document.getElementById(`action-${name}`);
+                if (posEl && gp.position) {
+                    const p = gp.position;
+                    posEl.textContent = `x ${p.x}, y ${p.y}, z ${p.z}`;
+                }
+                if (hunEl && typeof gp.hunger === 'number') {
+                    const fMax = typeof gp.hungerMax === 'number' ? gp.hungerMax : 20;
+                    hunEl.textContent = `hunger: ${gp.hunger}/${fMax}`;
+                }
+                if (bioEl && gp.biome) bioEl.textContent = `biome: ${gp.biome}`;
+                if (modeEl && gp.gamemode) modeEl.textContent = `gamemode: ${gp.gamemode}`;
+                if (itemsEl && st.inventory) {
+                    const used = st.inventory.stacksUsed ?? 0;
+                    const total = st.inventory.totalSlots ?? 0;
+                    itemsEl.textContent = `inventory slots: ${used}/${total}`;
+                }
+                if (equippedEl && st.inventory?.equipment) {
+                    const e = st.inventory.equipment;
+                    equippedEl.textContent = `equipped: ${e.mainHand || 'none'}`;
+                }
+                const armorEl = document.getElementById(`armor-${name}`);
+                if (armorEl && st.inventory?.equipment) {
+                    const e = st.inventory.equipment;
+                    const armor = [];
+                    if (e.helmet) armor.push(`head: ${e.helmet}`);
+                    if (e.chestplate) armor.push(`chest: ${e.chestplate}`);
+                    if (e.leggings) armor.push(`legs: ${e.leggings}`);
+                    if (e.boots) armor.push(`feet: ${e.boots}`);
+                    armorEl.textContent = `armor: ${armor.length ? armor.join(', ') : 'none'}`;
+                }
+                if (actionEl && st.action) {
+                    actionEl.textContent = `${st.action.current || 'Idle'}`;
+                }
+                if (invGrid && st.inventory?.counts) {
+                    const counts = st.inventory.counts;
+                    invGrid.innerHTML = Object.keys(counts).length ?
+                        Object.entries(counts).map(([k, v]) => `<div class="cell">${k}: ${v}</div>`).join('') :
+                        '<div class="cell">(empty)</div>';
+                }
+            } else if (st && st.error) {
+                if (healthEl) healthEl.textContent = 'Error';
+            }
+        }
+
+        function setupEventHandlers() {
+            if (!socket) return;
+            
+            socket.on('bot-output', (agentName, message) => {
+                agentLastMessage[agentName] = message;
+                const messageDiv = document.getElementById(`lastMessage-${agentName}`);
+                if (messageDiv) {
+                    messageDiv.textContent = message;
+                }
             });
 
-        function buildSettingsForm() {
+            // Subscribe to aggregated state updates (re-sent on each connect)
+            socket.on('state-update', (states) => {
+                window.lastStates = states;
+                Object.keys(states || {}).forEach(name => {
+                    const st = states[name];
+                    updateAgentData(name, st);
+                });
+            });
+
+            // Handle Microsoft Auth Code forwarding
+            socket.on('ms-auth-code', (data) => {
+                console.log('Received MS Auth Code:', data);
+                const agentName = data.username;
+                const message = `Microsoft Auth Required: Go to ${data.verification_uri} and enter code: ${data.user_code}`;
+                
+                // Show in last message area
+                agentLastMessage[agentName] = message;
+                const messageDiv = document.getElementById(`lastMessage-${agentName}`);
+                if (messageDiv) {
+                    messageDiv.innerHTML = `<strong>AUTH REQUIRED:</strong> Go to <a href="${data.verification_uri}" target="_blank" style="color: #2196F3;">${data.verification_uri}</a> and enter code: <b style="color: #4CAF50; font-size: 1.2em;">${data.user_code}</b>`;
+                }
+                
+                // Also show a notification or alert if possible
+                alert(`Agent ${agentName} needs Microsoft authentication!\nCode: ${data.user_code}\nURL: ${data.verification_uri}`);
+            });
+
+            socket.on('agents-status', async (agents) => {
+                console.log('Received agents status:', agents);
+                // Fetch settings for all agents that don't have current settings
+                const needSettings = agents.filter(a => !agentSettings[a.name]);
+                if (needSettings.length > 0) {
+                    await Promise.all(needSettings.map(async (a) => {
+                        const settings = await fetchAgentSettings(a.name);
+                        if (settings) {
+                            agentSettings[a.name] = settings;
+                        }
+                    }));
+                }
+
+                // Update current agents list
+                currentAgents = agents;
+
+                renderAgents(agents);
+                
+                // 如果有 agent 正在运行，尝试更新其状态数据
+                if (window.lastStates) {
+                    Object.keys(window.lastStates).forEach(name => {
+                        const st = window.lastStates[name];
+                        updateAgentData(name, st);
+                    });
+                }
+            });
+        }
+
+        // Start initialization
+        init();
+
+        function buildSettingsForm(currentSettings = {}) {
             const form = document.getElementById('settingsForm');
             form.innerHTML = '';
             // ensure grid for multi-column layout
@@ -440,21 +650,22 @@
                 label.textContent = key;
                 label.title = cfg.description || '';
                 let input;
+                const currentValue = currentSettings[key] !== undefined ? currentSettings[key] : cfg.default;
                 switch (cfg.type) {
                     case 'boolean':
                         input = document.createElement('input');
                         input.type = 'checkbox';
-                        input.checked = cfg.default === true;
+                        input.checked = currentValue === true;
                         break;
                     case 'number':
                         input = document.createElement('input');
                         input.type = 'number';
-                        input.value = cfg.default;
+                        input.value = currentValue;
                         break;
                     default:
                         input = document.createElement('input');
                         input.type = 'text';
-                        input.value = typeof cfg.default === 'object' ? JSON.stringify(cfg.default) : cfg.default;
+                        input.value = typeof currentValue === 'object' ? JSON.stringify(currentValue) : (currentValue || '');
                 }
                 input.title = cfg.description || '';
                 input.id = `setting-${key}`;
@@ -463,6 +674,28 @@
                 form.appendChild(wrapper);
             });
         }
+
+        document.getElementById('profileSelect').addEventListener('change', e => {
+            const val = e.target.value;
+            if (!val) {
+                profileData = null;
+                document.getElementById('submitCreateAgentBtn').disabled = true;
+                document.getElementById('profileStatus').textContent = 'Profile: Not uploaded';
+                document.getElementById('saveProfileContainer').style.display = 'none';
+                return;
+            }
+            socket.emit('get-profile', val, res => {
+                if (res.success) {
+                    profileData = res.content;
+                    document.getElementById('submitCreateAgentBtn').disabled = false;
+                    document.getElementById('profileStatus').textContent = `Profile: ${val} (Selected)`;
+                    document.getElementById('saveProfileContainer').style.display = 'none';
+                    document.getElementById('createError').textContent = '';
+                } else {
+                    document.getElementById('createError').textContent = 'Failed to load profile: ' + res.error;
+                }
+            });
+        });
 
         document.getElementById('uploadProfileBtn').addEventListener('click', () => {
             document.getElementById('profileFileInput').click();
@@ -478,11 +711,14 @@
                     document.getElementById('submitCreateAgentBtn').disabled = false;
                     document.getElementById('profileStatus').textContent = `Profile: ${profileData.name || 'Uploaded'}`;
                     document.getElementById('createError').textContent = '';
+                    document.getElementById('profileSelect').value = '';
+                    document.getElementById('saveProfileContainer').style.display = 'block';
                 } catch (err) {
                     document.getElementById('createError').textContent = 'Invalid profile JSON: ' + err.message;
                     profileData = null;
                     document.getElementById('submitCreateAgentBtn').disabled = true;
                     document.getElementById('profileStatus').textContent = 'Profile: Not uploaded';
+                    document.getElementById('saveProfileContainer').style.display = 'none';
                 }
             };
             reader.readAsText(file);
@@ -491,6 +727,47 @@
 
         document.getElementById('submitCreateAgentBtn').addEventListener('click', () => {
             if (!profileData) return;
+            
+            // Check if we should save the profile first
+            const saveCheckbox = document.getElementById('saveProfileCheckbox');
+            const autoStartCheckbox = document.getElementById('autoStartCheckbox');
+            
+            if (saveCheckbox.checked && profileData) {
+                const name = profileData.name || 'unnamed_profile';
+                socket.emit('upload-profile', { name: name, content: profileData }, (res) => {
+                    if (res.success) {
+                        console.log('Profile saved to server:', res.fileName);
+                        
+                        if (autoStartCheckbox.checked) {
+                            socket.emit('get-current-settings', (current) => {
+                                const profiles = current.profiles || [];
+                                const profilePath = `./profiles/${res.fileName}`;
+                                if (!profiles.includes(profilePath)) {
+                                    profiles.push(profilePath);
+                                    socket.emit('update-global-settings', { profiles: profiles }, (updateRes) => {
+                                        if (updateRes.success) console.log('Added to auto-start list');
+                                    });
+                                }
+                            });
+                        }
+
+                        // Refresh profile list
+                        socket.emit('list-profiles', (listRes) => {
+                            if (listRes.success) {
+                                const select = document.getElementById('profileSelect');
+                                select.innerHTML = '<option value="">-- Select a profile --</option>';
+                                listRes.profiles.forEach(name => {
+                                    const opt = document.createElement('option');
+                                    opt.value = name;
+                                    opt.textContent = name;
+                                    select.appendChild(opt);
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+
             const settings = { profile: profileData };
             Object.keys(settingsSpec).forEach(key => {
                 if (key === 'profile') return;
@@ -530,76 +807,6 @@
             modalBackdrop.style.display = 'none';
         }
         document.getElementById('closeCreateAgentBtn').addEventListener('click', hideCreateAgentModal);
-
-        socket.on('bot-output', (agentName, message) => {
-            agentLastMessage[agentName] = message;
-            const messageDiv = document.getElementById(`lastMessage-${agentName}`);
-            if (messageDiv) {
-                messageDiv.textContent = message;
-            }
-        });
-
-        // Subscribe to aggregated state updates (re-sent on each connect)
-        socket.on('state-update', (states) => {
-            window.lastStates = states;
-            Object.keys(states || {}).forEach(name => {
-                const st = states[name];
-                const healthEl = document.getElementById(`health-${name}`);
-                if (st && !st.error) {
-                    const gp = st.gameplay || {};
-                    if (healthEl && typeof gp.health === 'number') {
-                        const hMax = typeof gp.healthMax === 'number' ? gp.healthMax : 20;
-                        healthEl.textContent = `health: ${gp.health}/${hMax}`;
-                    }
-                    const posEl = document.getElementById(`pos-${name}`);
-                    const hunEl = document.getElementById(`hunger-${name}`);
-                    const bioEl = document.getElementById(`biome-${name}`);
-                    const modeEl = document.getElementById(`mode-${name}`);
-                    const itemsEl = document.getElementById(`items-${name}`);
-                    const equippedEl = document.getElementById(`equipped-${name}`);
-                    const invGrid = document.getElementById(`inventory-${name}`);
-                    const actionEl = document.getElementById(`action-${name}`);
-                    if (posEl && gp.position) {
-                        const p = gp.position;
-                        posEl.textContent = `x ${p.x}, y ${p.y}, z ${p.z}`;
-                    }
-                    if (hunEl && typeof gp.hunger === 'number') {
-                        const fMax = typeof gp.hungerMax === 'number' ? gp.hungerMax : 20;
-                        hunEl.textContent = `hunger: ${gp.hunger}/${fMax}`;
-                    }
-                    if (bioEl && gp.biome) bioEl.textContent = `biome: ${gp.biome}`;
-                    if (modeEl && gp.gamemode) modeEl.textContent = `gamemode: ${gp.gamemode}`;
-                    if (itemsEl && st.inventory) {
-                        const used = st.inventory.stacksUsed ?? 0;
-                        const total = st.inventory.totalSlots ?? 0;
-                        itemsEl.textContent = `inventory slots: ${used}/${total}`;
-                    }
-                    if (equippedEl && st.inventory?.equipment) {
-                        const e = st.inventory.equipment;
-                        equippedEl.textContent = `equipped: ${e.mainHand || 'none'}`;
-                    }
-                    const armorEl = document.getElementById(`armor-${name}`);
-                    if (armorEl && st.inventory?.equipment) {
-                        const e = st.inventory.equipment;
-                        const armor = [];
-                        if (e.helmet) armor.push(`head: ${e.helmet}`);
-                        if (e.chestplate) armor.push(`chest: ${e.chestplate}`);
-                        if (e.leggings) armor.push(`legs: ${e.leggings}`);
-                        if (e.boots) armor.push(`feet: ${e.boots}`);
-                        armorEl.textContent = `armor: ${armor.length ? armor.join(', ') : 'none'}`;
-                    }
-                    if (actionEl && st.action) {
-                        actionEl.textContent = `${st.action.current || 'Idle'}`;
-                    }
-                    if (invGrid && st.inventory?.counts) {
-                        const counts = st.inventory.counts;
-                        invGrid.innerHTML = Object.keys(counts).length ?
-                            Object.entries(counts).map(([k, v]) => `<div class="cell">${k}: ${v}</div>`).join('') :
-                            '<div class="cell">(empty)</div>';
-                    }
-                }
-            });
-        });
 
         function fetchAgentSettings(name) {
             return new Promise((resolve) => {
@@ -754,7 +961,7 @@
             const cfg = agentSettings[agent.name] || {};
             const showViewer = agent.in_game && cfg.render_bot_view === true;
             const viewerPort = agent.viewerPort;
-            const viewerHTML = showViewer ? `<div class="agent-view-container"><iframe class="agent-viewer" id="viewer-${agent.name}" src="http://localhost:${viewerPort}"></iframe></div>` : '';
+            const viewerHTML = showViewer ? `<div class="agent-view-container"><iframe class="agent-viewer" id="viewer-${agent.name}" src="http://${window.location.hostname}:${viewerPort}"></iframe></div>` : '';
             const lastMessage = agentLastMessage[agent.name] || '';
             const invOpen = inventoryOpen[agent.name] === true;
             const invStyle = invOpen ? '' : 'display:none;';
@@ -846,64 +1053,6 @@
                 }
             });
         }
-
-        socket.on('agents-status', async (agents) => {
-            // Fetch settings for all agents that don't have current settings
-            const needSettings = agents.filter(a => !agentSettings[a.name]);
-            if (needSettings.length > 0) {
-                await Promise.all(needSettings.map(async (a) => {
-                    const settings = await fetchAgentSettings(a.name);
-                    if (settings) {
-                        agentSettings[a.name] = settings;
-                    }
-                }));
-            }
-
-            // Compare with current agents to find changes
-            const prevAgents = currentAgents.reduce((acc, a) => ({ ...acc, [a.name]: a }), {});
-            const changedAgents = agents.filter(a => {
-                const prev = prevAgents[a.name];
-                return !prev || prev.in_game !== a.in_game || prev.viewerPort !== a.viewerPort || prev.socket_connected !== a.socket_connected;
-            });
-
-            // Update current agents list
-            currentAgents = agents;
-
-            // If agentsDiv is empty, do a full render
-            if (!agentsDiv.children.length) {
-                agentsDiv.innerHTML = agents.map(agent => renderAgentCard(agent)).join('');
-                // Update all viewers after initial render
-                setTimeout(() => {
-                    agents.forEach(a => {
-                        if (a.in_game) updateAgentViewer(a.name);
-                    });
-                }, 0);
-                return;
-            }
-
-            // Update only changed agents
-            changedAgents.forEach(agent => {
-                const el = document.getElementById(`agent-${agent.name}`);
-                if (el) {
-                    // Update existing card
-                    el.outerHTML = renderAgentCard(agent);
-                    if (agent.in_game) updateAgentViewer(agent.name);
-                } else {
-                    // Add new card
-                    agentsDiv.insertAdjacentHTML('beforeend', renderAgentCard(agent));
-                    if (agent.in_game) updateAgentViewer(agent.name);
-                }
-            });
-
-            // Remove cards for agents that no longer exist
-            Array.from(agentsDiv.children).forEach(el => {
-                const name = el.id.replace('agent-', '');
-                if (!agents.find(a => a.name === name)) {
-                    el.remove();
-                    delete inventoryOpen[name];
-                }
-            });
-        });
 
         function restartAgent(n) { socket.emit('restart-agent', n); }
         function disconnectAgent(n) { socket.emit('stop-agent', n); }

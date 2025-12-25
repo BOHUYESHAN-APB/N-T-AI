@@ -63,31 +63,36 @@ if (process.env.LOG_ALL) {
     settings.log_all_prompts = process.env.LOG_ALL;
 }
 
-Mindcraft.init(true, settings.mindserver_port, settings.auto_open_ui);
+async function main() {
+    await Mindcraft.init(true, settings.mindserver_port, settings.auto_open_ui, settings);
 
-for (let profile of settings.profiles) {
-    const profile_json = JSON.parse(readFileSync(profile, 'utf8'));
-    settings.profile = profile_json;
-    
-    // 允许通过全局设置覆盖模型和 API 密钥
-    if (settings.agent_model) {
-        settings.profile.model = settings.agent_model;
+    for (let profile_path of settings.profiles) {
+        try {
+            // 为每个 agent 创建独立的配置副本
+            const agent_settings = JSON.parse(JSON.stringify(settings));
+            
+            // 从路径中读取真实的 profile 内容
+            const profile = JSON.parse(readFileSync(profile_path, 'utf8'));
+            agent_settings.profile = profile;
+
+            // 只有当设置了 agent_name 时才覆盖，否则保持 profile 原名
+            if (settings.agent_name) {
+                console.log(`Overriding profile name ${profile.name} with agent_name from settings: ${settings.agent_name}`);
+                agent_settings.profile.name = settings.agent_name;
+            }
+
+            console.log(`Creating agent: ${agent_settings.profile.name} with model: ${agent_settings.agent_model || profile.model}`);
+            await Mindcraft.createAgent(agent_settings);
+        } catch (err) {
+            console.error(`Failed to load profile ${profile_path}:`, err);
+        }
     }
-    if (settings.agent_api_key) {
-        settings.profile.api_key = settings.agent_api_key;
-    }
-    if (settings.agent_base_url) {
-        settings.profile.url = settings.agent_base_url;
-    }
-    
-    // 允许覆盖 AI 名称，防止自言自语
-    if (settings.agent_name) {
-        console.log(`Overriding profile name ${settings.profile.name} with ${settings.agent_name}`);
-        settings.profile.name = settings.agent_name;
-    }
-    
-    Mindcraft.createAgent(settings);
+    console.log("Finished starting agents from profiles.");
 }
+
+main().catch(err => {
+    console.error('Fatal error in main:', err);
+});
 
 // 优雅退出处理
 function shutdown() {

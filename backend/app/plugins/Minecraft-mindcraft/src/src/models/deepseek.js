@@ -4,14 +4,17 @@ import { strictFormat } from '../utils/text.js';
 
 export class DeepSeek {
     static prefix = 'deepseek';
-    constructor(model_name, url, params) {
+    constructor(model_name, url, params, api_key) {
         this.model_name = model_name;
         this.params = params;
 
         let config = {};
 
-        config.baseURL = url || 'https://api.deepseek.com';
-        config.apiKey = getKey('DEEPSEEK_API_KEY');
+        config.baseURL = url || 'https://api.deepseek.com/v1';
+        config.apiKey = api_key || getKey('DEEPSEEK_API_KEY');
+
+        // 记录配置信息（隐藏 API Key）
+        console.log(`DeepSeek Model initialized with baseURL: ${config.baseURL}, apiKey: ${config.apiKey ? '***' + config.apiKey.slice(-4) : 'undefined'}`);
 
         this.openai = new OpenAIApi(config);
     }

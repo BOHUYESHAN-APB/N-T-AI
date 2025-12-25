@@ -1,0 +1,22 @@
+{
+    "mindserver_port": 12345,
+    "auto_start": false,
+    "language": "zh",
+    "ntai_backend_url": "http://127.0.0.1:23456",
+    "minecraft_version": "auto",
+    "host": "192.168.11.198",
+    "port": 25565,
+    "auth": "microsoft",
+    "profiles": [
+        "./profiles/andy-4.json"
+    ],
+    "load_memory": true,
+    "init_message": "\u4f60\u597d\uff01\u6211\u662f\u4f60\u7684 AI \u52a9\u624b\u3002",
+    "ms_email": "CourtneyPerkins8317@outlook.com",
+    "ms_password": "",
+    "agent_name": "_Fire00Fly_",
+    "agent_model": "deepseek-chat",
+    "agent_api_key": "sk-7825a4e196fd4aa9b3a30365128b87a3",
+    "agent_base_url": "https://api.deepseek.com/v1",
+    "online_mode": true
+}

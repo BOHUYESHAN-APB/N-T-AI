@@ -13,6 +13,9 @@ abstract class BasePlugin {
   /// Whether the plugin is currently enabled
   bool isEnabled = false;
 
+  /// Whether the plugin should auto-start on backend startup
+  bool autoStart = true;
+
   /// Called when the app starts or plugin is loaded
   Future<void> onInit();
 
