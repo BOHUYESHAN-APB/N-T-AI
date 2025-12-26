@@ -43,6 +43,7 @@ class SettingsController extends ChangeNotifier {
   static const _kShowLive2DMiniWindow = 'settings.ui.live2dMiniWindow';
   static const _kEnableFloatingWindow = 'settings.ui.enableFloatingWindow';
   static const _kLive2dDebug = 'settings.ui.live2dDebug';
+  static const _kEnableVts = 'settings.vts.enabled';
   static const _kEnableScreenCapture = 'settings.vision.enableScreenCapture';
   static const _kScreenCaptureInterval = 'settings.vision.screenCaptureInterval';
   static const _kScreenAnalysisPrompt = 'settings.vision.screenAnalysisPrompt';
@@ -180,6 +181,7 @@ class SettingsController extends ChangeNotifier {
     final enableFloatingWindow =
         _prefs.getBool(_kEnableFloatingWindow) ?? false;
     final live2dDebug = _prefs.getBool(_kLive2dDebug) ?? false;
+    final enableVts = _prefs.getBool(_kEnableVts) ?? false;
     final enableScreenCapture = _prefs.getBool(_kEnableScreenCapture) ?? false;
     final screenCaptureInterval = _prefs.getInt(_kScreenCaptureInterval) ?? 300;
     final screenAnalysisPrompt = _prefs.getString(_kScreenAnalysisPrompt) ??
@@ -535,6 +537,7 @@ class SettingsController extends ChangeNotifier {
       showLive2DMiniWindow: showLive2DMiniWindow,
       enableFloatingWindow: enableFloatingWindow,
       live2dDebug: live2dDebug,
+      enableVts: enableVts,
       enableScreenCapture: enableScreenCapture,
       screenCaptureInterval: screenCaptureInterval,
       screenAnalysisPrompt: screenAnalysisPrompt,
@@ -749,6 +752,13 @@ class SettingsController extends ChangeNotifier {
   Future<void> setLive2dDebug(bool v) async {
     _settings = _settings.copyWith(live2dDebug: v);
     await _prefs.setBool(_kLive2dDebug, v);
+    notifyListeners();
+  }
+
+  Future<void> setEnableVts(bool v) async {
+    _settings = _settings.copyWith(enableVts: v);
+    await _prefs.setBool(_kEnableVts, v);
+    debugPrint('[Settings] VTS Enabled: $v');
     notifyListeners();
   }
 

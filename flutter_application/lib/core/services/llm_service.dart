@@ -291,6 +291,8 @@ class LLMService {
       headers['X-Target-Model'] = provider.model;
       headers['X-Enable-Browser'] = enableBrowser.toString();
       headers['X-Search-Region'] = searchRegion;
+      final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+      headers['X-Enable-VTS'] = enableVts.toString();
       headers['X-Usage-Type'] = usageType;
       headers['X-Temperature'] = temperature.toString();
       headers['X-Persona-Mode'] = personaMode;
@@ -662,6 +664,8 @@ class LLMService {
       
       headers['X-Target-Model'] = model;
       headers['X-Enable-Browser'] = enableBrowser.toString();
+      final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+      headers['X-Enable-VTS'] = enableVts.toString();
       headers['X-Usage-Type'] = usageType;
       if (systemPrompt.trim().isNotEmpty) {
         headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());

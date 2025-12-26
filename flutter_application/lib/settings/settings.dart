@@ -377,6 +377,7 @@ class AppSettings {
   final bool showLive2DMiniWindow; // 是否在右上角显示内置小窗
   final bool enableFloatingWindow; // 是否启用独立悬浮窗显示 Live2D
   final bool live2dDebug; // 是否显示 Live2D 调试信息
+  final bool enableVts; // 是否启用 VTS 同步
   final bool enableScreenCapture; // 是否启用定时屏幕截取
   final int screenCaptureInterval; // 截取间隔（秒）
   final String screenAnalysisPrompt; // 屏幕分析提示词
@@ -474,6 +475,7 @@ class AppSettings {
     this.showLive2DMiniWindow = false,
     this.enableFloatingWindow = false, // Default to false
     this.live2dDebug = false, // 默认关闭调试信息
+    this.enableVts = false, // 默认关闭 VTS
     this.enableScreenCapture = false,
     this.screenCaptureInterval = 300, // 默认5分钟
     this.screenAnalysisPrompt =
@@ -558,6 +560,7 @@ class AppSettings {
     bool? showLive2DMiniWindow,
     bool? enableFloatingWindow,
     bool? live2dDebug,
+    bool? enableVts,
     bool? enableScreenCapture,
     int? screenCaptureInterval,
     String? screenAnalysisPrompt,
@@ -647,6 +650,7 @@ class AppSettings {
     showLive2DMiniWindow: showLive2DMiniWindow ?? this.showLive2DMiniWindow,
     enableFloatingWindow: enableFloatingWindow ?? this.enableFloatingWindow,
     live2dDebug: live2dDebug ?? this.live2dDebug,
+    enableVts: enableVts ?? this.enableVts,
     enableScreenCapture: enableScreenCapture ?? this.enableScreenCapture,
     screenCaptureInterval:
         screenCaptureInterval ?? this.screenCaptureInterval,

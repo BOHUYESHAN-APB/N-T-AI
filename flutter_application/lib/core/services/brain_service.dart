@@ -59,6 +59,9 @@ class BrainService {
   int _activeTtsCount = 0;
   bool get isAnyTtsActive => _activeTtsCount > 0 || _isSpeaking;
 
+  static const int _maxTtsTempFiles = 5;
+  final List<File> _ttsTempFiles = [];
+
   // Context window (Short-term memory)
   // This is now managed by the UI/ChatHistoryService, but we keep a local buffer for the current turn
   List<Map<String, String>> _context = [];
@@ -83,6 +86,20 @@ class BrainService {
   }
 
   AudioPlayer? _audioPlayer;
+
+  Future<void> _trackTtsTempFile(File file) async {
+    _ttsTempFiles.add(file);
+    final overflow = _ttsTempFiles.length - _maxTtsTempFiles;
+    if (overflow <= 0) return;
+    for (var i = 0; i < overflow; i++) {
+      final old = _ttsTempFiles.removeAt(0);
+      try {
+        if (await old.exists()) {
+          await old.delete();
+        }
+      } catch (_) {}
+    }
+  }
 
   bool _looksLikeWav(Uint8List bytes) {
     if (bytes.length < 12) return false;
@@ -478,6 +495,7 @@ class BrainService {
     
     try {
       await tempFile.writeAsBytes(bytes);
+      await _trackTtsTempFile(tempFile);
       
       _audioPlayer ??= AudioPlayer();
       await _audioPlayer!.setReleaseMode(ReleaseMode.stop);
@@ -526,12 +544,6 @@ class BrainService {
       }
     } catch (e) {
       logger.error('AudioPlayer 失败', e);
-    } finally {
-      try {
-        if (await tempFile.exists()) {
-          await tempFile.delete();
-        }
-      } catch (_) {}
     }
   }
 

@@ -611,6 +611,9 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
             
             # 同步全局 TTS 开关状态，供插件使用
             system_state.update_state("enable_tts", enable_backend_tts)
+            enable_vts_header = raw_request.headers.get("X-Enable-VTS", "false")
+            enable_vts = enable_vts_header.lower() in ["true", "1", "yes"]
+            system_state.update_state("enable_vts", enable_vts)
             
             if request.stream:
                 async def stream_generator():
@@ -787,5 +790,4 @@ async def parse_url(request: Request):
     except Exception as e:
         logger.error(f"Error parsing URL: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 

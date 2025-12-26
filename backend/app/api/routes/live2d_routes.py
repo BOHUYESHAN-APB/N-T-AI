@@ -4,8 +4,6 @@ from typing import List, Optional, Dict, Any, Set
 from collections import deque
 import json
 import asyncio
-import base64
-import os
 import time
 import uuid
 from app.services.motion_agent_service import MotionAgentService
@@ -610,73 +608,27 @@ async def cancel_scheduled_chat(request: CancelScheduledChatRequest):
 async def broadcast_audio(request: AudioBroadcastRequest):
     """
     Broadcast audio to all Live2D clients for lip-sync.
-    Optimized: Saves Base64 to file and broadcasts URL to reduce WebSocket overhead.
+    Audio is forwarded as Base64; frontend owns temp file lifecycle.
     """
     client_count = len(manager.active_connections)
-    if client_count > 0:
-        try:
-            start_at = time.time()
-            # 1. Decode Base64
-            audio_data = base64.b64decode(request.audio)
-            
-            # 2. Ensure temp directory exists
-            temp_dir = "app/static/live2d/temp"
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            ext = "mp3"
-            if len(audio_data) >= 12 and audio_data[0:4] == b"RIFF" and audio_data[8:12] == b"WAVE":
-                ext = "wav"
-
-            # 3. Save to file (unique name)
-            filename = f"tts_{uuid.uuid4().hex}.{ext}"
-            file_path = os.path.join(temp_dir, filename)
-            
-            with open(file_path, "wb") as f:
-                f.write(audio_data)
-                
-            # 4. Construct URL (assuming /live2d maps to app/static/live2d)
-            # Need to check main.py static mount. Usually /static maps to app/static.
-            # If we mount /static/live2d as /live2d, then:
-            audio_url = f"/static/live2d/temp/{filename}"
-            
-            # 5. Broadcast URL
-            await manager.broadcast({
-                "type": "audio",
-                "data": {
-                    "url": audio_url,
-                    "start_at": start_at,
-                    "source": request.source
-                }
-            })
-            
-            print(f"[Live2D] Broadcasted audio URL: {audio_url} to {client_count} clients.")
-            
-            # 6. Cleanup old files (older than 5 minutes)
-            try:
-                current_time = time.time()
-                for f in os.listdir(temp_dir):
-                    fp = os.path.join(temp_dir, f)
-                    if os.path.isfile(fp) and current_time - os.path.getmtime(fp) > 300:
-                        os.remove(fp)
-            except Exception as e:
-                print(f"[Live2D] Cleanup warning: {e}")
-                
-            return {"status": "ok", "clients": client_count, "url": audio_url}
-            
-        except Exception as e:
-            print(f"[Live2D] Audio broadcast error: {e}")
-            # Fallback to base64 if file save fails
-            await manager.broadcast({
-                "type": "audio",
-                "data": {
-                    "audio": request.audio,
-                    "source": request.source
-                }
-            })
-            return {"status": "ok", "clients": client_count, "fallback": True}
-    else:
+    if client_count <= 0:
         print("[Live2D] No clients connected for audio broadcast.")
         return {"status": "no_clients", "clients": 0}
+
+    try:
+        start_at = time.time()
+        await manager.broadcast({
+            "type": "audio",
+            "data": {
+                "audio": request.audio,
+                "start_at": start_at,
+                "source": request.source,
+            }
+        })
+        return {"status": "ok", "clients": client_count, "mode": "base64"}
+    except Exception as e:
+        print(f"[Live2D] Audio broadcast error: {e}")
+        return {"status": "error", "clients": client_count}
 
 @router.get("/connections")
 async def get_connections():

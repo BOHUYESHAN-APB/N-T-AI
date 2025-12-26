@@ -11,6 +11,7 @@ from app.services.audio_service import AudioService
 from app.services.meme_service import MemeService
 from app.services.live2d_service import manager as live2d_manager
 from app.services.vts_service import vts_service
+from app.services.system_state import system_state
 from app.core.prompts import (
     FIREFLY_PERSONA_BASIC,
     FIREFLY_PERSONA_ADVANCED,
@@ -453,7 +454,8 @@ class ChatService:
         })
         
         # 2. 同步到 VTube Studio (后台静默执行)
-        asyncio.create_task(vts_service.sync_live2d_data(expression_data))
+        if system_state.get_state("enable_vts", False):
+            asyncio.create_task(vts_service.sync_live2d_data(expression_data))
 
     async def process_message(self, message: Union[str, List[Dict[str, Any]]], user_id: str, 
                             session_id: str = None,

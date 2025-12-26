@@ -93,19 +93,14 @@ class BackendService {
     }
 
     // 2. If connection failed and auto-start is enabled, try to start local backend.
-    // We allow this in Debug mode too if the user explicitly enabled the switch.
     if (autoStartLocal && Platform.isWindows) {
       final uri = Uri.tryParse(configuredUrl);
       final port = uri?.port ?? 23456;
-      
-      // Heuristic: If port is custom (not 23456 or legacy 8000), do not auto-start bundled backend.
-      // This prevents the bundled backend from overriding a manually configured backend that might just be slow to start.
       if (port != 23456 && port != 8000 && (port < 8000 || port > 8020)) {
-         debugPrint('[BackendService] Configured port $port suggests custom backend. Skipping auto-start of bundled backend.');
-         _startHealthCheck();
-         return;
+        debugPrint('[BackendService] Configured port $port suggests custom backend. Skipping auto-start of bundled backend.');
+        _startHealthCheck();
+        return;
       }
-
       final host = uri?.host.toLowerCase() ?? '';
       final isLocalhost = host.isEmpty || host == 'localhost' || host == '127.0.0.1';
       if (isLocalhost) {
@@ -145,10 +140,9 @@ class BackendService {
 
   /// Attempts to start the bundled Python backend on Windows.
   Future<void> _startLocalBackend() async {
-    // Debug 模式下，严禁启动同级 server.exe，防止混淆 (用户反馈构建脚本可能导致 server 文件夹残留)
     if (kDebugMode) {
-       debugPrint('[BackendService] Debug mode: Skipping local backend startup to avoid conflict with development backend.');
-       return; 
+      debugPrint('[BackendService] Debug mode: skipping bundled backend autostart.');
+      return;
     }
 
     // Dynamic Port Logic:
@@ -420,7 +414,15 @@ class BackendService {
         final content = await serverInfoFile.readAsString();
         final info = jsonDecode(content);
         final url = info['url'] as String;
-        if (url != _backendUrl) {
+        final portOk = (() {
+          try {
+            final u = Uri.parse(url);
+            return u.port == 23456;
+          } catch (_) {
+            return false;
+          }
+        })();
+        if (portOk && url != _backendUrl) {
            final now = DateTime.now().millisecondsSinceEpoch;
            final last = _lastLogMs['server_info_recovered'] ?? 0;
            if (now - last > 3000) {
@@ -428,6 +430,13 @@ class BackendService {
              debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
            }
            _updateUrlAndNotify(url);
+        } else if (!portOk) {
+           final now = DateTime.now().millisecondsSinceEpoch;
+           final last = _lastLogMs['server_info_ignored'] ?? 0;
+           if (now - last > 3000) {
+             _lastLogMs['server_info_ignored'] = now;
+             debugPrint('[BackendService] Ignored server_info URL $url (non-fixed port). Keeping $_backendUrl');
+           }
         }
       }
     } catch (e) {

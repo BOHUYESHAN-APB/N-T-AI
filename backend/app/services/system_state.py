@@ -8,6 +8,7 @@ class SystemStateManager:
             cls._instance = super(SystemStateManager, cls).__new__(cls)
             cls._instance.state = {
                 "enable_tts": True,  # 默认开启
+                "enable_vts": False,
             }
         return cls._instance
 

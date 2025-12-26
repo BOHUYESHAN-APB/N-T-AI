@@ -162,11 +162,11 @@ def main():
 
         # Try finding an available port if the default is taken
         start_port = port
-        max_retries = 10
-        
-        # Check if port scanning is disabled via env var or if we are using a custom port
-        if os.environ.get("DISABLE_PORT_SCAN", "false").lower() == "true":
-            max_retries = 0
+        disable_port_scan = os.environ.get("DISABLE_PORT_SCAN")
+        if disable_port_scan is None:
+            disable_port_scan = "true"
+        disable_port_scan = disable_port_scan.lower() == "true"
+        max_retries = 0 if disable_port_scan else 10
             
         actual_port = start_port
         
@@ -182,9 +182,19 @@ def main():
                 health_url = f"{scheme}://{probe_host}:{check_port}/health"
                 if _health_ok(health_url, insecure_ssl=use_https):
                     print(f"Backend already running at {scheme}://{probe_host}:{check_port}")
-                    # Write info file even if already running, so frontend can find it
                     _write_server_info(scheme, probe_host, check_port)
-                    sys.exit(0)
+                    wait_on_running = os.environ.get("WAIT_ON_RUNNING", "true").lower() == "true"
+                    if wait_on_running:
+                        print("Holding this process until the existing backend stops...")
+                        while _health_ok(health_url, insecure_ssl=use_https):
+                            time.sleep(1.0)
+                        actual_port = check_port
+                        break
+                    else:
+                        sys.exit(0)
+                if i >= max_retries:
+                    print(f"Port {check_port} is busy and port scan is disabled. Exiting.")
+                    sys.exit(1)
                 print(f"Port {check_port} is busy, trying next...")
 
         port = actual_port

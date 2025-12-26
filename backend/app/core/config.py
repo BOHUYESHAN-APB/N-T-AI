@@ -1,13 +1,19 @@
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
 if os.environ.get("USE_HTTPS", "").strip() == "":
     os.environ["USE_HTTPS"] = "false"
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_DB_PATH = (DATA_DIR / "astra_me_v3.db").as_posix()
 
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Astra-Me (Fire-fly)"
     API_V1_STR: str = "/api/v1"
-    DATABASE_URL: str = "sqlite:///./astra_me_v3.db"
+    DATABASE_URL: str = f"sqlite:///{DEFAULT_DB_PATH}"
     SQL_ECHO: bool = False
     KNOW_TIMES_BATCH_SIZE: int = 10
 

@@ -18,6 +18,7 @@ TEMP-前端后端终端日志截取-不要编辑这个文件.md
 /other-Repository/
 /.trae/
 /backend/build/server/
+/backend/data/
 flutter_application/server/
 
 # Docker / Linux Env Temporary Files
@@ -35,3 +36,4 @@ flutter_application/server/
 **/plugins/minecraft/src/**/*.log
 **/plugins/minecraft/src/**/settings.json
 **/plugins/minecraft/src/**/.env
+/astra_me_v3.db

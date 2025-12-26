@@ -857,6 +857,14 @@ class _GeneralTabState extends State<GeneralTab> {
             s.enableLive2D ? (v) => controller.setEnableFloatingWindow(v) : null,
       ),
       SwitchListTile(
+        secondary: const Icon(Icons.link),
+        title: const Text('启用 VTS 连接'),
+        subtitle: const Text('同步表情到 VTube Studio（默认关闭）'),
+        value: s.enableVts,
+        onChanged:
+            s.enablePythonBackend ? (v) => controller.setEnableVts(v) : null,
+      ),
+      SwitchListTile(
         secondary: const Icon(Icons.face_retouching_natural),
         title: Text(l10n.generalExpressionIsland),
         subtitle: Text(l10n.generalExpressionIslandSubtitle),
