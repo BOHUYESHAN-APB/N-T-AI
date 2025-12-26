@@ -58,6 +58,7 @@ export function logoutAgent(agentName) {
     // Initialize the server
 export function createMindServer(host_public = false, port = 8080) {
     const app = express();
+    app.use(express.json());
     server = http.createServer(app);
     io = new Server(server, {
         cors: {
@@ -83,6 +84,25 @@ export function createMindServer(host_public = false, port = 8080) {
             mindserver_port: portNum,
             current_settings: current_settings
         });
+    });
+
+    // 提供 REST 接口，将外部消息转发给指定代理
+    app.post('/api/send-message', (req, res) => {
+        try {
+            const { agent, from, message } = req.body || {};
+            if (!agent || !message) {
+                return res.status(400).json({ success: false, error: "Missing 'agent' or 'message' field" });
+            }
+            const conn = agent_connections[agent];
+            if (!conn || !conn.socket || !conn.in_game) {
+                return res.status(404).json({ success: false, error: `Agent '${agent}' not in game or not connected` });
+            }
+            conn.socket.emit('send-message', { from: from || 'frontend', message });
+            return res.json({ success: true });
+        } catch (e) {
+            console.error('Error in /api/send-message:', e);
+            return res.status(500).json({ success: false, error: String(e) });
+        }
     });
 
     // Socket.io connection handling

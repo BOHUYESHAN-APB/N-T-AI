@@ -1,5 +1,38 @@
 # 更新日志 (Changelog)
 
+## [0.3.14-beta] - 2025-12-26
+
+### 新增 (Added)
+- **TTS 来源标记贯通**：
+  - 前端 `BrainService` 的 `speak/speakChunks` 增加 `source` 参数，播放与广播统一携带来源元数据。
+  - 后端 `/api/live2d/broadcast/audio` 支持 `source` 字段，WebSocket 广播的 `data.source` 可用于渲染端或日志分流。
+- **语音频道展示类型**：
+  - 新增中心气泡类型 `chat_voice_channel`，以靛蓝系风格在屏幕正中显示，并标注“来自于语音频道”。
+- **来源标识更清晰**：
+  - Minecraft 插件输出：蓝色主题中心气泡，标签“来自于MC插件”。
+  - Bilibili 弹幕总结：绿色主题中心气泡，标签“弹幕总结 · 来源: Bilibili直播插件”。
+
+### 优化 (Changed)
+- **系统播报策略**：
+  - Minecraft 插件输出不再触发系统 TTS，避免将游戏内指令朗读；主脑“行动宣言”与普通助手回复继续由系统 TTS 播报。
+- **消息映射与显示**：
+  - 将后端 `voice_channel_transcript` WebSocket 消息映射为前端 `chat_voice_channel`，统一以中心气泡展示。
+- **日志净化**：
+  - 对 `BackendService` 的 `server_info` 相关日志进行时间阈值节流与去重，降低重复输出带来的噪声。
+- **架构说明强化**：
+  - 明确保持既有职责边界：LLM/vLLM 调用在后端执行，前端仅透传服务商配置；语音频道监听与转写继续由后端负责。
+
+### 修复 (Fixed)
+- **播报与显示一致性**：
+  - 修复 MC 插件输出触发系统 TTS 的不当行为，改为仅前端中心气泡显示。
+
+### 相关文件 (Files)
+- `flutter_application/lib/core/services/brain_service.dart`
+- `flutter_application/lib/screens/firefly_screen.dart`
+- `flutter_application/lib/widgets/message_bubble.dart`
+- `backend/app/api/routes/live2d_routes.py`
+- `flutter_application/lib/core/services/backend_service.dart`
+
 ## [0.3.13-beta] - 2025-12-25
 
 ### 新增 (Added)

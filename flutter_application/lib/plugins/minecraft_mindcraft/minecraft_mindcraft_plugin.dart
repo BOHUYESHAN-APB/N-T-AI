@@ -119,9 +119,27 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     String? agentBaseUrl;
 
     if (agentProviderId == 'main-brain') {
-      effectiveModel = 'main-brain';
-      agentApiKey = 'sk-ntai-internal';
-      agentBaseUrl = '$backendUrl/api/v1';
+      // Resolve Main Brain config from active provider
+      dynamic selectedProvider = controller.activeProviderConfig;
+      
+      if (selectedProvider != null) {
+        agentApiKey = selectedProvider.apiKey;
+        agentBaseUrl = selectedProvider.baseUrl;
+        
+        // If the model is not specified in the text field, use the provider's model
+        if (effectiveModel.isEmpty) {
+          effectiveModel = selectedProvider.model ?? '';
+        }
+        
+        // If the base URL is local (pointing to backend), keep it. 
+        // Otherwise, this will allow the plugin to connect directly to the provider,
+        // bypassing the backend proxy issues.
+      } else {
+        // Fallback to internal placeholder if something goes wrong
+        effectiveModel = 'main-brain';
+        agentApiKey = 'sk-ntai-internal';
+        agentBaseUrl = '$backendUrl/api/v1';
+      }
     } else {
       // Find the provider config
       dynamic selectedProvider;

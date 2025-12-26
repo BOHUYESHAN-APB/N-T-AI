@@ -59,6 +59,7 @@ class MotionBroadcastRequest(BaseModel):
 class AudioBroadcastRequest(BaseModel):
     """音频广播请求"""
     audio: str # Base64 encoded audio
+    source: str | None = None
 
 class ChatBroadcastRequest(BaseModel):
     """Chat message broadcast request"""
@@ -643,7 +644,8 @@ async def broadcast_audio(request: AudioBroadcastRequest):
                 "type": "audio",
                 "data": {
                     "url": audio_url,
-                    "start_at": start_at
+                    "start_at": start_at,
+                    "source": request.source
                 }
             })
             
@@ -667,7 +669,8 @@ async def broadcast_audio(request: AudioBroadcastRequest):
             await manager.broadcast({
                 "type": "audio",
                 "data": {
-                    "audio": request.audio
+                    "audio": request.audio,
+                    "source": request.source
                 }
             })
             return {"status": "ok", "clients": client_count, "fallback": True}

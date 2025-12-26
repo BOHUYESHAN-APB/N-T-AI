@@ -380,8 +380,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
 
     async def _forward_to_ui(self, agent_name: str, message: str):
         """将 Minecraft 消息转发到主界面并触发前端 TTS"""
-        # 检查全局 TTS 开关，决定是否在前端播放
-        enable_tts = system_state.get_state("enable_tts", True)
+        enable_tts = False
         
         # 构造带前缀的消息
         display_message = f"【Minecraft】{message}"
@@ -398,7 +397,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
         if enable_tts:
             try:
                 # 强制使用 SiliconFlow API，因为 DeepSeek 不支持 TTS
-                tts_api_key = app_settings.SILICONFLOW_API_KEY
+                tts_api_key = getattr(app_settings, "SILICONFLOW_API_KEY", None)
                 tts_base_url = "https://api.siliconflow.cn/v1"
                 
                 # 如果没有全局 SiliconFlow Key，尝试检查插件配置是否显式指定了 SiliconFlow

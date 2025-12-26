@@ -260,7 +260,17 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
     if isinstance(text_input, list):
         text_input = text_input[0] 
         
-    embedding = await chat_service.llm.get_embedding(text_input, api_key=target_api_key, base_url=target_base_url, model=target_model)
+    # Safety check: If we have no API key at this point (and not using a local no-auth provider), 
+    # we should probably fail fast or return zero vector if it's critical.
+    # However, some local backends might not require a key. 
+    # But if we fell back to settings.OPENAI_API_KEY and it's empty, we are in trouble.
+    
+    embedding = None
+    try:
+        embedding = await chat_service.llm.get_embedding(text_input, api_key=target_api_key, base_url=target_base_url, model=target_model)
+    except Exception as e:
+        logger.error(f"Embedding generation error: {e}")
+        # Will fall through to zero vector fallback
     
     if not embedding:
         # Fallback to a zero vector to avoid 500 error and keep the client running

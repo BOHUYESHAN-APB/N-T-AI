@@ -19,6 +19,7 @@ class BackendService {
   bool _enabled = false;
   Timer? _healthCheckTimer;
   Timer? _serverInfoPollTimer;
+  final Map<String, int> _lastLogMs = {};
   
   // Stream to notify UI about connection status changes
   final _statusController = StreamController<BackendStatus>.broadcast();
@@ -227,7 +228,12 @@ class BackendService {
              final jsonStr = data.split('[SERVER_INFO]')[1].trim();
              final info = jsonDecode(jsonStr);
              final url = info['url'];
-             debugPrint('[BackendService] Detected backend URL from stdout: $url');
+             final now = DateTime.now().millisecondsSinceEpoch;
+             final last = _lastLogMs['server_info_stdout'] ?? 0;
+             if (now - last > 2000) {
+               _lastLogMs['server_info_stdout'] = now;
+               debugPrint('[BackendService] Detected backend URL from stdout: $url');
+             }
              _updateUrlAndNotify(url);
            } catch (e) {
              debugPrint('[BackendService] Failed to parse SERVER_INFO: $e');
@@ -255,7 +261,12 @@ class BackendService {
              final info = jsonDecode(content);
              final url = info['url'];
              if (url != _backendUrl) {
-                debugPrint('[BackendService] Detected backend URL from file: $url');
+                final now = DateTime.now().millisecondsSinceEpoch;
+                final last = _lastLogMs['server_info_file'] ?? 0;
+                if (now - last > 2000) {
+                  _lastLogMs['server_info_file'] = now;
+                  debugPrint('[BackendService] Detected backend URL from file: $url');
+                }
                 _updateUrlAndNotify(url);
                 timer.cancel();
              }
@@ -352,7 +363,12 @@ class BackendService {
            final f = File(p);
            if (await f.exists()) {
              serverInfoFile = f;
-             debugPrint('[BackendService] Debug mode: Found server_info.json at ${f.path}');
+             final now = DateTime.now().millisecondsSinceEpoch;
+             final last = _lastLogMs['server_info_found'] ?? 0;
+             if (now - last > 3000) {
+               _lastLogMs['server_info_found'] = now;
+               debugPrint('[BackendService] Debug mode: Found server_info.json at ${f.path}');
+             }
              break;
            }
          }
@@ -405,7 +421,12 @@ class BackendService {
         final info = jsonDecode(content);
         final url = info['url'] as String;
         if (url != _backendUrl) {
-           debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
+           final now = DateTime.now().millisecondsSinceEpoch;
+           final last = _lastLogMs['server_info_recovered'] ?? 0;
+           if (now - last > 3000) {
+             _lastLogMs['server_info_recovered'] = now;
+             debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
+           }
            _updateUrlAndNotify(url);
         }
       }

@@ -148,7 +148,7 @@ class BrainService {
     ..[2] = ((v >> 16) & 0xFF)
     ..[3] = ((v >> 24) & 0xFF);
 
-  Future<void> _broadcastTtsBytes(Uint8List bytes) async {
+  Future<void> _broadcastTtsBytes(Uint8List bytes, {String? source}) async {
     unawaited(() async {
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -160,7 +160,10 @@ class BrainService {
         final response = await http.post(
           Uri.parse('$urlStr/api/live2d/broadcast/audio'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'audio': base64Encode(bytes)}),
+          body: jsonEncode({
+            'audio': base64Encode(bytes),
+            if (source != null) 'source': source,
+          }),
         );
         if (response.statusCode == 200) {
           final json = jsonDecode(response.body);
@@ -179,9 +182,9 @@ class BrainService {
     }());
   }
 
-  void _emitTtsSignal(Uint8List bytes) {
+  void _emitTtsSignal(Uint8List bytes, {String? source}) {
     _ttsController.add(bytes);
-    unawaited(_broadcastTtsBytes(bytes));
+    unawaited(_broadcastTtsBytes(bytes, source: source));
   }
 
   Future<String?> _injectWavToBackend({
@@ -463,7 +466,7 @@ class BrainService {
     }
   }
 
-  Future<void> _playTtsBytes(Uint8List bytes, {Uint8List? lipsyncBytes}) async {
+  Future<void> _playTtsBytes(Uint8List bytes, {Uint8List? lipsyncBytes, String? source}) async {
     final signal = lipsyncBytes ?? bytes;
 
     // 确保在主线程（UI线程）执行，因为 Audioplayers 插件通常需要在主线程调用平台通道
@@ -486,7 +489,7 @@ class BrainService {
       // 所有的 AudioPlayer 操作都包裹在 try-catch 中
       try {
         await _audioPlayer!.play(DeviceFileSource(tempFile.path));
-        _emitTtsSignal(signal);
+        _emitTtsSignal(signal, source: source);
         
         // 等待播放完成或超时
         var wait = _estimateWavDuration(bytes);
@@ -505,7 +508,7 @@ class BrainService {
         } catch (_) {}
         try {
           await _audioPlayer!.play(BytesSource(bytes));
-          _emitTtsSignal(signal);
+          _emitTtsSignal(signal, source: source);
           
           var wait = _estimateWavDuration(bytes);
           if (wait == null) {
@@ -532,7 +535,7 @@ class BrainService {
     }
   }
 
-  Future<void> speak(String text, AiProviderConfig ttsProvider) async {
+  Future<void> speak(String text, AiProviderConfig ttsProvider, {String? source}) async {
     // CRITICAL: TTS MUST BE PERFORMED IN THE FRONTEND.
     // Do NOT move this logic to the backend. 
     // The Live2D model relies on local audio playback for precise Lip-Sync.
@@ -624,13 +627,13 @@ class BrainService {
         }());
       }
 
-      await _playTtsBytes(bytes);
+      await _playTtsBytes(bytes, source: source);
     } catch (e) {
       logger.error('TTS 失败', e);
     }
   }
 
-  Future<void> speakChunks(List<String> parts, AiProviderConfig ttsProvider) async {
+  Future<void> speakChunks(List<String> parts, AiProviderConfig ttsProvider, {String? source}) async {
     final cleanedParts = <String>[];
     for (final raw in parts) {
       final clean = raw.replaceAll(RegExp(r'\（.*?\）|\(.*?\)|\[.*?\]'), '').trim();
@@ -726,7 +729,7 @@ class BrainService {
             }
           }());
         }
-        await _playTtsBytes(bytes);
+        await _playTtsBytes(bytes, source: source);
       }
     } catch (e) {
       logger.error('TTS 失败（分段）', e);

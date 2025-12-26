@@ -172,6 +172,16 @@
         "description": "Whether to enable online mode for the bot",
         "default": true
     },
+    "translate_in_plugin": {
+        "type": "boolean",
+        "description": "Whether plugin performs automatic translation; disable to rely on frontend",
+        "default": false
+    },
+    "translate_use_llm": {
+        "type": "boolean",
+        "description": "Use main-brain LLM for translation instead of external APIs",
+        "default": true
+    },
     "ntai_backend_url": {
         "type": "string",
         "description": "The URL of the N-T-AI backend",

@@ -50,7 +50,7 @@ class MessageBubble extends StatelessWidget {
                   Icon(Icons.insights, size: 14, color: isDark ? Colors.green[300] : Colors.green.withValues(alpha: 0.9)),
                   const SizedBox(width: 6),
                   Text(
-                    "弹幕总结",
+                    "弹幕总结 · 来源: Bilibili直播插件",
                     style: TextStyle(
                       fontSize: 11, 
                       fontWeight: FontWeight.bold, 
@@ -66,6 +66,120 @@ class MessageBubble extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 13, 
                   color: isDark ? Colors.green[100] : cs.onSurface,
+                  height: 1.4
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (message.role == 'chat_minecraft') {
+      final theme = Theme.of(context);
+      final isDark = theme.brightness == Brightness.dark;
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 32),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0D47A1).withValues(alpha: 0.18) : const Color(0xFFE3F2FD),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isDark ? const Color(0xFF64B5F6).withValues(alpha: 0.35) : const Color(0xFF90CAF9),
+              width: 1.0,
+            ),
+            boxShadow: [
+               BoxShadow(
+                 color: Colors.black.withValues(alpha: 0.05), 
+                 blurRadius: 4, 
+                 offset: const Offset(0, 2)
+               ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.games, size: 14, color: isDark ? const Color(0xFF90CAF9) : const Color(0xFF1565C0)),
+                  const SizedBox(width: 6),
+                  Text(
+                    "来自于MC插件",
+                    style: TextStyle(
+                      fontSize: 11, 
+                      fontWeight: FontWeight.bold, 
+                      color: isDark ? const Color(0xFF90CAF9) : const Color(0xFF1565C0),
+                      letterSpacing: 1.0
+                    )
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message.text,
+                style: TextStyle(
+                  fontSize: 13, 
+                  color: isDark ? Colors.blue[50] : theme.colorScheme.onSurface,
+                  height: 1.4
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (message.role == 'chat_voice_channel') {
+      final theme = Theme.of(context);
+      final isDark = theme.brightness == Brightness.dark;
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 32),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1A237E).withValues(alpha: 0.18) : const Color(0xFFE8EAF6),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isDark ? const Color(0xFF7986CB).withValues(alpha: 0.35) : const Color(0xFF9FA8DA),
+              width: 1.0,
+            ),
+            boxShadow: [
+               BoxShadow(
+                 color: Colors.black.withValues(alpha: 0.05), 
+                 blurRadius: 4, 
+                 offset: const Offset(0, 2)
+               ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.record_voice_over, size: 14, color: isDark ? const Color(0xFF9FA8DA) : const Color(0xFF283593)),
+                  const SizedBox(width: 6),
+                  Text(
+                    "来自于语音频道",
+                    style: TextStyle(
+                      fontSize: 11, 
+                      fontWeight: FontWeight.bold, 
+                      color: isDark ? const Color(0xFF9FA8DA) : const Color(0xFF283593),
+                      letterSpacing: 1.0
+                    )
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                message.text,
+                style: TextStyle(
+                  fontSize: 13, 
+                  color: isDark ? Colors.indigo[50] : theme.colorScheme.onSurface,
                   height: 1.4
                 ),
                 textAlign: TextAlign.center,
@@ -224,6 +338,52 @@ class MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: alignRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
+          if (isSttHeard)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2.0, left: 8.0, right: 8.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF4527A0).withValues(alpha: 0.5) : const Color(0xFFEDE7F6),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isDark ? Colors.deepPurple.withValues(alpha: 0.3) : Colors.deepPurple.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.mic, size: 12, color: isDark ? Colors.deepPurple[200] : Colors.deepPurple),
+                    const SizedBox(width: 6),
+                    Text(
+                      "麦克风来源",
+                      style: TextStyle(fontSize: 10, color: isDark ? Colors.deepPurple[100] : Colors.deepPurple[700]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (!isSttHeard && isMine)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2.0, left: 8.0, right: 8.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1565C0).withValues(alpha: 0.5) : const Color(0xFFE3F2FD),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isDark ? Colors.blue.withValues(alpha: 0.3) : Colors.blue.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.keyboard_alt, size: 12, color: isDark ? Colors.blue[200] : Colors.blue[700]),
+                    const SizedBox(width: 6),
+                    Text(
+                      "文字输入",
+                      style: TextStyle(fontSize: 10, color: isDark ? Colors.blue[100] : Colors.blue[700]),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // Render each block
           for (final block in blocks)
             if (block['type'] == 'image')

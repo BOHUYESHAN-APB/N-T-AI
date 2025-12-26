@@ -134,7 +134,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         }
         final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
         if (ttsProvider != null) {
-          _brain.speak(response.content, ttsProvider);
+          _brain.speak(response.content, ttsProvider, source: 'assistant_action');
         }
       } catch (e) {
         debugPrint("[Initiative] TTS Error: $e");
@@ -413,7 +413,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (type == 'chat_message') {
        final sender = msg['sender'];
        if (sender == 'chat_normal' || sender == 'chat_sc' || sender == 'minecraft') {
-           role = sender == 'minecraft' ? 'assistant' : sender;
+           role = sender == 'minecraft' ? 'chat_minecraft' : sender;
            content = msg['text'] ?? msg['content'];
            
            // If it's from Minecraft, prepend the agent name if needed
@@ -421,6 +421,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
               content = "【Minecraft】${msg['senderName']}: $content";
            }
        }
+    } else if (type == 'voice_channel_transcript') {
+        role = 'chat_voice_channel';
+        final channelId = msg['channel_id']?.toString() ?? '';
+        final speaker = msg['speaker']?.toString() ?? '';
+        final text = msg['text']?.toString() ?? '';
+        final prefix = channelId.isNotEmpty ? "【语音频道 $channelId】" : "【语音频道】";
+        content = speaker.isNotEmpty ? "$prefix$speaker: $text" : "$prefix $text";
     } else if (type == 'chat_normal' || type == 'chat_sc') {
         // Legacy or direct format
         role = type;
@@ -473,20 +480,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 agentEnabled: true, // Minecraft context usually implies agent interaction
               ));
 
-              try {
-                final rootSettings = SettingsScope.of(context).settings;
-                if (rootSettings.enableTts) {
-                  final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
-                  if (ttsProvider != null) {
-                    // We speak the content but maybe without the 【Minecraft】 prefix for better TTS?
-                    // Let's speak the original text if available
-                    final textToSpeak = msg['text'] ?? content;
-                    _brain.speak(textToSpeak, ttsProvider);
-                  }
-                }
-              } catch (e) {
-                debugPrint("[Minecraft WS] TTS Error: $e");
-              }
+              // Skip system TTS for Minecraft plugin output per user logic
             }
           }
   }
@@ -1269,7 +1263,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speak(displayContent, ttsProvider);
+              _brain.speak(displayContent, ttsProvider, source: 'assistant');
             }
           }
 
@@ -1323,7 +1317,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speakChunks(parts, ttsProvider);
+              _brain.speakChunks(parts, ttsProvider, source: 'assistant');
             }
           }
 

@@ -11,6 +11,11 @@ from app.plugins import get_plugin
 
 router = APIRouter(prefix="/plugins/Minecraft-mindcraft", tags=["minecraft"])
 
+class SendMessageRequest(BaseModel):
+    agent: str
+    message: str
+    sender: Optional[str] = "frontend"
+
 @router.post("/config")
 async def update_minecraft_config(request_data: Dict[str, Any]):
     """
@@ -138,6 +143,28 @@ async def handle_minecraft_pov(frame: MinecraftPOVFrame):
         "stats": frame.stats
     })
     return {"status": "ok"}
+
+@router.post("/send_message")
+async def send_message_to_agent(req: SendMessageRequest):
+    """
+    通过后端转发消息到 MindServer，再由插件送入游戏内对话框。
+    这支持前端文本、语音识别文本、语音频道输入的融合。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    ms_port = plugin.config.get("mindserver_port", 8080)
+    url = f"http://localhost:{ms_port}/api/send-message"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json={"agent": req.agent, "from": req.sender, "message": req.message}, timeout=5.0)
+            if resp.status_code == 200:
+                return {"status": "ok"}
+            else:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except Exception as e:
+        logger.error(f"Failed to send message to MindServer: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
 
 @router.get("/stream", response_class=HTMLResponse)
 async def get_minecraft_stream():
