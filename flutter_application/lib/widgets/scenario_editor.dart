@@ -64,7 +64,7 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
 
   List<_TemplateItem> _buildTemplates(AppSettings settings) {
     if (settings.primaryMode == PrimaryModeOption.assistant) {
-      return [
+      return const [
         _TemplateItem(
           label: '游戏攻略/助手',
           context: '正在玩游戏，需要攻略、提示与解说，风格简洁实用。',
@@ -78,7 +78,7 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
       ];
     }
 
-    return [
+    return const [
       _TemplateItem(
         label: '直播：你玩AI看',
         context: '当前在直播，由玩家操作，AI只解说与搞效果。',

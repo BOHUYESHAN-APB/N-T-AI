@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../settings/settings_controller.dart';
 import '../../settings/settings_scope.dart';
 import '../base_plugin.dart';
 
@@ -114,8 +115,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
-  Future<bool> syncConfigToBackend(BuildContext context) async {
-    final controller = SettingsScope.of(context);
+  Future<bool> syncConfigToBackend(SettingsController controller) async {
     final settings = controller.settings;
     final backendUrl = settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
     final providers = controller.providers;
@@ -194,7 +194,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       );
       return response.statusCode == 200;
     } catch (e) {
-      print('Error syncing config: $e');
+      debugPrint('Error syncing config: $e');
       return false;
     }
   }
@@ -259,7 +259,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         _notify();
       }
     } catch (e) {
-      print('Error fetching Minecraft status: $e');
+      debugPrint('Error fetching Minecraft status: $e');
     } finally {
       _statusInFlight = false;
     }
@@ -383,17 +383,18 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () async {
+                        final controller = SettingsScope.of(context);
                         await _saveLocalConfig();
-                        final success = await syncConfigToBackend(context);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(success ? '配置已同步并尝试重启插件' : '同步失败，请检查后端连接')),
-                          );
-                        }
+                        if (!context.mounted) return;
+                        final success = await syncConfigToBackend(controller);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(success ? '配置已同步并尝试重启插件' : '同步失败，请检查后端连接')),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        backgroundColor: Colors.blue.withOpacity(0.1),
+                        backgroundColor: Colors.blue.withValues(alpha: 0.1),
                       ),
                       icon: const Icon(Icons.sync),
                       label: const Text('同步配置并重启插件'),
@@ -416,7 +417,9 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: _msAuthCode != null ? Colors.orange.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                    color: _msAuthCode != null
+                        ? Colors.orange.withValues(alpha: 0.1)
+                        : Colors.grey.withValues(alpha: 0.1),
                     border: Border.all(color: _msAuthCode != null ? Colors.orange : Colors.grey),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -443,7 +446,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
                           ),
                           child: Center(
                             child: SelectableText(

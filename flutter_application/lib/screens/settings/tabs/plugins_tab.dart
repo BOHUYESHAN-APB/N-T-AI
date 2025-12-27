@@ -56,10 +56,11 @@ class _PluginsTabState extends State<PluginsTab> {
           value: plugin.isEnabled,
           onChanged: (v) async {
             await globalPluginManager.togglePlugin(plugin.id, v);
+            if (!context.mounted) return;
             if (v) {
-              if (!mounted) return;
               await plugin.onSync(context);
             }
+            if (!context.mounted) return;
             setState(() {});
           },
         ),
@@ -76,9 +77,10 @@ class _PluginsTabState extends State<PluginsTab> {
                   value: plugin.autoStart,
                   onChanged: (v) async {
                     await globalPluginManager.toggleAutoStart(plugin.id, v);
+                    if (!context.mounted) return;
                     // 同步到后端
-                    if (!mounted) return;
                     await plugin.onSync(context);
+                    if (!context.mounted) return;
                     setState(() {});
                   },
                 ),

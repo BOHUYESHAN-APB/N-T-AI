@@ -170,9 +170,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
   bool _isLiveMode(AppSettings settings) =>
       settings.primaryMode == PrimaryModeOption.live;
 
-  bool _isLiveWatch(AppSettings settings) =>
-      _isLiveMode(settings) && settings.liveMode == LiveModeOption.watch;
-
   bool _isLiveCoPlay(AppSettings settings) =>
       _isLiveMode(settings) && settings.liveMode == LiveModeOption.coPlay;
 
@@ -281,6 +278,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (_currentSessionId == null) {
       await _createNewSession();
     }
+    if (!mounted) return;
 
     final settings = SettingsScope.of(context).settings;
     final learningOverride = _resolveLearningProbabilityOverride(settings);
@@ -470,7 +468,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
     super.didChangeDependencies();
     // logToFile("FireflyScreen.didChangeDependencies started");
       final settings = SettingsScope.of(context).settings;
-      final learningOverride = _resolveLearningProbabilityOverride(settings);
     if (_lastEnableTts && !settings.enableTts) {
       _stopTtsPlayback();
     }
@@ -873,20 +870,22 @@ ${capped.map((e) => '- $e').join('\n')}
             // Trigger Brain processing for Minecraft messages
             if (msg['sender'] == 'minecraft') {
               final rawContent = minecraftRawContent ?? content;
-              final brainContent = (msg['senderName'] != null && rawContent != null)
-                  ? '${msg['senderName']}: $rawContent'
-                  : rawContent;
+              final senderName = msg['senderName']?.toString();
+              final brainContent =
+                  senderName != null && senderName.isNotEmpty
+                      ? '$senderName: $rawContent'
+                      : rawContent;
               // Feed to brain with source tag
               unawaited(_brain.processMessage(
-                brainContent ?? content,
+                brainContent,
                 source: 'minecraft',
                 agentEnabled: true, // Minecraft context usually implies agent interaction
                 learningProbabilityOverride: 0.0,
               ));
               // Minecraft plugin output stays visible but does not trigger TTS.
               _enqueueMinecraftSummary(
-                _stripMinecraftPrefix(rawContent?.toString() ?? content),
-                senderName: msg['senderName']?.toString(),
+                _stripMinecraftPrefix(rawContent),
+                senderName: senderName,
               );
             }
 
@@ -895,7 +894,7 @@ ${capped.map((e) => '- $e').join('\n')}
                 !_blockExternalInputs(settings) &&
                 _allowVoiceChannelResponses(settings) &&
                 settings.autoVoiceChannelListening) {
-              unawaited(_respondToVoiceChannelInput(voiceChannelText!));
+              unawaited(_respondToVoiceChannelInput(voiceChannelText));
             }
           }
   }
@@ -2949,7 +2948,7 @@ ${capped.map((e) => '- $e').join('\n')}
               l10n.appTitle,
               style: theme.textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
-                color: colorScheme.onSurface.withOpacity(0.4),
+                color: colorScheme.onSurface.withValues(alpha: 0.4),
                 letterSpacing: 4,
               ),
             ),
@@ -2969,7 +2968,7 @@ ${capped.map((e) => '- $e').join('\n')}
                   message,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                     height: 1.6,
                   ),
                 );
@@ -3000,19 +2999,19 @@ ${capped.map((e) => '- $e').join('\n')}
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.2)),
+        border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: colorScheme.primary.withOpacity(0.5)),
+          Icon(icon, size: 16, color: colorScheme.primary.withValues(alpha: 0.5)),
           const SizedBox(width: 8),
           Text(
             label,
             style: theme.textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
             ),
           ),
         ],
