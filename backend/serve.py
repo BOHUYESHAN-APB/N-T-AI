@@ -162,10 +162,7 @@ def main():
 
         # Try finding an available port if the default is taken
         start_port = port
-        disable_port_scan = os.environ.get("DISABLE_PORT_SCAN")
-        if disable_port_scan is None:
-            disable_port_scan = "true"
-        disable_port_scan = disable_port_scan.lower() == "true"
+        disable_port_scan = os.environ.get("DISABLE_PORT_SCAN", "false").lower() == "true"
         max_retries = 0 if disable_port_scan else 10
             
         actual_port = start_port

@@ -133,7 +133,7 @@ class MessageBubble extends StatelessWidget {
       );
     }
 
-    if (message.role == 'chat_voice_channel') {
+    if (message.role == 'chat_voice_channel' && message.kind != ChatMessageKind.sttHeard) {
       final theme = Theme.of(context);
       final isDark = theme.brightness == Brightness.dark;
       return Center(
@@ -279,6 +279,7 @@ class MessageBubble extends StatelessWidget {
     final isMine = message.isMine;
     final settings = SettingsScope.of(context).settings;
     final kind = message.kind;
+    final source = message.source ?? '';
 
     // Helper to get Color from int
     Color? getColor(int? argb) => argb != null ? Color(argb) : null;
@@ -300,6 +301,7 @@ class MessageBubble extends StatelessWidget {
         : (chat?.otherText ?? theme.colorScheme.onSurface);
 
     final isSttHeard = kind == ChatMessageKind.sttHeard;
+    final isVoiceChannel = source == 'voice_channel' || message.role == 'chat_voice_channel';
     final alignRight = isMine || isSttHeard;
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
@@ -344,18 +346,41 @@ class MessageBubble extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF4527A0).withValues(alpha: 0.5) : const Color(0xFFEDE7F6),
+                  color: isDark
+                      ? (isVoiceChannel
+                          ? const Color(0xFF283593).withValues(alpha: 0.5)
+                          : const Color(0xFF4527A0).withValues(alpha: 0.5))
+                      : (isVoiceChannel ? const Color(0xFFE8EAF6) : const Color(0xFFEDE7F6)),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? Colors.deepPurple.withValues(alpha: 0.3) : Colors.deepPurple.withValues(alpha: 0.25)),
+                  border: Border.all(
+                    color: isDark
+                        ? (isVoiceChannel
+                            ? Colors.indigo.withValues(alpha: 0.3)
+                            : Colors.deepPurple.withValues(alpha: 0.3))
+                        : (isVoiceChannel
+                            ? Colors.indigo.withValues(alpha: 0.25)
+                            : Colors.deepPurple.withValues(alpha: 0.25)),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.mic, size: 12, color: isDark ? Colors.deepPurple[200] : Colors.deepPurple),
+                    Icon(
+                      isVoiceChannel ? Icons.headphones : Icons.mic,
+                      size: 12,
+                      color: isDark
+                          ? (isVoiceChannel ? Colors.indigo[200] : Colors.deepPurple[200])
+                          : (isVoiceChannel ? Colors.indigo[700] : Colors.deepPurple),
+                    ),
                     const SizedBox(width: 6),
                     Text(
-                      "麦克风来源",
-                      style: TextStyle(fontSize: 10, color: isDark ? Colors.deepPurple[100] : Colors.deepPurple[700]),
+                      isVoiceChannel ? "语音频道来源" : "麦克风来源",
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isDark
+                            ? (isVoiceChannel ? Colors.indigo[100] : Colors.deepPurple[100])
+                            : (isVoiceChannel ? Colors.indigo[700] : Colors.deepPurple[700]),
+                      ),
                     ),
                   ],
                 ),

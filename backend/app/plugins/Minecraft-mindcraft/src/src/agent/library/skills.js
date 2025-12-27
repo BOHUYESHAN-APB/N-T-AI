@@ -414,7 +414,7 @@ export async function defendSelf(bot, range=9) {
 
 
 
-export async function collectBlock(bot, blockType, num=1, exclude=null) {
+export async function collectBlock(bot, blockType, num=1, exclude=null, searchRange=64) {
     /**
      * Collect one of the given block type.
      * @param {MinecraftBot} bot, reference to the minecraft bot.
@@ -467,7 +467,7 @@ export async function collectBlock(bot, blockType, num=1, exclude=null) {
             }
             
             return movements.safeToBreak(block) || unsafeBlocks.includes(block.name);
-        }, 64, 1);
+        }, searchRange, 1);
 
         if (blocks.length === 0) {
             if (collected === 0)

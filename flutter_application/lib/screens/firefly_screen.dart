@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
 import '../widgets/expressive_face.dart';
@@ -54,6 +55,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   String? _latestDanmakuSummary;
   DateTime? _latestDanmakuSummaryAt;
+  static const int _minecraftSummaryBatchSize = 6;
+  static const int _minecraftSummaryMaxBuffer = 24;
+  final List<String> _minecraftSummaryBuffer = [];
+  bool _minecraftSummaryInFlight = false;
+  static const int _maxMessagesInMemory = 400;
+  bool _scrollToBottomScheduled = false;
 
   // Multi-session state
   List<ChatSession> _sessions = [];
@@ -62,7 +69,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
       []; // {role: user/assistant, content: text, created_at: DateTime}
   bool _isLoading = false;
   bool _isLoopbackCapturing = false;
-  bool _showMinecraftPOV = false;
   Completer<void>? _interruptCompleter;
 
   StreamSubscription? _historySubscription;
@@ -122,7 +128,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
           'role': 'assistant',
           'content': response.content,
           'created_at': DateTime.now(),
+          'source': 'assistant',
         });
+        _trimMessageBuffer();
       });
       _scrollToBottom();
       
@@ -148,21 +156,265 @@ class _FireflyScreenState extends State<FireflyScreen> {
     // logToFile("FireflyScreen.initState completed");
   }
 
-  // Simple file logger for Release mode debugging
-  void logToFile(String message) {
-    try {
-      final file = File('startup_log.txt');
-      final timestamp = DateTime.now().toIso8601String();
-      file.writeAsStringSync('[$timestamp] $message\n', mode: FileMode.append);
-    } catch (e) {
-      // Ignore logging errors
-    }
-  }
-
   String _safeFileName(String input) {
     final trimmed = input.trim();
     if (trimmed.isEmpty) return '未命名';
     return trimmed.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  }
+
+  bool _isMinecraftPluginEnabled() {
+    final plugin = globalPluginManager.getPlugin('Minecraft-mindcraft');
+    return plugin?.isEnabled ?? false;
+  }
+
+  bool _isLiveMode(AppSettings settings) =>
+      settings.primaryMode == PrimaryModeOption.live;
+
+  bool _isLiveWatch(AppSettings settings) =>
+      _isLiveMode(settings) && settings.liveMode == LiveModeOption.watch;
+
+  bool _isLiveCoPlay(AppSettings settings) =>
+      _isLiveMode(settings) && settings.liveMode == LiveModeOption.coPlay;
+
+  bool _isLiveAutoPlay(AppSettings settings) =>
+      _isLiveMode(settings) && settings.liveMode == LiveModeOption.autoPlay;
+
+  bool _allowMinecraftCommands(AppSettings settings) =>
+      _isLiveMode(settings) &&
+      (settings.liveMode == LiveModeOption.coPlay ||
+          settings.liveMode == LiveModeOption.autoPlay);
+
+  bool _allowVoiceChannelResponses(AppSettings settings) =>
+      _isLiveCoPlay(settings);
+
+  bool _blockExternalInputs(AppSettings settings) =>
+      _isLiveAutoPlay(settings);
+
+  double? _resolveLearningProbabilityOverride(AppSettings settings) =>
+      _isLiveMode(settings) && !settings.liveMemoryEnabled ? 0.0 : null;
+
+  Future<String> _getMinecraftAgentName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString('plugin.Minecraft-mindcraft.agentName') ?? '';
+    return name.isNotEmpty ? name : 'andy';
+  }
+
+  String _parseMinecraftRoute(String raw) {
+    var trimmed = raw.trim();
+    try {
+      final start = trimmed.indexOf('{');
+      final end = trimmed.lastIndexOf('}');
+      if (start != -1 && end != -1 && end > start) {
+        final jsonText = trimmed.substring(start, end + 1);
+        final data = jsonDecode(jsonText);
+        final route = data is Map ? data['route']?.toString().toLowerCase() : null;
+        if (route == 'minecraft' || route == 'chat' || route == 'uncertain') {
+          return route ?? 'uncertain';
+        }
+      }
+    } catch (_) {}
+
+    final lowered = trimmed.toLowerCase();
+    if (lowered.contains('minecraft')) return 'minecraft';
+    if (lowered.contains('chat')) return 'chat';
+    return 'uncertain';
+  }
+
+  Future<String> _classifyMinecraftRoute(String text) async {
+    final prompt = '''
+你是一个路由分类器。判断下面这句话是否是 Minecraft 游戏内的指令/任务，还是普通闲聊。
+只输出 JSON：{"route":"minecraft|chat|uncertain"}，不要输出多余文字。
+若无法确定，请输出 uncertain。
+内容：$text
+''';
+    try {
+      final response = await _llmService.chat(
+        [
+          {'role': 'system', 'content': '你只输出 JSON，不要解释。'},
+          {'role': 'user', 'content': prompt},
+        ],
+        usageType: 'system',
+        temperature: 0.0,
+        learningProbabilityOverride: 0.0,
+      );
+      return _parseMinecraftRoute(response.content);
+    } catch (e) {
+      logger.error('Minecraft 路由判断失败: $e');
+      return 'uncertain';
+    }
+  }
+
+  Future<bool> _sendMinecraftMessage(String message) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var backendUrl =
+          prefs.getString('settings.backend.url') ?? 'http://127.0.0.1:23456';
+      backendUrl = backendUrl.replaceAll(RegExp(r'/$'), '');
+      final agentName = await _getMinecraftAgentName();
+
+      final response = await http.post(
+        Uri.parse(
+            '$backendUrl/api/v1/plugins/Minecraft-mindcraft/send_message'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'agent': agentName,
+          'message': message,
+          'sender': 'frontend',
+        }),
+      );
+
+      return response.statusCode == 200;
+    } catch (e) {
+      logger.error('发送 Minecraft 指令失败: $e');
+      return false;
+    }
+  }
+
+  Future<void> _respondToVoiceChannelInput(String text) async {
+    final content = text.trim();
+    if (content.isEmpty || !mounted) return;
+    if (_isLoading) {
+      logger.info('语音频道输入被忽略：当前正在生成回复');
+      return;
+    }
+
+    if (_currentSessionId == null) {
+      await _createNewSession();
+    }
+
+    final settings = SettingsScope.of(context).settings;
+    final learningOverride = _resolveLearningProbabilityOverride(settings);
+
+    setState(() {
+      _isLoading = true;
+      _interruptCompleter = Completer<void>();
+    });
+
+    try {
+      final provider = SettingsScope.of(context)
+          .selectProviderForNextCall(category: AiProviderCategory.llm);
+
+      final aiResponse = await _brain.processMessage(
+        content,
+        agentEnabled: settings.agentEnabled,
+        enableBrowser: settings.enableBrowser,
+        enableNoteAccess: settings.enableNoteAccess,
+        userNickname: settings.userNickname,
+        learningProbability: settings.learningProbability,
+        enableExpressionAgent: settings.enableExpressionAgent,
+        systemPromptOverride: settings.systemPrompt,
+        providerOverride: provider,
+        sessionId: _currentSessionId,
+        source: 'voice_channel',
+        learningProbabilityOverride: learningOverride,
+      );
+
+      var cleanedResponse = _stripExpressionBlocks(aiResponse.content);
+      if (!settings.ai.allowEmojis) {
+        cleanedResponse = _stripEmojis(cleanedResponse);
+      }
+
+      if (settings.chatMode == ChatModeOption.standard) {
+        final displayContent =
+            cleanedResponse.replaceAll('[SPLIT]', '\n\n').trim();
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _messages.add(<String, dynamic>{
+              'role': 'assistant',
+              'content': displayContent,
+              'reasoning_content': aiResponse.reasoningContent,
+              'tool_calls': aiResponse.toolCalls,
+              'created_at': DateTime.now(),
+              'source': 'assistant',
+            });
+            _trimMessageBuffer();
+          });
+        }
+        _scrollToBottom();
+        await _chatHistory.addMessage(
+          _currentSessionId!,
+          'assistant',
+          displayContent,
+          source: 'assistant',
+        );
+
+        if (settings.enableLive2D) {
+          _brain.expressionAgent.requestMotion(content, displayContent);
+        }
+
+        if (settings.enableTts) {
+          final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+          if (ttsProvider != null) {
+            _brain.speak(displayContent, ttsProvider, source: 'assistant');
+          }
+        }
+      } else {
+        final parts = _splitPersonaText(cleanedResponse);
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+        for (var i = 0; i < parts.length; i++) {
+          final part = parts[i].trim();
+          if (part.isEmpty) continue;
+
+          if (i > 0) {
+            await Future.delayed(
+              Duration(
+                milliseconds: 500 + (part.length * 20).clamp(0, 1500),
+              ),
+            );
+            if (!mounted) return;
+          }
+
+          setState(() {
+            _messages.add(<String, dynamic>{
+              'role': 'assistant',
+              'content': part,
+              'created_at': DateTime.now(),
+              'source': 'assistant',
+            });
+            _trimMessageBuffer();
+          });
+          _scrollToBottom();
+          await _chatHistory.addMessage(
+            _currentSessionId!,
+            'assistant',
+            part,
+            source: 'assistant',
+          );
+        }
+
+        if (settings.enableLive2D) {
+          _brain.expressionAgent.requestMotion(content, cleanedResponse);
+        }
+
+        if (settings.enableTts) {
+          final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+          if (ttsProvider != null) {
+            _brain.speakChunks(parts, ttsProvider, source: 'assistant');
+          }
+        }
+      }
+    } catch (e) {
+      logger.error('语音频道处理失败', e);
+      if (mounted) {
+        setState(() {
+          _messages.add(<String, dynamic>{
+            'role': 'assistant',
+            'content': '语音频道处理失败: $e',
+            'created_at': DateTime.now(),
+            'source': 'system',
+          });
+          _trimMessageBuffer();
+          _isLoading = false;
+        });
+      }
+    } finally {
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Future<void> _exportCurrentSession() async {
@@ -199,6 +451,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             (m) => <String, dynamic>{
               'role': m['role']?.toString() ?? '',
               'content': m['content']?.toString() ?? '',
+              if (m['source'] != null) 'source': m['source'],
               if (m['created_at'] is DateTime) 'createdAt': (m['created_at'] as DateTime).toIso8601String(),
               if (m['reasoning_content'] != null) 'reasoningContent': m['reasoning_content'],
               if (m['tool_calls'] != null) 'toolCalls': m['tool_calls'],
@@ -216,7 +469,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // logToFile("FireflyScreen.didChangeDependencies started");
-    final settings = SettingsScope.of(context).settings;
+      final settings = SettingsScope.of(context).settings;
+      final learningOverride = _resolveLearningProbabilityOverride(settings);
     if (_lastEnableTts && !settings.enableTts) {
       _stopTtsPlayback();
     }
@@ -314,16 +568,19 @@ class _FireflyScreenState extends State<FireflyScreen> {
       'role': 'system',
       'content': content,
       'created_at': DateTime.now(),
+      'source': 'system',
     };
 
     setState(() {
       _messages.add(newMessage);
+      _trimMessageBuffer();
     });
 
     _chatHistory.addMessage(
       _currentSessionId!,
       'system',
       content,
+      source: 'system',
     );
     _scrollToBottom();
     
@@ -332,6 +589,23 @@ class _FireflyScreenState extends State<FireflyScreen> {
       'role': m['role'] as String,
       'content': m['content'] as String,
     }).toList());
+
+    final settings = SettingsScope.of(context).settings;
+    if (settings.enableTts) {
+      final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+      if (ttsProvider != null) {
+        _brain.speak(content, ttsProvider, source: 'screen_awareness');
+      }
+    }
+
+    if (settings.enableLive2D) {
+      final anyLive2D = settings.enableFloatingWindow ||
+          settings.showLive2D ||
+          settings.showLive2DMiniWindow;
+      if (anyLive2D) {
+        _brain.expressionAgent.requestMotion('屏幕感知', content);
+      }
+    }
   }
 
   Future<void> _interruptGeneration() async {
@@ -348,10 +622,130 @@ class _FireflyScreenState extends State<FireflyScreen> {
           'role': 'system',
           'content': '[用户中断了生成]',
           'created_at': DateTime.now(),
+          'source': 'system',
         });
+        _trimMessageBuffer();
       });
     }
     await _stopTtsPlayback();
+  }
+
+  String _stripMinecraftPrefix(String text) {
+    return text.replaceFirst(RegExp(r'^【Minecraft】\s*'), '').trim();
+  }
+
+  List<String> _compactMinecraftEvents(List<String> events) {
+    final cleaned = events
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (cleaned.isEmpty) return cleaned;
+    final List<String> compacted = [];
+    String? last;
+    for (final entry in cleaned) {
+      if (entry == last) continue;
+      compacted.add(entry);
+      last = entry;
+    }
+    return compacted;
+  }
+
+  void _enqueueMinecraftSummary(String? rawContent, {String? senderName}) {
+    if (rawContent == null) return;
+    final trimmed = rawContent.trim();
+    if (trimmed.isEmpty) return;
+    final normalized = senderName != null && senderName.isNotEmpty
+        ? '$senderName: $trimmed'
+        : trimmed;
+    _minecraftSummaryBuffer.add(normalized);
+    if (_minecraftSummaryBuffer.length > _minecraftSummaryMaxBuffer) {
+      _minecraftSummaryBuffer.removeRange(
+        0,
+        _minecraftSummaryBuffer.length - _minecraftSummaryMaxBuffer,
+      );
+    }
+    if (_minecraftSummaryBuffer.length >= _minecraftSummaryBatchSize &&
+        !_minecraftSummaryInFlight) {
+      final batch = List<String>.from(_minecraftSummaryBuffer);
+      _minecraftSummaryBuffer.clear();
+      unawaited(_summarizeMinecraftBatch(batch));
+    }
+  }
+
+  Future<void> _summarizeMinecraftBatch(List<String> batch) async {
+    if (!mounted || batch.isEmpty) return;
+    _minecraftSummaryInFlight = true;
+    try {
+      final settings = SettingsScope.of(context).settings;
+      final compacted = _compactMinecraftEvents(batch);
+      if (compacted.isEmpty) return;
+      final capped = compacted.length > 12
+          ? compacted.sublist(compacted.length - 12)
+          : compacted;
+
+      final prompt = '''
+你是 Firefly，需要总结 Minecraft 机器人在最近一段时间的动作、意图以及对玩家指令的回应。
+要求：中文、第一人称、1-2 句、简洁自然，不要逐条罗列，也不要输出无关信息。
+以下是最近的日志：
+${capped.map((e) => '- $e').join('\n')}
+''';
+
+      final response = await _llmService.chat(
+        [
+          {'role': 'system', 'content': '你是 Firefly，只输出总结内容，不要解释。'},
+          {'role': 'user', 'content': prompt},
+        ],
+        usageType: 'system',
+        temperature: 0.3,
+        learningProbabilityOverride: 0.0,
+      );
+
+      final summary = response.content.trim();
+      if (summary.isEmpty) return;
+      final displaySummary = '【Minecraft 总结】$summary';
+
+      if (mounted) {
+        setState(() {
+          _messages.add({
+            'role': 'assistant',
+            'content': displaySummary,
+            'created_at': DateTime.now(),
+            'source': 'assistant',
+          });
+          _trimMessageBuffer();
+        });
+        _scrollToBottom();
+      }
+
+      if (_currentSessionId != null) {
+        await _chatHistory.addMessage(
+          _currentSessionId!,
+          'assistant',
+          displaySummary,
+          source: 'assistant',
+        );
+      }
+
+      if (settings.enableLive2D) {
+        _brain.expressionAgent.requestMotion('', summary);
+      }
+
+      if (settings.enableTts) {
+        final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
+        if (ttsProvider != null) {
+          _brain.speak(summary, ttsProvider, source: 'assistant');
+        }
+      }
+    } catch (e) {
+      debugPrint('[Minecraft] Summary Error: $e');
+    } finally {
+      _minecraftSummaryInFlight = false;
+      if (_minecraftSummaryBuffer.length >= _minecraftSummaryBatchSize) {
+        final batch = List<String>.from(_minecraftSummaryBuffer);
+        _minecraftSummaryBuffer.clear();
+        unawaited(_summarizeMinecraftBatch(batch));
+      }
+    }
   }
 
   Future<void> _checkFirstRun() async {
@@ -388,25 +782,17 @@ class _FireflyScreenState extends State<FireflyScreen> {
     super.dispose();
   }
 
-  String? _latestMinecraftPOV;
-  String? _minecraftAgentName;
-
   void _handleWebSocketMessage(Map<String, dynamic> msg) {
     if (!mounted) return;
     
+    final settings = SettingsScope.of(context).settings;
     final type = msg['type'];
     final data = msg['data'];
     
-    if (type == 'minecraft_pov') {
-      setState(() {
-        _latestMinecraftPOV = msg['image'];
-        _minecraftAgentName = msg['agent'];
-      });
-      return;
-    }
-    
     String? role;
     String? content;
+    String? minecraftRawContent;
+    String? voiceChannelText;
     
     // Handle different formats
     // Backend sends: type="chat_message", text="...", sender="chat_normal"/"chat_sc"
@@ -418,7 +804,10 @@ class _FireflyScreenState extends State<FireflyScreen> {
            
            // If it's from Minecraft, prepend the agent name if needed
            if (sender == 'minecraft' && msg['senderName'] != null) {
+              minecraftRawContent = content?.toString();
               content = "【Minecraft】${msg['senderName']}: $content";
+           } else if (sender == 'minecraft') {
+              minecraftRawContent = content?.toString();
            }
        }
     } else if (type == 'voice_channel_transcript') {
@@ -426,6 +815,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         final channelId = msg['channel_id']?.toString() ?? '';
         final speaker = msg['speaker']?.toString() ?? '';
         final text = msg['text']?.toString() ?? '';
+        voiceChannelText = text;
         final prefix = channelId.isNotEmpty ? "【语音频道 $channelId】" : "【语音频道】";
         content = speaker.isNotEmpty ? "$prefix$speaker: $text" : "$prefix $text";
     } else if (type == 'chat_normal' || type == 'chat_sc') {
@@ -446,7 +836,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
             // unless it's explicitly marked as a summary or important.
             // User requested to show only summaries here.
             if (role == 'chat_normal') {
-              _brain.feedDanmaku(content); // Feed raw danmaku to brain for initiative mode
+              if (!_blockExternalInputs(settings)) {
+                _brain.feedDanmaku(content); // Feed raw danmaku to brain for initiative mode
+              }
               // debugPrint('[Danmaku] Ignored in main chat: $content');
               return; 
             }
@@ -462,111 +854,52 @@ class _FireflyScreenState extends State<FireflyScreen> {
             // Explicitly allow summaries or agent output
             // (role == 'assistant' is standard, 'chat_summary' might be custom)
             
+            final messageSource = role == 'chat_voice_channel'
+                ? 'voice_channel'
+                : role == 'chat_minecraft'
+                    ? 'minecraft'
+                    : msg['source']?.toString();
             setState(() {
               _messages.add({
                 'role': role,
                 'content': content,
                 'created_at': DateTime.now(),
+                if (messageSource != null) 'source': messageSource,
               });
+              _trimMessageBuffer();
             });
             _scrollToBottom();
 
             // Trigger Brain processing for Minecraft messages
             if (msg['sender'] == 'minecraft') {
+              final rawContent = minecraftRawContent ?? content;
+              final brainContent = (msg['senderName'] != null && rawContent != null)
+                  ? '${msg['senderName']}: $rawContent'
+                  : rawContent;
               // Feed to brain with source tag
               unawaited(_brain.processMessage(
-                content,
+                brainContent ?? content,
                 source: 'minecraft',
                 agentEnabled: true, // Minecraft context usually implies agent interaction
+                learningProbabilityOverride: 0.0,
               ));
+              // Minecraft plugin output stays visible but does not trigger TTS.
+              _enqueueMinecraftSummary(
+                _stripMinecraftPrefix(rawContent?.toString() ?? content),
+                senderName: msg['senderName']?.toString(),
+              );
+            }
 
-              // Skip system TTS for Minecraft plugin output per user logic
+            if (type == 'voice_channel_transcript' &&
+                voiceChannelText != null &&
+                !_blockExternalInputs(settings) &&
+                _allowVoiceChannelResponses(settings) &&
+                settings.autoVoiceChannelListening) {
+              unawaited(_respondToVoiceChannelInput(voiceChannelText!));
             }
           }
   }
 
-  Widget _buildMinecraftPOVOverlay(BuildContext context) {
-    if (!_showMinecraftPOV || _latestMinecraftPOV == null) return const SizedBox.shrink();
-
-    return Positioned(
-      bottom: 120, // Positioned above input area
-      right: 16,
-      child: Container(
-        width: 320,
-        height: 200,
-        decoration: BoxDecoration(
-          color: Colors.black,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 10,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            Image.memory(
-              base64Decode(_latestMinecraftPOV!),
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              gaplessPlayback: true,
-            ),
-            Positioned(
-              top: 8,
-              left: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'LIVE: ${_minecraftAgentName ?? 'Bot'}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 20),
-                onPressed: () => setState(() => _showMinecraftPOV = false),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
   Widget _buildDanmakuSummaryCard(BuildContext context) {
     return AnimatedBuilder(
       animation: globalPluginManager,
@@ -722,6 +1055,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               'role': m.role,
               'content': m.content,
               'created_at': m.createdAt,
+              if (m.source != null) 'source': m.source,
             },
           )
           .toList();
@@ -811,10 +1145,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
           '语音转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
         );
         _controller.text = text;
+        final inputSource = fromLoopback ? 'voice_channel' : 'mic';
         _sendMessage(
-          uiRole: fromLoopback ? 'stt_heard' : 'user', 
+          uiRole: 'stt_heard',
           needsRefinement: true,
-          source: fromLoopback ? 'voice' : 'direct',
+          source: inputSource,
         );
       } else {
         keepFile = true;
@@ -931,7 +1266,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
         '系统回环转写完成: len=${text.length} text="${text.length > 120 ? text.substring(0, 120) : text}"',
       );
       _controller.text = text;
-      _sendMessage(uiRole: 'stt_heard', needsRefinement: true, source: 'voice');
+      _sendMessage(
+        uiRole: 'stt_heard',
+        needsRefinement: true,
+        source: 'voice_channel',
+      );
       
       // 成功识别并发送后，如果是自动模式，继续下一次监听循环
       if (isAuto && settings.autoVoiceChannelListening) {
@@ -1027,6 +1366,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         'created_at': DateTime.now(),
         'source': source, // Track source in message history
       });
+      _trimMessageBuffer();
       _isLoading = true;
       _interruptCompleter = Completer<void>(); // Initialize completer
       _controller.clear();
@@ -1038,10 +1378,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
       _currentSessionId!,
       uiRole,
       text.isEmpty ? '[图片]' : text,
+      source: source,
     );
 
     if (!mounted) return;
     final settings = SettingsScope.of(context).settings;
+    final learningOverride = _resolveLearningProbabilityOverride(settings);
 
     // Update session title if it's the first message
     if (_messages.length <= 2) {
@@ -1056,6 +1398,44 @@ class _FireflyScreenState extends State<FireflyScreen> {
       logger.info(
         '发送到AI: uiRole=$uiRole session=${_currentSessionId ?? ''} textLen=${text.length} hasImage=${_pendingImageBytes != null}',
       );
+
+      bool routeToMinecraft = false;
+      bool routeToChat = true;
+      final allowMinecraft = _allowMinecraftCommands(settings) && _isMinecraftPluginEnabled();
+      if (allowMinecraft && text.isNotEmpty && _pendingImageBytes == null) {
+        final route = await _classifyMinecraftRoute(text);
+        routeToMinecraft = route == 'minecraft' || route == 'uncertain';
+        routeToChat = route == 'chat' || route == 'uncertain';
+
+        if (routeToMinecraft && !settings.enablePythonBackend) {
+          routeToMinecraft = false;
+          routeToChat = true;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('未启用后端，无法发送到 Minecraft 插件，已转为主脑处理。')),
+            );
+          }
+        }
+      }
+
+      if (routeToMinecraft) {
+        final ok = await _sendMinecraftMessage(text);
+        if (!ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Minecraft 插件指令发送失败，请检查插件是否已启动。')),
+          );
+        }
+      }
+
+      if (!routeToChat) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _pendingImageBytes = null;
+          });
+        }
+        return;
+      }
 
       // Define the generation task
       Future<AiResponse> generationTask() async {
@@ -1144,7 +1524,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     'role': 'assistant',
                     'content': helper,
                     'created_at': DateTime.now(),
+                    'source': 'assistant',
                   });
+                  _trimMessageBuffer();
                 });
               }
               return await _brain.processMessage(
@@ -1159,6 +1541,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 sessionId: _currentSessionId,
                 needsRefinement: needsRefinement,
                 source: source,
+                learningProbabilityOverride: learningOverride,
               );
             }
           } catch (_) {
@@ -1175,6 +1558,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               sessionId: _currentSessionId,
               needsRefinement: needsRefinement,
               source: source,
+              learningProbabilityOverride: learningOverride,
             );
           }
         } else {
@@ -1199,6 +1583,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             sessionId: _currentSessionId,
             needsRefinement: needsRefinement,
             source: source,
+            learningProbabilityOverride: learningOverride,
           );
 
           if (provider != null && mounted) {
@@ -1245,13 +1630,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
               'reasoning_content': aiResponse.reasoningContent,
               'tool_calls': aiResponse.toolCalls,
               'created_at': DateTime.now(),
+              'source': 'assistant',
             });
+            _trimMessageBuffer();
           });
           _scrollToBottom();
           await _chatHistory.addMessage(
             _currentSessionId!,
             'assistant',
             displayContent,
+            source: 'assistant',
           );
 
           // Trigger Motion Agent
@@ -1298,7 +1686,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 'role': 'assistant',
                 'content': part,
                 'created_at': DateTime.now(),
+                'source': 'assistant',
               });
+              _trimMessageBuffer();
             });
             _scrollToBottom();
             // Save assistant message
@@ -1306,6 +1696,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               _currentSessionId!,
               'assistant',
               part,
+              source: 'assistant',
             );
           }
 
@@ -1338,7 +1729,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
             'role': 'assistant',
             'content': '呜呜，我好像出错了... ($e)',
             'created_at': DateTime.now(),
+            'source': 'system',
           });
+          _trimMessageBuffer();
           _isLoading = false;
           _pendingImageBytes = null;
         });
@@ -1426,15 +1819,29 @@ class _FireflyScreenState extends State<FireflyScreen> {
   }
 
   void _scrollToBottom() {
+    if (_scrollToBottomScheduled) return;
+    _scrollToBottomScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      _scrollToBottomScheduled = false;
+      if (!_scrollController.hasClients) return;
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final current = _scrollController.position.pixels;
+      if (maxScroll - current > 160) {
+        return;
       }
+      _scrollController.animateTo(
+        maxScroll,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
+  }
+
+  void _trimMessageBuffer() {
+    final overflow = _messages.length - _maxMessagesInMemory;
+    if (overflow > 0) {
+      _messages.removeRange(0, overflow);
+    }
   }
 
   // ignore: unused_element
@@ -1460,7 +1867,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    logToFile("FireflyScreen.build started");
     final settingsController = SettingsScope.of(context);
     final settings = settingsController.settings;
     // final quickActions = settings.quickActions;
@@ -1515,7 +1921,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
             children: [
               Column(
                 children: [
-                  _buildHeader(context, settings, titleFontFamily),
+                  _buildHeader(context, settings, settingsController, titleFontFamily),
                   _buildDanmakuSummaryCard(context),
                   Expanded(
                 child: Stack(
@@ -1559,20 +1965,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
                     ),
                   ),
                 ),
-              Positioned(
-                top: 12,
-                right: 12,
-                child: SafeArea(
-                  child: _buildDisplayModeButton(
-                    context,
-                    settings,
-                    settingsController,
-                  ),
-                ),
-              ),
               if (settings.enableLive2D && settings.showLive2DMiniWindow)
                 _buildLive2DMiniWindowOverlay(context, settings),
-              _buildMinecraftPOVOverlay(context),
             ],
           ),
         ),
@@ -1600,8 +1994,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
     );
   }
 
-  /// 显示模式下拉菜单按钮
-  Widget _buildDisplayModeButton(
+  /// 头部快捷按钮
+  List<Widget> _buildHeaderActions(
     BuildContext context,
     AppSettings settings,
     SettingsController settingsController,
@@ -1623,116 +2017,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
       isActive = false;
     }
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Thinking Mode Toggle (DeepSeek)
-        if (settings.agentEnabled)
-          Container(
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(24),
-                onTap: () {
-                  final newValue = !(settings.ai.enableThinking);
-                  settingsController.updateAiSettings(settings.ai.copyWith(enableThinking: newValue));
-                  
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(newValue ? 'Thinking Mode Enabled' : 'Thinking Mode Disabled'),
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.psychology, 
-                        size: 20, 
-                        color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "Thinking",
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
+    final widgets = <Widget>[];
 
-        // Initiative Mode Toggle (搭话模式)
-        if (settings.agentEnabled)
-          Container(
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(24),
-                onTap: () {
-                  final newValue = !settings.ai.initiativeMode;
-                  settingsController.updateAiSettings(settings.ai.copyWith(initiativeMode: newValue));
-                  
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(newValue ? '搭话模式已开启' : '搭话模式已关闭'),
-                      duration: const Duration(seconds: 1),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.record_voice_over, 
-                        size: 20, 
-                        color: settings.ai.initiativeMode ? Colors.green : Colors.grey
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "搭话",
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: settings.ai.initiativeMode ? Colors.green : Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-        // Scenario Context & Objectives Toggle (场景描述)
+    // Thinking Mode Toggle (DeepSeek)
+    if (settings.agentEnabled) {
+      widgets.add(
         Container(
-          margin: const EdgeInsets.only(right: 8),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(24),
@@ -1745,11 +2035,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
             child: InkWell(
               borderRadius: BorderRadius.circular(24),
               onTap: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (context) => const ScenarioEditor(),
+                final newValue = !(settings.ai.enableThinking);
+                settingsController.updateAiSettings(settings.ai.copyWith(enableThinking: newValue));
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(newValue ? 'Thinking Mode Enabled' : 'Thinking Mode Disabled'),
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ),
                 );
               },
               child: Padding(
@@ -1757,23 +2051,17 @@ class _FireflyScreenState extends State<FireflyScreen> {
                 child: Row(
                   children: [
                     Icon(
-                      (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
-                          ? Icons.assignment
-                          : Icons.assignment_outlined,
-                      size: 20,
-                      color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
-                          ? Colors.green
-                          : Colors.grey,
+                      Icons.psychology, 
+                      size: 20, 
+                      color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      "状态描述",
+                      "Thinking",
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
-                            ? Colors.green
-                            : Colors.grey,
+                        color: (settings.ai.enableThinking) ? Colors.orange : Colors.grey,
                       ),
                     ),
                   ],
@@ -1782,145 +2070,435 @@ class _FireflyScreenState extends State<FireflyScreen> {
             ),
           ),
         ),
+      );
+    }
 
+    // Initiative Mode Toggle (搭话模式)
+    if (settings.agentEnabled) {
+      widgets.add(
         Container(
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
+              BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
-          child: PopupMenuButton<String>(
-            tooltip: '显示模式',
-            padding: EdgeInsets.zero,
-            icon: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Icon(
-                currentIcon,
-                size: 24,
-                color: isActive
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-            onSelected: (value) {
-              if (value == 'minecraft_pov') {
-                setState(() => _showMinecraftPOV = !_showMinecraftPOV);
-                return;
-              }
-              // Mutually exclusive logic: Disable all first
-              settingsController.setShowExpressionFace(false);
-              settingsController.setShowLive2D(false);
-              settingsController.setEnableFloatingWindow(false);
-              settingsController.setShowLive2DMiniWindow(false);
-
-              switch (value) {
-                case 'expression':
-                  settingsController.setShowExpressionFace(true);
-                  break;
-                case 'sidebar':
-                  settingsController.setShowLive2D(true);
-                  break;
-                case 'floating_native':
-                  settingsController.setEnableFloatingWindow(true);
-                  break;
-                case 'floating_mini':
-                  settingsController.setShowLive2DMiniWindow(true);
-                  break;
-                case 'hide':
-                  // All disabled above
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'expression',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: () {
+                final newValue = !settings.ai.initiativeMode;
+                settingsController.updateAiSettings(settings.ai.copyWith(initiativeMode: newValue));
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(newValue ? '搭话模式已开启' : '搭话模式已关闭'),
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: Row(
                   children: [
                     Icon(
-                      Icons.face_retouching_natural,
-                      color: settings.showExpressionFace
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
+                      Icons.record_voice_over, 
+                      size: 20, 
+                      color: settings.ai.initiativeMode ? Colors.green : Colors.grey
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    "搭话",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: settings.ai.initiativeMode ? Colors.green : Colors.grey,
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    const Text('表情系统（灵动岛）'),
                   ],
                 ),
               ),
-              PopupMenuItem(
-                value: 'sidebar',
-                child: Row(
-                  children: [
-                Icon(
-                  Icons.view_sidebar,
-                  color: settings.showLive2D && !settings.enableFloatingWindow
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('Live2D 侧边栏'),
-              ],
             ),
           ),
-          PopupMenuItem(
-            value: 'floating_native',
-            child: Row(
-              children: [
-                Icon(
-                  Icons.open_in_new,
-                  color: settings.enableFloatingWindow
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('Live2D 原生悬浮窗'),
-              ],
+        ),
+      );
+    }
+
+    // Mode Badge -> quick switcher
+    widgets.add(
+      Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () => _showModeQuickSwitcher(context, settingsController, settings),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    settings.primaryMode == PrimaryModeOption.assistant
+                        ? Icons.support_agent_outlined
+                        : Icons.live_tv_outlined,
+                    size: 20,
+                    color: settings.primaryMode == PrimaryModeOption.assistant
+                        ? Colors.grey
+                        : Colors.redAccent,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    settings.primaryMode == PrimaryModeOption.assistant
+                        ? '助理'
+                        : settings.liveMode == LiveModeOption.watch
+                            ? '你玩AI看'
+                            : settings.liveMode == LiveModeOption.coPlay
+                                ? '你玩+AI玩'
+                                : 'AI玩你看',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: settings.primaryMode == PrimaryModeOption.assistant
+                          ? Colors.grey
+                          : Colors.redAccent,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          PopupMenuItem(
-            value: 'floating_mini',
-            child: Row(
-              children: [
-                Icon(
-                  Icons.open_in_new,
-                  color: settings.showLive2DMiniWindow
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('Live2D 应用内小窗'),
-              ],
-            ),
-          ),
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            value: 'hide',
-            child: Row(
-              children: [
-                Icon(
-                  Icons.visibility_off,
-                  color:
-                      !settings.showLive2D &&
-                          !settings.enableFloatingWindow &&
-                          !settings.showExpressionFace
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                const Text('全部隐藏'),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
-    ),
-      ],
+    );
+
+    // Scenario Context & Objectives Toggle (场景描述)
+    widgets.add(
+      Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (context) => const ScenarioEditor(),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                        ? Icons.assignment
+                        : Icons.assignment_outlined,
+                    size: 20,
+                    color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                        ? Colors.green
+                        : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    "情况说明",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: (settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty)
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    widgets.add(
+      Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: PopupMenuButton<String>(
+          tooltip: '显示模式',
+          padding: EdgeInsets.zero,
+          icon: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(
+              currentIcon,
+              size: 24,
+              color: isActive
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          onSelected: (value) {
+            // Mutually exclusive logic: Disable all first
+            settingsController.setShowExpressionFace(false);
+            settingsController.setShowLive2D(false);
+            settingsController.setEnableFloatingWindow(false);
+            settingsController.setShowLive2DMiniWindow(false);
+
+            switch (value) {
+              case 'expression':
+                settingsController.setShowExpressionFace(true);
+                break;
+              case 'sidebar':
+                settingsController.setShowLive2D(true);
+                break;
+              case 'floating_native':
+                settingsController.setEnableFloatingWindow(true);
+                break;
+              case 'floating_mini':
+                settingsController.setShowLive2DMiniWindow(true);
+                break;
+              case 'hide':
+                // All disabled above
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'expression',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.face_retouching_natural,
+                    color: settings.showExpressionFace
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('表情系统（灵动岛）'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'sidebar',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.view_sidebar,
+                    color: settings.showLive2D && !settings.enableFloatingWindow
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Live2D 侧边栏'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'floating_native',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.open_in_new,
+                    color: settings.enableFloatingWindow
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Live2D 原生悬浮窗'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'floating_mini',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.open_in_new,
+                    color: settings.showLive2DMiniWindow
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Live2D 应用内小窗'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'hide',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.visibility_off,
+                    color: !settings.showLive2D &&
+                            !settings.enableFloatingWindow &&
+                            !settings.showExpressionFace &&
+                            !settings.showLive2DMiniWindow
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('全部隐藏'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return widgets;
+  }
+
+  void _showModeQuickSwitcher(
+    BuildContext context,
+    SettingsController settingsController,
+    AppSettings settings,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.live_tv_outlined, size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            '快速切换模式',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.settings_outlined, size: 20),
+                            tooltip: '打开设置',
+                            onPressed: () {
+                              Navigator.of(ctx).pop();
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.support_agent_outlined),
+                      title: const Text('助理模式'),
+                      subtitle: const Text('个人助理、研究、日常对话'),
+                      trailing: settings.primaryMode == PrimaryModeOption.assistant
+                          ? const Icon(Icons.check, color: Colors.green)
+                          : null,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        await settingsController.setPrimaryMode(PrimaryModeOption.assistant);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.remove_red_eye_outlined),
+                      title: const Text('你玩，AI看'),
+                      subtitle: const Text('只解说/互动，不下指令'),
+                      trailing: settings.primaryMode == PrimaryModeOption.live &&
+                              settings.liveMode == LiveModeOption.watch
+                          ? const Icon(Icons.check, color: Colors.redAccent)
+                          : null,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        await settingsController.setPrimaryMode(PrimaryModeOption.live);
+                        await settingsController.setLiveMode(LiveModeOption.watch);
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.videogame_asset_outlined),
+                      title: const Text('你玩 + AI玩'),
+                      subtitle: const Text('共玩，允许语音频道指令'),
+                      trailing: settings.primaryMode == PrimaryModeOption.live &&
+                              settings.liveMode == LiveModeOption.coPlay
+                          ? const Icon(Icons.check, color: Colors.redAccent)
+                          : null,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        await settingsController.setPrimaryMode(PrimaryModeOption.live);
+                        await settingsController.setLiveMode(LiveModeOption.coPlay);
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.autorenew),
+                      title: const Text('AI玩，你看'),
+                      subtitle: const Text('全自动，屏蔽外部打断'),
+                      trailing: settings.primaryMode == PrimaryModeOption.live &&
+                              settings.liveMode == LiveModeOption.autoPlay
+                          ? const Icon(Icons.check, color: Colors.redAccent)
+                          : null,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        await settingsController.setPrimaryMode(PrimaryModeOption.live);
+                        await settingsController.setLiveMode(LiveModeOption.autoPlay);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      title: const Text('直播记忆写入'),
+                      subtitle: const Text('关闭后直播模式不写入长期记忆'),
+                      value: settings.liveMemoryEnabled,
+                      onChanged: (v) => settingsController.setLiveMemoryEnabled(v),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2145,7 +2723,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           right: 0,
           child: Column(
             children: [
-              _buildHeader(context, settings, titleFontFamily),
+              _buildHeader(context, settings, settingsController, titleFontFamily),
               _buildDanmakuSummaryCard(context),
               Expanded(child: _buildMessageList(context, settings)),
               _buildInputArea(
@@ -2189,18 +2767,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
           ),
         ),
 
-        // 右上角显示模式下拉菜单
-        Positioned(
-          top: 12,
-          right: 12,
-          child: SafeArea(
-            child: _buildDisplayModeButton(
-              context,
-              settings,
-              settingsController,
-            ),
-          ),
-        ),
         if (settings.enableLive2D && settings.showLive2DMiniWindow)
           _buildLive2DMiniWindowOverlay(context, settings),
 
@@ -2230,70 +2796,94 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Widget _buildHeader(
     BuildContext context,
     AppSettings settings,
+    SettingsController settingsController,
     String? titleFontFamily,
   ) {
     final hasScenario = settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty;
 
-    return Container(
-      height: 80,
-      alignment: Alignment.center,
-      child: (!settings.showExpressionFace)
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12.0,
-                ),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 48), // Space for menu button
-                    Expanded(
-                      child: Column(
+    if (settings.showExpressionFace) return const SizedBox.shrink();
+
+    final actions = _buildHeaderActions(context, settings, settingsController);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const SizedBox(width: 48), // Space for menu button
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        settings.assistantName,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: titleFontFamily,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
+                          if (hasScenario)
+                            Container(
+                              width: 6,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: const BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
                           Text(
-                            settings.assistantName,
+                            hasScenario ? '场景模式激活' : 'Astra-Me',
                             style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 10,
+                              letterSpacing: 1.2,
+                              color: hasScenario ? Colors.green : Theme.of(context).colorScheme.outline,
                               fontFamily: titleFontFamily,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (hasScenario)
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  margin: const EdgeInsets.only(right: 6),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                              Text(
-                                hasScenario ? '场景模式激活' : 'Astra-Me',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  letterSpacing: 1.2,
-                                  color: hasScenario ? Colors.green : Theme.of(context).colorScheme.outline,
-                                  fontFamily: titleFontFamily,
-                                ),
-                              ),
-                            ],
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 48), // Space for symmetry or other buttons
-                  ],
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 48), // Space for symmetry or other buttons
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (actions.isNotEmpty)
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: actions,
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-            )
-          : null,
+          ],
+        ),
+      ),
     );
   }
 
@@ -2317,6 +2907,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
               text: msg['content'],
               isMine: isUser,
               role: msg['role'], // Pass role for plugin message support
+              source: msg['source']?.toString(),
               time: timeStr,
               reasoningContent: msg['reasoning_content'], // Pass reasoning if available
               toolCalls: msg['tool_calls'], // Pass tool calls if available

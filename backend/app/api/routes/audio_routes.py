@@ -10,6 +10,13 @@ from app.core.logger import logger
 router = APIRouter()
 audio_service = AudioService()
 
+# 后端 STT/TTS 接口仅保留占位：本脚本已不再使用（前端负责 STT/TTS）
+BACKEND_STT_TTS_DEPRECATED = True
+
+def _raise_backend_audio_deprecated(feature: str) -> None:
+    # 本脚本已不再使用
+    raise HTTPException(status_code=410, detail=f"后端 {feature} 已停用（本脚本已不再使用）")
+
 def _normalize_cosyvoice_voice(model: str, voice: Optional[str]) -> Optional[str]:
     if not model or "CosyVoice" not in model:
         return voice
@@ -347,6 +354,8 @@ async def loopback_transcribe(
     authorization: Optional[str] = Header(None, alias="Authorization"),
     base_url: Optional[str] = Header("https://api.siliconflow.cn/v1", alias="X-SiliconFlow-Base-Url"),
 ):
+    if BACKEND_STT_TTS_DEPRECATED:
+        _raise_backend_audio_deprecated("STT")
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
@@ -432,6 +441,8 @@ async def tts_play(
     authorization: Optional[str] = Header(None, alias="Authorization"),
     base_url: Optional[str] = Header("https://api.siliconflow.cn/v1", alias="X-SiliconFlow-Base-Url"),
 ):
+    if BACKEND_STT_TTS_DEPRECATED:
+        _raise_backend_audio_deprecated("TTS")
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
@@ -525,6 +536,8 @@ async def transcribe_audio(
     """
     Transcribe audio file to text (STT).
     """
+    if BACKEND_STT_TTS_DEPRECATED:
+        _raise_backend_audio_deprecated("STT")
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
@@ -566,6 +579,8 @@ async def generate_speech_stream(
     Generate speech from text (TTS) with streaming.
     Returns audio binary stream.
     """
+    if BACKEND_STT_TTS_DEPRECATED:
+        _raise_backend_audio_deprecated("TTS")
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")
@@ -613,6 +628,8 @@ async def generate_speech(
     Generate speech from text (TTS).
     Returns audio binary.
     """
+    if BACKEND_STT_TTS_DEPRECATED:
+        _raise_backend_audio_deprecated("TTS")
     final_api_key = api_key
     if not final_api_key and authorization and authorization.startswith("Bearer "):
         final_api_key = authorization.replace("Bearer ", "")

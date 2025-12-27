@@ -6,9 +6,10 @@ from app.tools.unified_office import UnifiedOfficeTool
 from .utils import normalize_output_format, parse_writer_output_files
 
 from app.services.rag_service import TempRAGSession
+from app.core.config import REPORTS_DIR
 
 class Writer:
-    def __init__(self, config: Dict[str, Any], output_dir: str = "app/static/reports", rag_session: Optional[TempRAGSession] = None):
+    def __init__(self, config: Dict[str, Any], output_dir: str = str(REPORTS_DIR), rag_session: Optional[TempRAGSession] = None):
         self.config = config
         self.output_dir = output_dir
         self.office_tool = UnifiedOfficeTool(output_dir=output_dir)

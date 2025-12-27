@@ -19,7 +19,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.14%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
+[![Version](https://img.shields.io/badge/Version-0.3.15%20Beta-blue)](https://github.com/BOHUYESHAN-APB/N-T-AI)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://flutter.dev)
 [![Sponsor](https://img.shields.io/badge/Sponsor-爱发电-pink)](https://afdian.com/a/N-T-AI)

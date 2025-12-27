@@ -1,24 +1,148 @@
 # 更新日志 (Changelog)
 
-## [0.4.0-beta] - 2025-12-25
+## [0.3.15-beta] - 2025-12-27
 
 ### 新增 (Added)
-- **Minecraft 智能体插件 (Minecraft-mindcraft)**:
-    - **深度集成**: 实现了 Minecraft 智能体与 N-T-AI 后端的深度打通，支持通过主脑 (MainBrain) 进行 RAG 检索和视觉理解。
-    - **微软认证支持**: 完善了 Microsoft Device Code Flow 登录流程，支持在控制台和管理界面直接显示验证码，解决了复杂的登录授权问题。
-    - **自动化配置**: 实现了从插件设置到智能体 Profile 的自动同步，支持自定义智能体名称、模型参数及联网模式切换。
-    - **Live2D 联动**: 实现了 Minecraft 聊天内容实时驱动前端 Live2D 模型的口型同步与语音播放 (TTS)。
+- **Minecraft 行为摘要播报**：Minecraft 插件消息仍显示在前端，但现在按批次汇总为“行动摘要”，仅摘要走主脑 TTS 与 Live2D 语音通路。
+- **Minecraft 指令扩展**：新增 `!giveAllToPlayer`（清空库存给玩家）与 `collectBlocks`/`collectBlock` 的 `search_range` 参数，便于执行大范围稀有资源任务。
+- **消息来源持久化**：聊天记录新增 `source` 字段，自动保存/恢复 `mic` 与 `voice_channel` 来源标签。
+
+### 优化 (Changed)
+- **语音频道监听开关**：`voice_channel_transcript` 仅在开启“自动语音频道监听”时注入主脑，避免误触发。
+- **语音频道展示一致性**：语音频道消息统一为右侧紫色气泡，并在重启后保持来源标识一致。
+- **前端性能与内存**：移除构建期同步日志写盘，自动滚动节流，聊天列表保留最近消息上限，Minecraft 插件状态轮询去重并裁剪日志长度。
 
 ### 修复 (Fixed)
-- **端口与连接 (Connection)**:
-    - 修复了 MindServer 端口硬编码问题，支持通过 `/config` 接口动态同步端口，解决了“MindServer Offline”显示异常。
-    - 修复了子进程退出时的端口占用和僵尸进程清理逻辑。
-- **登录与异常处理**:
-    - 针对微软登录中的 `PPFT` 错误提供了明确的引导修复建议，支持自动回退到交互式登录模式。
-    - 优化了 Agent 初始化顺序，确保优先连接 Minecraft 服务器再进行辅助功能的初始化。
-- **模型兼容性**:
-    - 修复了 Deepseek 模型的 API 调用逻辑及 API Key 传递问题。
-    - 优化了 Ollama 的连接回退逻辑，减少了服务未启动时的日志干扰。
+- **Minecraft 指令规划**：为“交出所有物品”与“挖稀有资源”场景补足提示与参数，减少只执行单次动作的问题。
+- **MindCraft 进程释放**：关闭插件时加强进程树退出与日志线程回收，减少残留与重复启动卡顿。
+
+## [0.3.14-beta] - 2025-12-26
+
+### 新增 (Added)
+- **TTS 来源标记贯通**：
+  - 前端 `BrainService` 的 `speak/speakChunks` 增加 `source` 参数，播放与广播统一携带来源元数据。
+  - 后端 `/api/live2d/broadcast/audio` 支持 `source` 字段，WebSocket 广播的 `data.source` 可用于渲染端或日志分流。
+- **语音频道展示类型**：
+  - 新增中心气泡类型 `chat_voice_channel`，以靛蓝系风格在屏幕正中显示，并标注“来自于语音频道”。
+- **来源标识更清晰**：
+  - Minecraft 插件输出：蓝色主题中心气泡，标签“来自于MC插件”。
+  - Bilibili 弹幕总结：绿色主题中心气泡，标签“弹幕总结 · 来源: Bilibili直播插件”。
+
+### 优化 (Changed)
+- **系统播报策略**：
+  - Minecraft 插件输出不再触发系统 TTS，避免将游戏内指令朗读；主脑“行动宣言”与普通助手回复继续由系统 TTS 播报。
+- **消息映射与显示**：
+  - 将后端 `voice_channel_transcript` WebSocket 消息映射为前端 `chat_voice_channel`，统一以中心气泡展示。
+- **日志净化**：
+  - 对 `BackendService` 的 `server_info` 相关日志进行时间阈值节流与去重，降低重复输出带来的噪声。
+- **架构说明强化**：
+  - 明确保持既有职责边界：LLM/vLLM 调用在后端执行，前端仅透传服务商配置；语音频道监听与转写继续由后端负责。
+
+### 修复 (Fixed)
+- **播报与显示一致性**：
+  - 修复 MC 插件输出触发系统 TTS 的不当行为，改为仅前端中心气泡显示。
+
+### 相关文件 (Files)
+- `flutter_application/lib/core/services/brain_service.dart`
+- `flutter_application/lib/screens/firefly_screen.dart`
+- `flutter_application/lib/widgets/message_bubble.dart`
+- `backend/app/api/routes/live2d_routes.py`
+- `flutter_application/lib/core/services/backend_service.dart`
+
+## [0.3.13-beta] - 2025-12-25
+
+### 新增 (Added)
+- **环境感知 (Environment Awareness) / 屏幕截图**:
+    - **定时截图与分析**: 支持以 5s - 1800s 的自定义间隔自动截取屏幕并交由 AI 分析，最小间隔支持 5s（高负载提示）。
+    - **消息注入**: AI 视觉分析结果自动注入聊天历史并同步至 `Brain` 上下文，赋予 AI 实时观察桌面的能力。
+    - **UI 配置**: 在设置界面的“视觉中枢”模块新增完整配置项，支持频率滑动条及自定义提示词。
+- **深度研究 (Deep Research) 视觉风格**:
+    - **背景嵌入式问候**: 模拟深度研究界面的视觉效果，将聊天问候语直接嵌入聊天背景，提升界面美感与现代感。
+    - **极简 Logo**: 采用了全新的几何美学 Logo，规避了生物恐惧感，并与整体现代 UI 风格保持高度统一。
+- **UI/UX 交互升级**:
+    - **情景描述编辑器**: 将情景描述（Scenario）功能整合进前端药丸型按钮，操作更直观。
+    - **界面去冗余**: 移除了主界面冗余的“Minecraft 第一视角”按钮，进一步简化交互层级。
+- **Minecraft-mindcraft 插件深度集成**:
+    - **核心升级**: 采用 `mindcraft-develop` 最新核心，支持更复杂的生存逻辑与自动化。
+    - **AI 名称配置**: 前端新增“AI 代理名称”配置项，支持动态覆盖 Minecraft 角色名。
+    - **微软登录增强**: 实现了微软 OAuth 验证码的实时捕获与前端 UI 同步显示。
+
+### 修复 (Fixed)
+- **进程残留彻底清理**: 引入 `taskkill /F /T` 强制杀死 Windows 下的 Node.js 进程树，彻底解决插件退出残留。
+- **Bilibili 插件 404 故障**: 优化后端插件注册机制，修复动态开启时的配置接口 404 错误。
+- **Windows 依赖兼容性**: 移除了 `canvas` 等强依赖，采用优雅降级，并修复了 `eslint` 在生产环境下的模块丢失问题。
+- **代码诊断修复**: 修复了 `firefly_screen.dart` 中 `addMessage` 调用参数不匹配及依赖丢失等一系列编译诊断问题。
+
+### 优化 (Changed)
+- **Logo 资源体系**: 统一应用图标与背景 Logo，确保全平台视觉一致性。
+- **文档同步**: 同步中英文 `README.md`，清理版本信息与功能描述。
+- **UI 细节优化**: 移除 Bilibili 配置页冗余端口显示，日志净化等。
+
+## [0.3.12-beta] - 2025-12-24
+
+### 新增 (Added)
+- **VTube Studio (VTS) 深度集成**:
+    - **参数同步**: 支持将 N-T-AI 的实时表情数据（面部红晕、头部旋转、表情触发）同步至 VTube Studio。
+    - **非阻塞广播**: 采用异步任务机制，确保 Live2D 前端显示与 VTS 同步更新且互不干扰。
+    - **预设表情库**: 新增了一套中英文双语触发的预设表情映射逻辑。
+- **RAG (检索增强生成) 系统增强**:
+    - **后端接口**: 新增 `/api/v1/memory/retrieve` 统一检索接口。
+    - **插件联动**: Minecraft 插件现已接入 RAG 系统，能够根据游戏上下文自动检索长期记忆，提升对话的连续性与真实感。
+- **项目参考与展示修正**:
+    - **Neuro**: 正式列为 VTS 设计模式与集成策略的参考项目。
+    - **AIRI**: 移至“同类优秀项目”展示区，明确其作为社区优秀作品的地位，并指出其与本项目共用的 Mineflayer 无头客户端技术路线。
+    - **Plan4MC**: 正式列入插件信誉/参考列表，并确立为下一代视觉闭环 Minecraft 插件的核心研究对象。
+- **文档体系完善**:
+    - 在中英文 README 中同步更新了“开发路线图”，新增了基于 Plan4MC 的视觉闭环智能体开发计划。
+    - 细化了“同类优秀项目”章节，加强了与社区项目的互动与展示。
+
+### 优化 (Changed)
+- **Minecraft 插件配置同步**: 前端配置的 API 密钥与 URL 现可自动同步至 Minecraft 插件环境，无需手动二次配置。
+- **嵌入模型 (Embedding) 稳定性**:
+    - 将嵌入请求超时时间提升至 30s。
+    - 增加了自动回退机制，当主模型失败时自动尝试使用 `BAAI/bge-m3` 等备选模型。
+- **VTS 连接鲁棒性**: 增加了 VTS 服务的自动重连逻辑（30s 周期），提升了长效运行的稳定性。
+
+### 修复 (Fixed)
+- **Minecraft 登录故障**: 修复了由于空密码传递导致的 Microsoft 账户登录 `XboxReplayError` 错误。
+- **配置覆盖问题**: 修复了 `settings_json` 映射逻辑，确保不会意外覆盖用户在 Minecraft 插件中的默认端口配置。
+
+## [0.3.11-beta] - 2025-12-23
+
+### 新增 (Added)
+- **Minecraft 插件重大更新**:
+    - **LLM 翻译系统**: 彻底移除 Google Translate，改用主模型进行游戏内聊天翻译，解决 SSL 校验及稳定性问题。
+    - **前端深度集成**: Minecraft 消息现在带 `【Minecraft】` 前缀显示在 Flutter 界面，并能正确触发 TTS 语音。
+    - **OBS 专场支持**: 新增推流专用页面 (`/plugins/minecraft/stream`)，包含实时 HUD（血量、饥饿、坐标）。
+    - **高清采样**: 支持环境变量配置 720P@24FPS 画面采样。
+- **外部研究环境**: 预置 `Neuro` 与 `AIRI` 参考项目于 `other-Repository` 文件夹。
+
+### 优化 (Changed)
+- **自动化同步机制**: Minecraft 插件保存设置后支持自动防抖重启，无需手动干预。
+- **文档体系**: 
+    - 统一了中英文 README 特性描述。
+    - 移除了“直连模式”相关描述，明确后端代理架构。
+    - 修正了 `NEKO` 与 `live2d-py` 的致谢详情。
+
+### 修复 (Fixed)
+- **代码诊断**: 清理了 `firefly_screen.dart` 中所有的 Linter 错误及潜在逻辑诊断警告。
+
+## [0.3.10-beta] - 2025-12-22
+
+### 优化 (Changed)
+- **设置页整理（通用 / General）**:
+    - 按类别分组并改为可折叠展示，减少页面拥挤并提升观感。
+    - 展开后才显示分组边框与内容区域，收起时仅显示标题行。
+    - 位置: `flutter_application/lib/screens/settings/tabs/general_tab.dart`
+- **后端写库频率优化**:
+    - `Person.know_times` 改为内存缓冲 + 批量写入（默认阈值 `KNOW_TIMES_BATCH_SIZE=10`）。
+    - 位置: `backend/app/services/person_service.py`、`backend/app/core/config.py`
+- **SQL 日志开关**:
+    - 数据库 `echo` 改为读取 `SQL_ECHO` 配置（默认 false）。
+    - 位置: `backend/app/models/database.py`、`backend/app/core/config.py`
+
+<!-- LATEST_LOG_SPLIT: 最新日志与历史日志分割线，请勿删除 -->
+---
 
 ## [0.3.9-beta] - 2025-12-20
 

@@ -206,6 +206,7 @@ class LLMService {
     String? systemPromptOverride,
     String? assistantNameOverride,
     String? sessionId,
+    double? learningProbabilityOverride,
   }) async {
     final provider = providerOverride ?? await _getActiveProvider();
     if (provider == null) throw Exception("No active AI provider configured");
@@ -299,7 +300,10 @@ class LLMService {
       headers['X-Chat-Mode'] = chatMode;
       headers['X-Deep-Research'] = enableDeepResearch.toString();
       headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
-      final learningProbability = prefs.getDouble('settings.user.learningProbability') ?? 1.0;
+      final learningProbability =
+          learningProbabilityOverride ??
+          prefs.getDouble('settings.user.learningProbability') ??
+          1.0;
       headers['X-Learning-Probability'] = learningProbability.toString();
       if (systemPrompt.trim().isNotEmpty) {
         headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());

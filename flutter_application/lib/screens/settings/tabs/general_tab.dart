@@ -1204,6 +1204,70 @@ class _GeneralTabState extends State<GeneralTab> {
         ),
       ),
       ListTile(
+        title: const Text('主模式 (Primary Mode)'),
+        subtitle: Text(
+          s.primaryMode == PrimaryModeOption.assistant
+              ? '助理优先 - 任务/对话为主'
+              : '直播模式 - 节目效果优先',
+        ),
+        trailing: DropdownButton<PrimaryModeOption>(
+          value: s.primaryMode,
+          underline: const SizedBox(),
+          onChanged: (v) {
+            if (v != null) controller.setPrimaryMode(v);
+          },
+          items: const [
+            DropdownMenuItem(
+              value: PrimaryModeOption.assistant,
+              child: Text('助理'),
+            ),
+            DropdownMenuItem(
+              value: PrimaryModeOption.live,
+              child: Text('直播'),
+            ),
+          ],
+        ),
+      ),
+      if (s.primaryMode == PrimaryModeOption.live) ...[
+        ListTile(
+          title: const Text('直播子模式'),
+          subtitle: Text(
+            s.liveMode == LiveModeOption.watch
+                ? '你玩、AI看（只解说）'
+                : s.liveMode == LiveModeOption.coPlay
+                    ? '你玩+AI玩（互动加强）'
+                    : 'AI玩、你看（自主任务）',
+          ),
+          trailing: DropdownButton<LiveModeOption>(
+            value: s.liveMode,
+            underline: const SizedBox(),
+            onChanged: (v) {
+              if (v != null) controller.setLiveMode(v);
+            },
+            items: const [
+              DropdownMenuItem(
+                value: LiveModeOption.watch,
+                child: Text('你玩、AI看'),
+              ),
+              DropdownMenuItem(
+                value: LiveModeOption.coPlay,
+                child: Text('你玩+AI玩'),
+              ),
+              DropdownMenuItem(
+                value: LiveModeOption.autoPlay,
+                child: Text('AI玩、你看'),
+              ),
+            ],
+          ),
+        ),
+        SwitchListTile(
+          title: const Text('直播模式写入记忆'),
+          subtitle: const Text('允许直播内容进入记忆系统（可关闭）'),
+          value: s.liveMemoryEnabled,
+          onChanged: (v) => controller.setLiveMemoryEnabled(v),
+        ),
+      ],
+      ListTile(
         title: const Text('聊天模式 (Chat Mode)'),
         subtitle: Text(
           s.chatMode == ChatModeOption.persona

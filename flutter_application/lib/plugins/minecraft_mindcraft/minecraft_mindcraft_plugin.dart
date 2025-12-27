@@ -39,6 +39,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   String? _msAuthCode;
   String? _msAuthUrl;
   Timer? _statusTimer;
+  bool _statusInFlight = false;
+  static const int _maxLogLines = 200;
+  int _lastLogCount = 0;
+  String? _lastLogTail;
+  String? _lastMsAuthCode;
+  String? _lastMsAuthUrl;
 
   // 添加对 notifyListeners 的包装以兼容 BasePlugin
   void _notify() {
@@ -58,7 +64,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   String get name => 'Minecraft MindCraft';
 
   @override
-  String get description => '基于 MindCraft 的高级 Minecraft 智能代理插件，支持最新 1.21.6 版本。';
+  String get description => '基于 MindCraft 的高级 Minecraft 智能代理插件（版本随 MindCraft 原始项目更新，适配 1.21.6）。';
 
   @override
   IconData get icon => Icons.videogame_asset;
@@ -215,6 +221,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   }
 
   Future<void> _fetchStatus() async {
+    if (_statusInFlight) return;
+    _statusInFlight = true;
     try {
       final prefs = await SharedPreferences.getInstance();
       // 使用 SharedPreferences 中存储的后端地址
@@ -227,13 +235,33 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        _logs = List<String>.from(data['logs'] ?? []);
-        _msAuthCode = data['ms_auth_code'];
-        _msAuthUrl = data['ms_auth_url'];
+        final rawLogs = List<String>.from(data['logs'] ?? []);
+        final trimmedLogs = rawLogs.length > _maxLogLines
+            ? rawLogs.sublist(rawLogs.length - _maxLogLines)
+            : rawLogs;
+        final nextMsAuthCode = data['ms_auth_code'];
+        final nextMsAuthUrl = data['ms_auth_url'];
+        final tail = trimmedLogs.isNotEmpty ? trimmedLogs.last : null;
+        final changed = trimmedLogs.length != _lastLogCount ||
+            tail != _lastLogTail ||
+            nextMsAuthCode != _lastMsAuthCode ||
+            nextMsAuthUrl != _lastMsAuthUrl;
+
+        if (!changed) return;
+
+        _logs = trimmedLogs;
+        _msAuthCode = nextMsAuthCode;
+        _msAuthUrl = nextMsAuthUrl;
+        _lastLogCount = trimmedLogs.length;
+        _lastLogTail = tail;
+        _lastMsAuthCode = nextMsAuthCode;
+        _lastMsAuthUrl = nextMsAuthUrl;
         _notify();
       }
     } catch (e) {
       print('Error fetching Minecraft status: $e');
+    } finally {
+      _statusInFlight = false;
     }
   }
 
@@ -250,8 +278,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildSectionTitle('服务器连接'),
-              const Text('支持版本: Java Edition (最高支持 v1.21.6, 推荐 v1.21.6)', 
-                style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              const Text('支持版本: Java Edition（版本随 MindCraft 原始项目更新，适配 v1.21.6）', 
+                  style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               TextField(
                 controller: hostController,

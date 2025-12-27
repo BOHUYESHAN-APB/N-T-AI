@@ -1164,13 +1164,14 @@ Based on these comments, do you want to proactively say something to the audienc
     bool enableNoteAccess = false,
     String userNickname = '',
     double learningProbability = 1.0,
+    double? learningProbabilityOverride,
     bool enableExpressionAgent = true,
     String? systemPromptOverride,
     Map<String, dynamic>? sidecarCommands, // concurrent side agents payload
     AiProviderConfig? providerOverride,
     String? sessionId,
     bool needsRefinement = false,
-    String source = 'direct', // 'direct', 'voice', 'minecraft', 'danmaku'
+    String source = 'direct', // 'direct', 'mic', 'voice_channel', 'voice', 'minecraft', 'danmaku'
   }) async {
     final prefs = await SharedPreferences.getInstance();
     
@@ -1185,7 +1186,11 @@ Based on these comments, do you want to proactively say something to the audienc
 
     // 1. 实现信源元数据标记 (Source Tagging)
     String taggedUserMessage = processedUserMessage;
-    if (source == 'voice') {
+    if (source == 'mic') {
+      taggedUserMessage = "[Microphone] $processedUserMessage";
+    } else if (source == 'voice_channel') {
+      taggedUserMessage = "[Voice Channel/Unknown Speaker] $processedUserMessage";
+    } else if (source == 'voice') {
       taggedUserMessage = "[Voice Channel] $processedUserMessage";
     } else if (source == 'minecraft') {
       taggedUserMessage = "[Minecraft] $processedUserMessage";
@@ -1281,6 +1286,8 @@ Based on these comments, do you want to proactively say something to the audienc
         temperature: dynamicTemperature,
         providerOverride: providerConfig,
         sessionId: sessionId,
+        learningProbabilityOverride:
+            learningProbabilityOverride ?? learningProbability,
       );
       String response = aiResponse.content;
       if (!allowEmojis) {

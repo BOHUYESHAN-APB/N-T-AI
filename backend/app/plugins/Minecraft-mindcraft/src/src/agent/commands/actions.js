@@ -1,4 +1,5 @@
 import * as skills from '../library/skills.js';
+import * as world from '../library/world.js';
 import settings from '../settings.js';
 import convoManager from '../conversation.js';
 
@@ -193,6 +194,25 @@ export const actionsList = [
         })
     },
     {
+        name: '!giveAllToPlayer',
+        description: 'Give all items in your inventory to the given player.',
+        params: {
+            'player_name': { type: 'string', description: 'The name of the player to receive all items.' }
+        },
+        perform: runAsAction(async (agent, player_name) => {
+            const inventory = world.getInventoryCounts(agent.bot);
+            const entries = Object.entries(inventory).filter(([, count]) => count > 0);
+            if (entries.length === 0) {
+                skills.log(agent.bot, 'Inventory empty, nothing to give.');
+                return 'Inventory empty.';
+            }
+            for (const [itemName, count] of entries) {
+                await skills.giveToPlayer(agent.bot, itemName, player_name, count);
+            }
+            return `Gave ${entries.length} item types to ${player_name}.`;
+        })
+    },
+    {
         name: '!consume',
         description: 'Eat/drink the given item.',
         params: {'item_name': { type: 'ItemName', description: 'The name of the item to consume.' }},
@@ -257,10 +277,11 @@ export const actionsList = [
         description: 'Collect the nearest blocks of a given type.',
         params: {
             'type': { type: 'BlockName', description: 'The block type to collect.' },
-            'num': { type: 'int', description: 'The number of blocks to collect.', domain: [1, Number.MAX_SAFE_INTEGER] }
+            'num': { type: 'int', description: 'The number of blocks to collect.', domain: [1, Number.MAX_SAFE_INTEGER] },
+            'search_range': { type: 'int', description: 'Search radius in blocks (use 64+ for rare ores).', domain: [8, 256] }
         },
-        perform: runAsAction(async (agent, type, num) => {
-            await skills.collectBlock(agent.bot, type, num);
+        perform: runAsAction(async (agent, type, num, search_range) => {
+            await skills.collectBlock(agent.bot, type, num, null, search_range);
         }, false, 10) // 10 minute timeout
     },
     {

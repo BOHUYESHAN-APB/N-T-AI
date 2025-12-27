@@ -30,10 +30,17 @@ flutter_application/server/
 **/*.qcow2
 
 /backend/app/static/reports/
+/backend/app/static/live2d/temp/
+/app/static/live2d/temp/
 /backend/third_party/
 # Minecraft Plugin Artifacts
 **/plugins/minecraft/src/**/node_modules/
 **/plugins/minecraft/src/**/*.log
 **/plugins/minecraft/src/**/settings.json
 **/plugins/minecraft/src/**/.env
+**/plugins/Minecraft-*/src/**/node_modules/
+**/plugins/Minecraft-*/src/**/*.log
+**/plugins/Minecraft-*/src/**/settings.json
+**/plugins/Minecraft-*/src/**/.env
 /astra_me_v3.db
+/backend/astra_me.db

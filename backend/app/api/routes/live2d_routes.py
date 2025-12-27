@@ -16,6 +16,9 @@ import wave
 
 router = APIRouter(prefix="/api/live2d", tags=["live2d"])
 
+# 后端语音识别/合成接口仅保留占位：本脚本已不再使用（前端负责 STT/TTS）
+BACKEND_AUDIO_DEPRECATED = True
+
 from app.services.priority_manager import priority_manager, ChatPriority
 from app.services.live2d_service import manager
 from app.services.system_state import system_state
@@ -69,7 +72,7 @@ class ScheduleChatRequest(BaseModel):
     delay_ms: int = 0
     prompt: str
     user_id: str = "live2d_websocket_user"
-    enable_backend_tts: bool = True
+    enable_backend_tts: bool = False
     enable_thinking: bool = False
     enable_search: bool = False
     tts_mode: str = "sentence"
@@ -225,6 +228,9 @@ async def live2d_websocket(websocket: WebSocket):
         return bio.getvalue()
 
     async def _process_utterance(pcm_bytes: bytes):
+        if BACKEND_AUDIO_DEPRECATED:
+            # 本脚本已不再使用
+            return
         if not pcm_bytes:
             return
         stt_api_key = (getattr(settings, "STT_API_KEY", "") or "").strip()
@@ -268,7 +274,7 @@ async def live2d_websocket(websocket: WebSocket):
                 user_id="live2d_websocket_user",
                 enable_thinking=False,
                 enable_search=False,
-                enable_backend_tts=True,
+                enable_backend_tts=False,
             )
 
     def _reset_audio_state():
@@ -330,7 +336,7 @@ async def live2d_websocket(websocket: WebSocket):
                             user_id="live2d_websocket_user",
                             enable_thinking=enable_thinking,
                             enable_search=enable_search,
-                            enable_backend_tts=True,
+                            enable_backend_tts=False,
                         )
                     continue
 
@@ -347,7 +353,7 @@ async def live2d_websocket(websocket: WebSocket):
                         user_id="live2d_websocket_user",
                         enable_thinking=False,
                         enable_search=False,
-                        enable_backend_tts=True,
+                        enable_backend_tts=False,
                     )
                     last_user_activity_ts = time.time()
                     continue
@@ -391,7 +397,7 @@ async def live2d_websocket(websocket: WebSocket):
                                 user_id="live2d_websocket_user",
                                 enable_thinking=False,
                                 enable_search=False,
-                                enable_backend_tts=True,
+                                enable_backend_tts=False,
                             )
                     continue
 
@@ -400,6 +406,9 @@ async def live2d_websocket(websocket: WebSocket):
 
             if "bytes" in packet and packet["bytes"] is not None:
                 if session_mode != "audio":
+                    continue
+                if BACKEND_AUDIO_DEPRECATED:
+                    # 本脚本已不再使用
                     continue
                 chunk = packet["bytes"]
                 if not isinstance(chunk, (bytes, bytearray)) or len(chunk) < 2:
@@ -674,7 +683,7 @@ async def voice_channel_transcript(request: VoiceChannelTranscriptRequest):
             user_id=(request.user_id or "live2d_websocket_user"),
             enable_thinking=False,
             enable_search=False,
-            enable_backend_tts=True,
+            enable_backend_tts=False,
             tts_mode="sentence",
         )
 

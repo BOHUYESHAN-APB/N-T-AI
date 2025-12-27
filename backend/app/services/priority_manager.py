@@ -154,7 +154,7 @@ class PriorityManager:
 3. 结尾顺便抛出一个相关的小问题，引导用户和你互动。
 4. 回复要短小精悍，不要超过3句话。
 """
-                await self.add_task(ChatPriority.PROACTIVE, prompt, "heartbeat_user", enable_backend_tts=True)
+                await self.add_task(ChatPriority.PROACTIVE, prompt, "heartbeat_user", enable_backend_tts=False)
                 return
             except Exception as e:
                 logger.warning(f"Proactive search failed: {e}")
@@ -167,6 +167,6 @@ class PriorityManager:
             "你观察到用户已经有一阵子没说话了，主动问候一下，或者说句俏皮话。"
         ]
         prompt = random.choice(default_prompts)
-        await self.add_task(ChatPriority.PROACTIVE, prompt, "heartbeat_user", enable_backend_tts=True)
+        await self.add_task(ChatPriority.PROACTIVE, prompt, "heartbeat_user", enable_backend_tts=False)
 
 priority_manager = PriorityManager()

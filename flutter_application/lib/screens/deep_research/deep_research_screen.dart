@@ -1064,12 +1064,13 @@ class _DeepResearchScreenState extends State<DeepResearchScreen> {
     
     // Simplest way: The backend serves static files at /static.
     // If path contains "static/reports", we extract relative path.
-    String relativePath = path;
-    if (path.contains("static/reports")) {
-      relativePath = path.split("static/reports/").last;
+    final normalizedPath = path.replaceAll('\\', '/');
+    String relativePath = normalizedPath;
+    if (normalizedPath.contains("static/reports/")) {
+      relativePath = normalizedPath.split("static/reports/").last;
     } else {
       // Fallback: just filename (might break if in subdir)
-      relativePath = path.split(r'\').last.split('/').last;
+      relativePath = normalizedPath.split('/').last;
     }
     
     // URL encode the path segments

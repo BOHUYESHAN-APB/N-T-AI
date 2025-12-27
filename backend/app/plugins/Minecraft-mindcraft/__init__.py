@@ -5,11 +5,10 @@ import re
 import json
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from ..base import BasePlugin
 from app.services.live2d_service import manager as live2d_manager
 from app.services.audio_service import AudioService
-from app.services.system_state import system_state
 from app.core.config import settings as app_settings
 
 logger = logging.getLogger(__name__)
@@ -19,6 +18,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
         super().__init__()
         self._process = None
         self._thread = None
+        self._stderr_thread = None
         self.logs = []
         self.ms_auth_code = None
         self.ms_auth_url = None
@@ -41,7 +41,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
 
     @property
     def description(self) -> str:
-        return "基于 MindCraft 的高级 Minecraft 智能代理插件"
+        return "基于 MindCraft 的高级 Minecraft 智能代理插件（版本随 MindCraft 原始项目更新，适配 1.21.6）"
 
     async def setup(self):
         """初始化插件配置，从本地 settings.json 加载"""
@@ -229,16 +229,22 @@ class MinecraftMindcraftPlugin(BasePlugin):
                 self.logs.append("ERROR: Node.js is not installed or not in PATH.")
                 return False
 
+            creation_flags = 0
+            if os.name == 'nt' and hasattr(subprocess, 'CREATE_NEW_PROCESS_GROUP'):
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
             self._process = subprocess.Popen(
                 cmd,
                 cwd=self.src_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
                 text=True,
                 bufsize=1,
                 env=env,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                creationflags=creation_flags
             )
 
             # 启动日志读取线程
@@ -280,9 +286,18 @@ class MinecraftMindcraftPlugin(BasePlugin):
         if self._process:
             pid = self._process.pid
             try:
+                try:
+                    if self._process.stdin:
+                        self._process.stdin.close()
+                except Exception:
+                    pass
                 if os.name == 'nt':
                     # Windows 下强制杀死进程树
                     subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+                    try:
+                        self._process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
                 else:
                     self._process.terminate()
                     try:
@@ -291,10 +306,24 @@ class MinecraftMindcraftPlugin(BasePlugin):
                         self._process.kill()
             except Exception as e:
                 logger.error(f"停止 Minecraft-mindcraft 进程 {pid} 失败: {e}")
-            
+            finally:
+                try:
+                    if self._process.stdout:
+                        self._process.stdout.close()
+                except Exception:
+                    pass
+                try:
+                    if self._process.stderr:
+                        self._process.stderr.close()
+                except Exception:
+                    pass
             self._process = None
         
         # 停止日志线程
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2)
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=2)
         self._thread = None
         self._stderr_thread = None
         
@@ -382,14 +411,14 @@ class MinecraftMindcraftPlugin(BasePlugin):
         """将 Minecraft 消息转发到主界面并触发前端 TTS"""
         enable_tts = False
         
-        # 构造带前缀的消息
-        display_message = f"【Minecraft】{message}"
+        # 发送原始消息，前端负责统一加前缀
+        display_message = message
         
         # 广播到 Live2D/WebSocket 界面
         payload = {
             "type": "chat_message",
             "text": display_message,
-            "sender": "chat_normal",
+            "sender": "minecraft",
             "senderName": agent_name
         }
         

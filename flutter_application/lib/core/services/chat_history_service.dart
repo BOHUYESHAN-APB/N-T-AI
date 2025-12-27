@@ -36,6 +36,7 @@ class ChatMessage {
   final String sessionId;
   final String role;
   final String content;
+  final String? source;
   final DateTime createdAt;
 
   ChatMessage({
@@ -43,6 +44,7 @@ class ChatMessage {
     required this.sessionId,
     required this.role,
     required this.content,
+    this.source,
     required this.createdAt,
   });
 
@@ -51,6 +53,7 @@ class ChatMessage {
     'session_id': sessionId,
     'role': role,
     'content': content,
+    'source': source,
     'created_at': createdAt.millisecondsSinceEpoch,
   };
 
@@ -59,6 +62,7 @@ class ChatMessage {
     sessionId: map['session_id'],
     role: map['role'],
     content: map['content'],
+    source: map['source'],
     createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at']),
   );
 }
@@ -83,7 +87,7 @@ class ChatHistoryService {
 
     return await openDatabase(
       path, 
-      version: 2, 
+      version: 3, 
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -92,6 +96,9 @@ class ChatHistoryService {
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE sessions ADD COLUMN type TEXT DEFAULT "chat"');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE messages ADD COLUMN source TEXT');
     }
   }
 
@@ -110,6 +117,7 @@ class ChatHistoryService {
         session_id TEXT NOT NULL,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
+        source TEXT,
         created_at INTEGER NOT NULL,
         FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
       )
@@ -161,13 +169,19 @@ class ChatHistoryService {
     _updateController.add(null);
   }
 
-  Future<void> addMessage(String sessionId, String role, String content) async {
+  Future<void> addMessage(
+    String sessionId,
+    String role,
+    String content, {
+    String? source,
+  }) async {
     final db = await database;
     final msg = ChatMessage(
       id: _uuid.v4(),
       sessionId: sessionId,
       role: role,
       content: content,
+      source: source,
       createdAt: DateTime.now(),
     );
     await db.insert('messages', msg.toMap());

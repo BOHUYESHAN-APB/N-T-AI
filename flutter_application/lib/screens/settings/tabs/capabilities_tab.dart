@@ -279,29 +279,14 @@ class CapabilitiesTab extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text('截取间隔'),
-                            Row(
-                              children: [
-                                if (settings.screenCaptureInterval < 30)
-                                  Text(
-                                    '不推荐 (极高负载) ',
-                                    style: TextStyle(
-                                      color: Theme.of(context).colorScheme.error,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                Text('${settings.screenCaptureInterval} 秒'),
-                              ],
+                            Text(
+                              '随机 10–50 秒（偏左正态）',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.outline,
+                                fontSize: 12,
+                              ),
                             ),
                           ],
-                        ),
-                        Slider(
-                          value: settings.screenCaptureInterval.toDouble(),
-                          min: 5,
-                          max: 1800,
-                          divisions: 359, // (1800 - 5) / 5 = 359 steps of 5s
-                          onChanged: (v) =>
-                              controller.setScreenCaptureInterval(v.toInt()),
                         ),
                       ],
                     ),

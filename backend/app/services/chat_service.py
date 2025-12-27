@@ -34,7 +34,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-from app.core.config import settings
+from app.core.config import settings, REPORTS_DIR
 from app.tools.academic_search import academic_search
 import httpx
 import random
@@ -158,7 +158,7 @@ class ChatService:
         if not safe_name:
             safe_name = f"file_{int(datetime.now().timestamp())}"
 
-        reports_dir = Path("app/static/reports")
+        reports_dir = REPORTS_DIR
         reports_dir.mkdir(parents=True, exist_ok=True)
         target_path = reports_dir / safe_name
 
@@ -377,6 +377,9 @@ class ChatService:
 
     async def _generate_and_broadcast_audio(self, text: str, api_key: str = None, base_url: str = None, voice: str = None, tts_mode: str = "sentence"):
         if not text:
+            return
+        # 后端 TTS 接口保留占位：本脚本已不再使用（前端负责 TTS）
+        if not bool(getattr(settings, "ALLOW_BACKEND_TTS", False)):
             return
 
         clean_text = self._sanitize_text_for_tts(text)

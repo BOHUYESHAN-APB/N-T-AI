@@ -9,6 +9,7 @@ import uuid
 from app.agents.deep_research import DeepResearchAgent
 from app.services.file_service import file_ingestion_service
 from app.services.vision_service import vision_service
+from app.core.config import REPORTS_DIR
 
 router = APIRouter()
 
@@ -44,10 +45,10 @@ async def delete_research_task(session_id: str):
         
     # 2. Delete generated files directory
     safe_session_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
-    report_dir = f"app/static/reports/{safe_session_id}"
+    report_dir = REPORTS_DIR / safe_session_id
     
     deleted_files = False
-    if os.path.exists(report_dir):
+    if report_dir.exists():
         try:
             shutil.rmtree(report_dir)
             deleted_files = True
@@ -98,19 +99,19 @@ async def open_task_folder(session_id: str):
     import subprocess
     
     safe_session_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
-    report_dir = os.path.abspath(f"app/static/reports/{safe_session_id}")
-    
-    if not os.path.exists(report_dir):
+    report_dir = REPORTS_DIR / safe_session_id
+
+    if not report_dir.exists():
         # Fallback to base dir if specific dir doesn't exist yet
-        report_dir = os.path.abspath("app/static/reports")
+        report_dir = REPORTS_DIR
         
     try:
         if platform.system() == "Windows":
-            os.startfile(report_dir)
+            os.startfile(str(report_dir))
         elif platform.system() == "Darwin":  # macOS
-            subprocess.Popen(["open", report_dir])
+            subprocess.Popen(["open", str(report_dir)])
         else:  # Linux
-            subprocess.Popen(["xdg-open", report_dir])
+            subprocess.Popen(["xdg-open", str(report_dir)])
         return {"status": "success", "message": "Folder opened"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to open folder: {str(e)}")

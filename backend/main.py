@@ -312,8 +312,8 @@ async def get_plugin_status(plugin_id: str):
     if (plugin_id == "minecraft" or plugin_id == "Minecraft-mindcraft") and hasattr(plugin, "logs"):
         status.update({
             "logs": plugin.logs,
-            "ms_auth_code": plugin.ms_auth_code,
-            "ms_auth_url": plugin.ms_auth_url
+            "ms_auth_code": getattr(plugin, "ms_auth_code", None),
+            "ms_auth_url": getattr(plugin, "ms_auth_url", None)
         })
         
     return status
@@ -607,9 +607,10 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
             current_mood = None # No mood update for system tasks
         else:
             enable_backend_tts_header = raw_request.headers.get("X-Backend-TTS", "false")
-            enable_backend_tts = enable_backend_tts_header.lower() in ["true", "1", "yes", "server"]
-            
-            # 同步全局 TTS 开关状态，供插件使用
+            enable_backend_tts_requested = enable_backend_tts_header.lower() in ["true", "1", "yes", "server"]
+            enable_backend_tts = bool(settings.ALLOW_BACKEND_TTS) and enable_backend_tts_requested
+
+            # 同步全局 TTS 开关状态，供插件使用（后端 TTS 默认禁用）
             system_state.update_state("enable_tts", enable_backend_tts)
             enable_vts_header = raw_request.headers.get("X-Enable-VTS", "false")
             enable_vts = enable_vts_header.lower() in ["true", "1", "yes"]
@@ -790,4 +791,3 @@ async def parse_url(request: Request):
     except Exception as e:
         logger.error(f"Error parsing URL: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-

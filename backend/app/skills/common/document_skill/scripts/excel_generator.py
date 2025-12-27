@@ -6,9 +6,10 @@ Wraps openpyxl/pandas to create .xlsx files.
 import os
 import pandas as pd
 from typing import List, Dict
+from app.core.config import REPORTS_DIR
 
 class ExcelGenerator:
-    def __init__(self, output_dir: str = "app/static/reports"):
+    def __init__(self, output_dir: str = str(REPORTS_DIR)):
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)

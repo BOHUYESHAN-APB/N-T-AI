@@ -50,6 +50,7 @@ class ChatMessage {
   final String text;
   final bool isMine;
   final String? role; // 'user', 'assistant', 'chat_normal', 'chat_sc', 'system'
+  final String? source; // 'direct', 'mic', 'voice_channel', 'minecraft', etc.
   final ChatMessageKind kind;
   final String time;
   final List<Attachment> attachments;
@@ -61,6 +62,7 @@ class ChatMessage {
     required this.text,
     this.isMine = false,
     this.role,
+    this.source,
     ChatMessageKind? kind,
     required this.time,
     List<Attachment>? attachments,
@@ -80,6 +82,8 @@ class ChatMessage {
       case 'chat_summary':
         return ChatMessageKind.pluginSummary;
       case 'stt_heard':
+        return ChatMessageKind.sttHeard;
+      case 'chat_voice_channel':
         return ChatMessageKind.sttHeard;
       default:
         return isMine ? ChatMessageKind.user : ChatMessageKind.assistant;

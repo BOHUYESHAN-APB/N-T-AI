@@ -8,6 +8,10 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_DB_PATH = (DATA_DIR / "astra_me_v3.db").as_posix()
+STATIC_DIR = BASE_DIR / "app" / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+REPORTS_DIR = STATIC_DIR / "reports"
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Settings(BaseSettings):
@@ -26,6 +30,7 @@ class Settings(BaseSettings):
     # TTS Configuration (SiliconFlow)
     TTS_API_KEY: str = ""
     TTS_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    ALLOW_BACKEND_TTS: bool = False
 
     # STT Configuration (OpenAI-compatible)
     STT_API_KEY: str = ""

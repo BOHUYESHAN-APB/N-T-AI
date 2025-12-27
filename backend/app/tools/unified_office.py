@@ -1,6 +1,7 @@
 
 import os
 from typing import Dict, Any, List, Union
+from app.core.config import REPORTS_DIR
 from app.skills.common.document_skill.scripts.ppt_generator import PPTGenerator
 from app.skills.common.document_skill.scripts.word_generator import WordGenerator
 from app.skills.common.document_skill.scripts.excel_generator import ExcelGenerator, excel_generator as default_excel_gen
@@ -10,7 +11,7 @@ class UnifiedOfficeTool:
     Unified interface for generating Office documents (PPT, Doc, Excel).
     Inspired by Skywork-Super-Agents' office_tool.
     """
-    def __init__(self, output_dir: str = "app/static/reports"):
+    def __init__(self, output_dir: str = str(REPORTS_DIR)):
         self.output_dir = output_dir
         self.ppt_generator = PPTGenerator(output_dir=output_dir)
         self.word_generator = WordGenerator(output_dir=output_dir)
@@ -63,4 +64,3 @@ class UnifiedOfficeTool:
         
     def generate_sheet(self, content: List[Dict], filename: str) -> str:
         return self.excel_generator.generate_excel(content, filename)
-

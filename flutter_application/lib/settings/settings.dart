@@ -33,6 +33,12 @@ enum ChatModeOption { persona, standard }
 
 enum PersonaLevelOption { basic, advanced, full }
 
+// 主模式：助理优先 / 直播模式
+enum PrimaryModeOption { assistant, live }
+
+// 直播子模式：你玩AI看 / 你玩+AI玩 / AI玩你看
+enum LiveModeOption { watch, coPlay, autoPlay }
+
 class AiSettings {
   final AiProvider provider;
   final String baseUrl; // 对于 openai 可留空（使用默认），custom 需要填写
@@ -352,6 +358,9 @@ class AppSettings {
   final UIModeOption uiMode; // 对话界面样式
   final ChatModeOption chatMode; // 聊天模式
   final PersonaLevelOption personaLevel; // 人格等级
+  final PrimaryModeOption primaryMode; // 主模式
+  final LiveModeOption liveMode; // 直播子模式
+  final bool liveMemoryEnabled; // 直播模式是否写入记忆
   // 字体
   final BaseFontModeOption baseFontMode; // 基础字体（是否优先 MiSans）
   final DecorativeFontFamily decoFamily; // 装饰字体家族（FZG / nfdcs / none）
@@ -448,6 +457,9 @@ class AppSettings {
     this.uiMode = UIModeOption.auto,
     this.chatMode = ChatModeOption.persona,
     this.personaLevel = PersonaLevelOption.full,
+    this.primaryMode = PrimaryModeOption.assistant,
+    this.liveMode = LiveModeOption.watch,
+    this.liveMemoryEnabled = true,
     this.baseFontMode = BaseFontModeOption.miSansPreferred,
     this.decoFamily = DecorativeFontFamily.none,
     this.decoUseTitles = false,
@@ -533,6 +545,9 @@ class AppSettings {
     UIModeOption? uiMode,
     ChatModeOption? chatMode,
     PersonaLevelOption? personaLevel,
+    PrimaryModeOption? primaryMode,
+    LiveModeOption? liveMode,
+    bool? liveMemoryEnabled,
     BaseFontModeOption? baseFontMode,
     DecorativeFontFamily? decoFamily,
     bool? decoUseTitles,
@@ -614,6 +629,9 @@ class AppSettings {
     uiMode: uiMode ?? this.uiMode,
     chatMode: chatMode ?? this.chatMode,
     personaLevel: personaLevel ?? this.personaLevel,
+    primaryMode: primaryMode ?? this.primaryMode,
+    liveMode: liveMode ?? this.liveMode,
+    liveMemoryEnabled: liveMemoryEnabled ?? this.liveMemoryEnabled,
     baseFontMode: baseFontMode ?? this.baseFontMode,
     decoFamily: decoFamily ?? this.decoFamily,
     decoUseTitles: decoUseTitles ?? this.decoUseTitles,

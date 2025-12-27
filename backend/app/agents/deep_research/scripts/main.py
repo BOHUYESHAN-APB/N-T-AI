@@ -11,6 +11,7 @@ from .researcher import Researcher
 from .writer import Writer
 from .utils import normalize_user_input, detect_requested_formats, extract_json_from_text
 from .flow_manager import FlowManager
+from app.core.config import REPORTS_DIR
 
 class DeepResearchAgent:
     def __init__(self, model_config: Dict[str, Any], session_id: Optional[str] = None):
@@ -22,13 +23,9 @@ class DeepResearchAgent:
         self.rag_session = temp_rag_service.create_session_with_id(self.sandbox_session_id)
         # SandboxService now handles this automatically based on session_id
         
-        # Determine output directory relative to the isolated workspace
-        # But for static serving, we still need to copy/link or use a known path.
-        # However, to solve "History Leakage", we should prefer keeping files in the workspace
-        # and only exposing them when needed.
-        # For now, let's keep the app/static/reports pattern but ensure it's CLEANED or Unique.
+        # Determine output directory for static serving while keeping session isolation.
         safe_session_id = "".join([c for c in self.sandbox_session_id if c.isalnum() or c in ('-', '_')])
-        output_dir = f"app/static/reports/{safe_session_id}"
+        output_dir = str(REPORTS_DIR / safe_session_id)
         os.makedirs(output_dir, exist_ok=True)
         
         self.planner = Planner(model_config)

@@ -100,6 +100,9 @@ class SettingsController extends ChangeNotifier {
   static const _kUiMode = 'settings.ui.uiMode';
   static const _kChatMode = 'settings.ui.chatMode';
   static const _kPersonaLevel = 'settings.ui.personaLevel';
+  static const _kPrimaryMode = 'settings.mode.primary';
+  static const _kLiveMode = 'settings.mode.live';
+  static const _kLiveMemoryEnabled = 'settings.mode.liveMemoryEnabled';
 
   late SharedPreferences _prefs;
   AppSettings _settings = const AppSettings();
@@ -129,6 +132,8 @@ class SettingsController extends ChangeNotifier {
     final uiModeIdx = _prefs.getInt(_kUiMode);
     final chatModeIdx = _prefs.getInt(_kChatMode);
     final personaLevelIdx = _prefs.getInt(_kPersonaLevel);
+    final primaryModeIdx = _prefs.getInt(_kPrimaryMode);
+    final liveModeIdx = _prefs.getInt(_kLiveMode);
     final aiBaseUrl = _prefs.getString(_kAiBaseUrl) ?? '';
     final aiApiKey = _prefs.getString(_kAiApiKey) ?? '';
     final aiModel = _prefs.getString(_kAiModel) ?? '';
@@ -184,6 +189,7 @@ class SettingsController extends ChangeNotifier {
     final enableVts = _prefs.getBool(_kEnableVts) ?? false;
     final enableScreenCapture = _prefs.getBool(_kEnableScreenCapture) ?? false;
     final screenCaptureInterval = _prefs.getInt(_kScreenCaptureInterval) ?? 300;
+    final liveMemoryEnabled = _prefs.getBool(_kLiveMemoryEnabled) ?? true;
     final screenAnalysisPrompt = _prefs.getString(_kScreenAnalysisPrompt) ??
         '你现在是我的环境观察员。请仔细观察这张当前的屏幕截图，描述当前屏幕上正在发生的重要事情、打开的应用、正在处理的内容或任何值得注意的变化。请用客观、简洁的语言描述。';
     final screenInjectionPrompt = _prefs.getString(_kScreenInjectionPrompt) ??
@@ -506,6 +512,19 @@ class SettingsController extends ChangeNotifier {
             PersonaLevelOption.values.length,
             fallback: PersonaLevelOption.full.index,
           )],
+      primaryMode:
+          PrimaryModeOption.values[safeIndex(
+            primaryModeIdx,
+            PrimaryModeOption.values.length,
+            fallback: PrimaryModeOption.assistant.index,
+          )],
+      liveMode:
+          LiveModeOption.values[safeIndex(
+            liveModeIdx,
+            LiveModeOption.values.length,
+            fallback: LiveModeOption.watch.index,
+          )],
+      liveMemoryEnabled: liveMemoryEnabled,
       baseFontMode: baseFontMode,
       decoFamily: decoFamily,
       decoUseTitles: useTitles,
@@ -961,6 +980,24 @@ class SettingsController extends ChangeNotifier {
   Future<void> setPersonaLevel(PersonaLevelOption l) async {
     _settings = _settings.copyWith(personaLevel: l);
     await _prefs.setInt(_kPersonaLevel, l.index);
+    notifyListeners();
+  }
+
+  Future<void> setPrimaryMode(PrimaryModeOption m) async {
+    _settings = _settings.copyWith(primaryMode: m);
+    await _prefs.setInt(_kPrimaryMode, m.index);
+    notifyListeners();
+  }
+
+  Future<void> setLiveMode(LiveModeOption m) async {
+    _settings = _settings.copyWith(liveMode: m);
+    await _prefs.setInt(_kLiveMode, m.index);
+    notifyListeners();
+  }
+
+  Future<void> setLiveMemoryEnabled(bool enabled) async {
+    _settings = _settings.copyWith(liveMemoryEnabled: enabled);
+    await _prefs.setBool(_kLiveMemoryEnabled, enabled);
     notifyListeners();
   }
 

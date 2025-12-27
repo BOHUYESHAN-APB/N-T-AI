@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../settings/settings.dart';
 import '../settings/settings_scope.dart';
 
 class ScenarioEditor extends StatefulWidget {
@@ -39,10 +40,69 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
     controller.setScenarioTasks(_tasks);
   }
 
+  String _modeLabel(AppSettings settings) {
+    if (settings.primaryMode == PrimaryModeOption.assistant) {
+      return '助理模式';
+    }
+    return switch (settings.liveMode) {
+      LiveModeOption.watch => '直播：你玩、AI看',
+      LiveModeOption.coPlay => '直播：你玩+AI玩',
+      LiveModeOption.autoPlay => '直播：AI玩、你看',
+    };
+  }
+
+  String _modeHint(AppSettings settings) {
+    if (settings.primaryMode == PrimaryModeOption.assistant) {
+      return '以个人助理为主，偏任务/攻略/聊天，可记录用户偏好。';
+    }
+    return switch (settings.liveMode) {
+      LiveModeOption.watch => '只解说与搞效果，不参与操作。',
+      LiveModeOption.coPlay => '解说+互动，强化人格效果。',
+      LiveModeOption.autoPlay => '自主任务模式，人工少干预。',
+    };
+  }
+
+  List<_TemplateItem> _buildTemplates(AppSettings settings) {
+    if (settings.primaryMode == PrimaryModeOption.assistant) {
+      return [
+        _TemplateItem(
+          label: '游戏攻略/助手',
+          context: '正在玩游戏，需要攻略、提示与解说，风格简洁实用。',
+          tasks: ['给出关键提示', '指出可优化操作', '不要打断用户'],
+        ),
+        _TemplateItem(
+          label: '轻松闲聊',
+          context: '当前是轻松聊天，语气自然但不过度表演。',
+          tasks: ['保持简短', '避免夸张表演', '可补充有趣知识'],
+        ),
+      ];
+    }
+
+    return [
+      _TemplateItem(
+        label: '直播：你玩AI看',
+        context: '当前在直播，由玩家操作，AI只解说与搞效果。',
+        tasks: ['简洁解说', '适当吐槽', '不主动指挥操作'],
+      ),
+      _TemplateItem(
+        label: '直播：你玩+AI玩',
+        context: '当前在直播，AI参与互动与部分操作，需强化人格。',
+        tasks: ['解说自己在做的事', '与观众互动', '保持节目效果'],
+      ),
+      _TemplateItem(
+        label: '直播：AI玩你看',
+        context: '当前在直播，AI自主规划任务并执行，观众为主。',
+        tasks: ['保持任务进度', '适当节目效果', '必要时自检纠错'],
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final settings = SettingsScope.of(context).settings;
+    final templates = _buildTemplates(settings);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -58,7 +118,7 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '场景与目标配置',
+                '情况说明与目标配置',
                 style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               IconButton(
@@ -68,8 +128,46 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
             ],
           ),
           const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  settings.primaryMode == PrimaryModeOption.assistant
+                      ? Icons.support_agent_outlined
+                      : Icons.live_tv_outlined,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _modeLabel(settings),
+                        style: theme.textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _modeHint(settings),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
-            '当前场景说明 (AI 会感知此上下文)',
+            '当前情况说明 (AI 会感知此上下文)',
             style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.primary),
           ),
           const SizedBox(height: 8),
@@ -77,7 +175,9 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
             controller: _contextController,
             maxLines: 3,
             decoration: InputDecoration(
-              hintText: '例如：正在直播玩 Minecraft，有嘉宾“小明”连麦...',
+              hintText: settings.primaryMode == PrimaryModeOption.assistant
+                  ? '例如：正在玩 Minecraft，需要攻略和提示...'
+                  : '例如：正在直播玩 Minecraft，有观众互动...',
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
               fillColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
@@ -171,36 +271,17 @@ class _ScenarioEditorState extends State<ScenarioEditor> {
           Wrap(
             spacing: 8,
             children: [
-              _TemplateChip(
-                label: '直播模式',
-                onTap: () {
-                  setState(() {
-                    _contextController.text = '当前正在直播，氛围轻松愉快，多与弹幕互动。';
-                    _tasks = ['欢迎新进直播间的观众', '回复有趣的弹幕', '保持直播热度'];
-                  });
-                  _save();
-                },
-              ),
-              _TemplateChip(
-                label: '游戏解说',
-                onTap: () {
-                  setState(() {
-                    _contextController.text = '正在玩游戏，我是解说/助手，观察画面并评论。';
-                    _tasks = ['分析当前局势', '吐槽操作失误', '分享游戏小知识'];
-                  });
-                  _save();
-                },
-              ),
-              _TemplateChip(
-                label: '连麦/协作',
-                onTap: () {
-                  setState(() {
-                    _contextController.text = '正在与其他人连麦交流。';
-                    _tasks = ['有礼貌地回应他人', '引导话题讨论', '不要抢话'];
-                  });
-                  _save();
-                },
-              ),
+              for (final t in templates)
+                _TemplateChip(
+                  label: t.label,
+                  onTap: () {
+                    setState(() {
+                      _contextController.text = t.context;
+                      _tasks = List.from(t.tasks);
+                    });
+                    _save();
+                  },
+                ),
               _TemplateChip(
                 label: '清空状态',
                 onTap: () {
@@ -234,4 +315,16 @@ class _TemplateChip extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     );
   }
+}
+
+class _TemplateItem {
+  final String label;
+  final String context;
+  final List<String> tasks;
+
+  const _TemplateItem({
+    required this.label,
+    required this.context,
+    required this.tasks,
+  });
 }
