@@ -308,14 +308,17 @@ async def get_plugin_status(plugin_id: str):
         "is_active": getattr(plugin, "is_active", True),
     }
     
-    # 特殊处理 minecraft 插件
+    # 特殊处理 Minecraft 插件
     if (plugin_id == "minecraft" or plugin_id == "Minecraft-mindcraft") and hasattr(plugin, "logs"):
         status.update({
             "logs": plugin.logs,
             "ms_auth_code": getattr(plugin, "ms_auth_code", None),
-            "ms_auth_url": getattr(plugin, "ms_auth_url", None)
+            "ms_auth_url": getattr(plugin, "ms_auth_url", None),
+            "control_mode": getattr(plugin, "control_mode", None),
+            "headful_ready": getattr(plugin, "headful_ready", None),
+            "headful_state": getattr(plugin, "_headful_last_state", None)
         })
-        
+    
     return status
 
 

@@ -16,6 +16,9 @@ class SendMessageRequest(BaseModel):
     message: str
     sender: Optional[str] = "frontend"
 
+class HeadfulActionRequest(BaseModel):
+    action: Dict[str, Any]
+
 @router.post("/config")
 async def update_minecraft_config(request_data: Dict[str, Any]):
     """
@@ -153,6 +156,12 @@ async def send_message_to_agent(req: SendMessageRequest):
     plugin = get_plugin("Minecraft-mindcraft")
     if not plugin:
         raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    # headful 模式下通过 WS 直连模组
+    if getattr(plugin, "control_mode", "headless") == "headful":
+        ok = await plugin.send_headful_message(req.message)
+        if ok:
+            return {"status": "ok"}
+        raise HTTPException(status_code=502, detail="Failed to send headful message")
     ms_port = plugin.config.get("mindserver_port", 8080)
     url = f"http://localhost:{ms_port}/api/send-message"
     try:
@@ -165,6 +174,21 @@ async def send_message_to_agent(req: SendMessageRequest):
     except Exception as e:
         logger.error(f"Failed to send message to MindServer: {e}")
         raise HTTPException(status_code=502, detail=str(e))
+
+@router.post("/headful_action")
+async def send_headful_action(req: HeadfulActionRequest):
+    """
+    直接转发 headful 动作 JSON 到本地 Fabric 模组 WS。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    if getattr(plugin, "control_mode", "headless") != "headful":
+        raise HTTPException(status_code=400, detail="Plugin not in headful mode")
+    ok = await plugin.send_headful_action(req.action)
+    if ok:
+        return {"status": "ok"}
+    raise HTTPException(status_code=502, detail="Failed to send headful action")
 
 @router.get("/stream", response_class=HTMLResponse)
 async def get_minecraft_stream():

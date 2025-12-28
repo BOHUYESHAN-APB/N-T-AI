@@ -19,6 +19,11 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     msEmailController = TextEditingController();
     msPasswordController = TextEditingController();
     mindServerPortController = TextEditingController();
+    modHostController = TextEditingController();
+    modPortController = TextEditingController();
+    modTokenController = TextEditingController();
+    headfulQuickTextController = TextEditingController();
+    headfulActionController = TextEditingController();
   }
 
   late TextEditingController hostController;
@@ -30,11 +35,20 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   late TextEditingController msEmailController;
   late TextEditingController msPasswordController;
   late TextEditingController mindServerPortController;
+  late TextEditingController modHostController;
+  late TextEditingController modPortController;
+  late TextEditingController modTokenController;
+  late TextEditingController headfulQuickTextController;
+  late TextEditingController headfulActionController;
 
+  String controlMode = 'headless'; // headless: 现有无头；headful: Fabric 模组
   String authMethod = 'offline';
   bool loadMemory = false;
   String? agentProviderId;
   String language = 'zh';
+  int modEventIntervalMs = 200;
+  int modScanRadius = 16;
+  bool modVisionStream = false;
 
   List<String> _logs = [];
   String? _msAuthCode;
@@ -46,6 +60,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   String? _lastLogTail;
   String? _lastMsAuthCode;
   String? _lastMsAuthUrl;
+  String? _backendControlMode;
+  bool? _headfulReady;
+  Map<String, dynamic>? _headfulState;
+  String? _lastHeadfulStateSig;
+  bool? _lastHeadfulReady;
+  String? _lastBackendControlMode;
 
   // 添加对 notifyListeners 的包装以兼容 BasePlugin
   void _notify() {
@@ -74,20 +94,42 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   Future<void> onInit() async {
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'plugin.$id.';
-    hostController.text = prefs.getString('${prefix}host') ?? '127.0.0.1';
-    portController.text = prefs.getString('${prefix}port') ?? '-1';
-    initMessageController.text = prefs.getString('${prefix}initMessage') ?? '你好！我是你的 AI 助手。';
-    minecraftVersionController.text = prefs.getString('${prefix}minecraftVersion') ?? 'auto';
-    agentNameController.text = prefs.getString('${prefix}agentName') ?? 'andy';
-    agentModelController.text = prefs.getString('${prefix}agentModel') ?? '';
-    msEmailController.text = prefs.getString('${prefix}msEmail') ?? '';
-    msPasswordController.text = prefs.getString('${prefix}msPassword') ?? '';
-    mindServerPortController.text = prefs.getString('${prefix}mindServerPort') ?? '8080';
-    authMethod = prefs.getString('${prefix}authMethod') ?? 'offline';
-    loadMemory = prefs.getBool('${prefix}loadMemory') ?? false;
-    agentProviderId = prefs.getString('${prefix}agentProviderId');
-    language = prefs.getString('${prefix}language') ?? 'zh';
+    final headlessPrefix = '${prefix}headless.';
+    final headfulPrefix = '${prefix}headful.';
+    controlMode = prefs.getString('${prefix}mode') ?? 'headless';
+
+    // headless（兼容旧字段）
+    hostController.text =
+        prefs.getString('${headlessPrefix}host') ?? prefs.getString('${prefix}host') ?? '127.0.0.1';
+    portController.text =
+        prefs.getString('${headlessPrefix}port') ?? prefs.getString('${prefix}port') ?? '-1';
+    initMessageController.text =
+        prefs.getString('${headlessPrefix}initMessage') ?? prefs.getString('${prefix}initMessage') ?? '你好！我是你的 AI 助手。';
+    minecraftVersionController.text =
+        prefs.getString('${headlessPrefix}minecraftVersion') ?? prefs.getString('${prefix}minecraftVersion') ?? 'auto';
+    agentNameController.text =
+        prefs.getString('${headlessPrefix}agentName') ?? prefs.getString('${prefix}agentName') ?? 'andy';
+    agentModelController.text =
+        prefs.getString('${headlessPrefix}agentModel') ?? prefs.getString('${prefix}agentModel') ?? '';
+    msEmailController.text =
+        prefs.getString('${headlessPrefix}msEmail') ?? prefs.getString('${prefix}msEmail') ?? '';
+    msPasswordController.text =
+        prefs.getString('${headlessPrefix}msPassword') ?? prefs.getString('${prefix}msPassword') ?? '';
+    mindServerPortController.text =
+        prefs.getString('${headlessPrefix}mindServerPort') ?? prefs.getString('${prefix}mindServerPort') ?? '8080';
+    authMethod = prefs.getString('${headlessPrefix}authMethod') ?? prefs.getString('${prefix}authMethod') ?? 'offline';
+    loadMemory = prefs.getBool('${headlessPrefix}loadMemory') ?? prefs.getBool('${prefix}loadMemory') ?? false;
+    agentProviderId = prefs.getString('${headlessPrefix}agentProviderId') ?? prefs.getString('${prefix}agentProviderId');
+    language = prefs.getString('${headlessPrefix}language') ?? prefs.getString('${prefix}language') ?? 'zh';
     autoStart = prefs.getBool('${prefix}autoStart') ?? false;
+
+    // headful（模组通讯）
+    modHostController.text = prefs.getString('${headfulPrefix}host') ?? '127.0.0.1';
+    modPortController.text = prefs.getString('${headfulPrefix}port') ?? '8765';
+    modTokenController.text = prefs.getString('${headfulPrefix}token') ?? '';
+    modEventIntervalMs = prefs.getInt('${headfulPrefix}eventIntervalMs') ?? 200;
+    modScanRadius = prefs.getInt('${headfulPrefix}scanRadius') ?? 16;
+    modVisionStream = prefs.getBool('${headfulPrefix}visionStream') ?? false;
 
     if (isEnabled) {
       _startStatusTimer();
@@ -97,6 +139,23 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   Future<void> _saveLocalConfig() async {
     final prefs = await SharedPreferences.getInstance();
     final prefix = 'plugin.$id.';
+    final headlessPrefix = '${prefix}headless.';
+    final headfulPrefix = '${prefix}headful.';
+    await prefs.setString('${prefix}mode', controlMode);
+    // headless 存储（兼容旧字段）
+    await prefs.setString('${headlessPrefix}host', hostController.text);
+    await prefs.setString('${headlessPrefix}port', portController.text);
+    await prefs.setString('${headlessPrefix}initMessage', initMessageController.text);
+    await prefs.setString('${headlessPrefix}minecraftVersion', minecraftVersionController.text);
+    await prefs.setString('${headlessPrefix}agentName', agentNameController.text);
+    await prefs.setString('${headlessPrefix}agentModel', agentModelController.text);
+    await prefs.setString('${headlessPrefix}msEmail', msEmailController.text);
+    await prefs.setString('${headlessPrefix}msPassword', msPasswordController.text);
+    await prefs.setString('${headlessPrefix}mindServerPort', mindServerPortController.text);
+    await prefs.setString('${headlessPrefix}authMethod', authMethod);
+    await prefs.setBool('${headlessPrefix}loadMemory', loadMemory);
+    await prefs.setString('${headlessPrefix}language', language);
+    // 兼容旧字段存一份
     await prefs.setString('${prefix}host', hostController.text);
     await prefs.setString('${prefix}port', portController.text);
     await prefs.setString('${prefix}initMessage', initMessageController.text);
@@ -109,6 +168,13 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setString('${prefix}authMethod', authMethod);
     await prefs.setBool('${prefix}loadMemory', loadMemory);
     await prefs.setString('${prefix}language', language);
+    // headful 存储
+    await prefs.setString('${headfulPrefix}host', modHostController.text);
+    await prefs.setString('${headfulPrefix}port', modPortController.text);
+    await prefs.setString('${headfulPrefix}token', modTokenController.text);
+    await prefs.setInt('${headfulPrefix}eventIntervalMs', modEventIntervalMs);
+    await prefs.setInt('${headfulPrefix}scanRadius', modScanRadius);
+    await prefs.setBool('${headfulPrefix}visionStream', modVisionStream);
     await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null) {
       await prefs.setString('${prefix}agentProviderId', agentProviderId!);
@@ -168,7 +234,17 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       }
     }
 
+    final headfulConfig = {
+      "host": modHostController.text.trim().isEmpty ? "127.0.0.1" : modHostController.text.trim(),
+      "port": int.tryParse(modPortController.text) ?? 8765,
+      "token": modTokenController.text.trim(),
+      "event_interval_ms": modEventIntervalMs,
+      "scan_radius": modScanRadius,
+      "vision_stream": modVisionStream,
+    };
+
     final config = {
+      "control_mode": controlMode,
       "minecraft_version": minecraftVersionController.text,
       "host": hostController.text,
       "port": int.tryParse(portController.text) ?? -1,
@@ -184,6 +260,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "agent_api_key": agentApiKey,
       "agent_base_url": agentBaseUrl,
       "auto_start": autoStart,
+      "headful": headfulConfig,
     };
 
     try {
@@ -241,27 +318,128 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
             : rawLogs;
         final nextMsAuthCode = data['ms_auth_code'];
         final nextMsAuthUrl = data['ms_auth_url'];
+        final nextBackendControlMode = data['control_mode']?.toString();
+        final nextHeadfulReady = data['headful_ready'];
+        final nextHeadfulStateRaw = data['headful_state'];
+        Map<String, dynamic>? nextHeadfulState;
+        if (nextHeadfulStateRaw is Map<String, dynamic>) {
+          nextHeadfulState = nextHeadfulStateRaw;
+        } else if (nextHeadfulStateRaw is Map) {
+          nextHeadfulState = Map<String, dynamic>.from(nextHeadfulStateRaw);
+        }
+        final nextHeadfulStateSig = nextHeadfulState == null ? null : jsonEncode(nextHeadfulState);
         final tail = trimmedLogs.isNotEmpty ? trimmedLogs.last : null;
         final changed = trimmedLogs.length != _lastLogCount ||
             tail != _lastLogTail ||
             nextMsAuthCode != _lastMsAuthCode ||
-            nextMsAuthUrl != _lastMsAuthUrl;
+            nextMsAuthUrl != _lastMsAuthUrl ||
+            nextBackendControlMode != _lastBackendControlMode ||
+            nextHeadfulReady != _lastHeadfulReady ||
+            nextHeadfulStateSig != _lastHeadfulStateSig;
 
         if (!changed) return;
 
         _logs = trimmedLogs;
         _msAuthCode = nextMsAuthCode;
         _msAuthUrl = nextMsAuthUrl;
+        _backendControlMode = nextBackendControlMode;
+        _headfulReady = nextHeadfulReady is bool ? nextHeadfulReady : null;
+        _headfulState = nextHeadfulState;
         _lastLogCount = trimmedLogs.length;
         _lastLogTail = tail;
         _lastMsAuthCode = nextMsAuthCode;
         _lastMsAuthUrl = nextMsAuthUrl;
+        _lastBackendControlMode = nextBackendControlMode;
+        _lastHeadfulReady = _headfulReady;
+        _lastHeadfulStateSig = nextHeadfulStateSig;
         _notify();
       }
     } catch (e) {
       debugPrint('Error fetching Minecraft status: $e');
     } finally {
       _statusInFlight = false;
+    }
+  }
+
+  Future<void> _sendHeadfulQuickMessage(BuildContext context) async {
+    final message = headfulQuickTextController.text.trim();
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入要发送的聊天或指令')),
+      );
+      return;
+    }
+    final controller = SettingsScope.of(context);
+    final backendUrl = controller.settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
+    final agentName = agentNameController.text.trim().isEmpty ? 'agent' : agentNameController.text.trim();
+    try {
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/v1/plugins/$id/send_message'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'agent': agentName,
+          'message': message,
+          'sender': 'frontend',
+        }),
+      );
+      if (!context.mounted) return;
+      final ok = response.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? '已发送' : '发送失败: ${response.statusCode}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    }
+  }
+
+  Future<void> _sendHeadfulActionJson(BuildContext context) async {
+    final raw = headfulActionController.text.trim();
+    if (raw.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入动作 JSON')),
+      );
+      return;
+    }
+    Map<String, dynamic> action;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Action must be a JSON object');
+      }
+      action = decoded;
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('动作 JSON 无效: $e')),
+      );
+      return;
+    }
+    if (!action.containsKey('type')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('动作 JSON 缺少 type 字段')),
+      );
+      return;
+    }
+    final controller = SettingsScope.of(context);
+    final backendUrl = controller.settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
+    try {
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/v1/plugins/$id/headful_action'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action}),
+      );
+      if (!context.mounted) return;
+      final ok = response.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? '动作已发送' : '动作发送失败: ${response.statusCode}')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('动作发送失败: $e')),
+      );
     }
   }
 
@@ -272,11 +450,186 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     return AnimatedBuilder(
       animation: this,
       builder: (context, _) {
+        String fmtNum(dynamic v, {int digits = 2}) {
+          if (v is num) {
+            return v.toStringAsFixed(digits);
+          }
+          return '--';
+        }
+
+        Widget buildHeadfulStatusCard() {
+          final backendMode = _backendControlMode ?? controlMode;
+          final modeMismatch = _backendControlMode != null && _backendControlMode != controlMode;
+          final ready = _headfulReady == true;
+          final state = _headfulState;
+          final posText = state == null
+              ? '--'
+              : '${fmtNum(state['x'])}, ${fmtNum(state['y'])}, ${fmtNum(state['z'])}';
+          final yawText = state == null ? '--' : fmtNum(state['yaw'], digits: 1);
+          final pitchText = state == null ? '--' : fmtNum(state['pitch'], digits: 1);
+          final hpText = state == null ? '--' : fmtNum(state['health'], digits: 1);
+          final foodText = state == null ? '--' : fmtNum(state['hunger'], digits: 0);
+          final dimText = state == null ? '--' : (state['dimension']?.toString() ?? '--');
+          final focusedText = state == null ? '--' : ((state['focused'] == true) ? '是' : '否');
+
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blueGrey.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.blueGrey.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ready ? '模组连接：已连接' : '模组连接：未连接',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: ready ? Colors.green : Colors.redAccent,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  modeMismatch ? '后端模式：$backendMode（本地选择：$controlMode）' : '后端模式：$backendMode',
+                  style: const TextStyle(color: Colors.black87),
+                ),
+                const SizedBox(height: 6),
+                Text('位置：$posText  视角：$yawText/$pitchText'),
+                Text('血量：$hpText  饥饿：$foodText'),
+                Text('维度：$dimText  窗口焦点：$focusedText'),
+              ],
+            ),
+          );
+        }
+
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildSectionTitle('运行模式'),
+              DropdownButtonFormField<String>(
+                value: controlMode,
+                decoration: const InputDecoration(labelText: '选择运行模式'),
+                items: const [
+                  DropdownMenuItem(value: 'headless', child: Text('无头 (MindCraft/mineflayer)')),
+                  DropdownMenuItem(value: 'headful', child: Text('有头 (Fabric 模组通讯)')),
+                ],
+                onChanged: (v) => _updateState(() => controlMode = v ?? 'headless'),
+              ),
+              const SizedBox(height: 12),
+              if (controlMode == 'headful') ...[
+                _buildSectionTitle('模组通讯（本地客户端）'),
+                const Text('绑定 127.0.0.1，需在本地运行 Fabric 模组提供的 WS/HTTP。', style: TextStyle(color: Colors.green)),
+                const SizedBox(height: 8),
+                buildHeadfulStatusCard(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: modHostController,
+                  decoration: const InputDecoration(labelText: '模组 Host', hintText: '127.0.0.1'),
+                ),
+                TextField(
+                  controller: modPortController,
+                  decoration: const InputDecoration(labelText: '模组端口', hintText: '8765'),
+                  keyboardType: TextInputType.number,
+                ),
+                TextField(
+                  controller: modTokenController,
+                  decoration: const InputDecoration(labelText: '访问口令 (可选)', hintText: '为空则不校验'),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: modEventIntervalMs.toString(),
+                        decoration: const InputDecoration(labelText: '事件频率 ms', hintText: '200'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => modEventIntervalMs = int.tryParse(v) ?? 200,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: modScanRadius.toString(),
+                        decoration: const InputDecoration(labelText: '扫描半径', hintText: '16'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => modScanRadius = int.tryParse(v) ?? 16,
+                      ),
+                    ),
+                  ],
+                ),
+                SwitchListTile(
+                  title: const Text('启用视觉流 (预留)'),
+                  subtitle: const Text('预留画面/特征流通道，后续接入视觉解析'),
+                  value: modVisionStream,
+                  onChanged: (v) => _updateState(() => modVisionStream = v),
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('Headful 快捷控制'),
+                const Text('用于本地模组调试，可发送聊天/指令或动作 JSON。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: headfulQuickTextController,
+                  decoration: const InputDecoration(labelText: '聊天/指令', hintText: '你好 或 /time set day'),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulQuickMessage(context),
+                      icon: const Icon(Icons.send),
+                      label: const Text('发送聊天/指令'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => headfulQuickTextController.clear(),
+                      icon: const Icon(Icons.clear),
+                      label: const Text('清空输入'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: headfulActionController,
+                  minLines: 3,
+                  maxLines: 6,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    labelText: '动作 JSON',
+                    hintText: '{"type":"moveTo","x":0,"y":64,"z":0,"speed":0.25}',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulActionJson(context),
+                      icon: const Icon(Icons.bolt),
+                      label: const Text('发送动作'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => headfulActionController.text =
+                          '{"type":"moveTo","x":0,"y":64,"z":0,"speed":0.25}',
+                      icon: const Icon(Icons.code),
+                      label: const Text('填充示例'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        headfulActionController.text = '{"type":"stopMove"}';
+                        _sendHeadfulActionJson(context);
+                      },
+                      icon: const Icon(Icons.stop),
+                      label: const Text('停止移动'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
               _buildSectionTitle('服务器连接'),
               const Text('支持版本: Java Edition（版本随 MindCraft 原始项目更新，适配 v1.21.6）', 
                   style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
@@ -402,12 +755,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
-                    onPressed: () => _openWebUI(),
+                    onPressed: controlMode == 'headless' ? () => _openWebUI() : null,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                     ),
                     icon: const Icon(Icons.open_in_browser),
-                    label: const Text('管理页面'),
+                    label: Text(controlMode == 'headless' ? 'MindCraft 管理页面' : 'Headful 模式无需管理页面'),
                   ),
                 ],
               ),
@@ -500,11 +853,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 ),
               ),
               const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => _openWebUI(),
-                icon: const Icon(Icons.open_in_browser),
-                label: const Text('打开 MindCraft 管理界面'),
-              ),
+              if (controlMode == 'headless')
+                ElevatedButton.icon(
+                  onPressed: () => _openWebUI(),
+                  icon: const Icon(Icons.open_in_browser),
+                  label: const Text('打开 MindCraft 管理界面'),
+                ),
             ],
           ),
         );

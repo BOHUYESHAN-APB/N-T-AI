@@ -44,3 +44,6 @@ flutter_application/server/
 **/plugins/Minecraft-*/src/**/.env
 /astra_me_v3.db
 /backend/astra_me.db
+
+*.pth
+/minecraft-headful-fabric-proto/

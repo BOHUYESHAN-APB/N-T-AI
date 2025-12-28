@@ -42,6 +42,7 @@ async def startup_plugins() -> None:
     except Exception as e:
         print(f"[PluginManager] Error registering Minecraft-mindcraft plugin: {e}")
 
+
     # 2. Start them
     for plugin in _plugins.values():
         # Check if the plugin should auto-start
