@@ -41,6 +41,7 @@ class FireflyScreen extends StatefulWidget {
 }
 
 class _FireflyScreenState extends State<FireflyScreen> {
+  static const _kCurrentChatSessionId = 'chat.currentSessionId';
   final BrainService _brain = BrainService();
   final LLMService _llmService = LLMService();
   final WebSocketService _wsService = WebSocketService();
@@ -1072,6 +1073,11 @@ ${capped.map((e) => '- $e').join('\n')}
           .toList(),
     );
 
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kCurrentChatSessionId, sessionId);
+    } catch (_) {}
+
     _scrollToBottom();
   }
 
@@ -1081,6 +1087,10 @@ ${capped.map((e) => '- $e').join('\n')}
     if (_currentSessionId == sessionId) {
       _currentSessionId = null;
       _messages.clear();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_kCurrentChatSessionId);
+      } catch (_) {}
       if (_sessions.isNotEmpty) {
         _selectSession(_sessions.first.id);
       } else {

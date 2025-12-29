@@ -19,6 +19,10 @@ class SendMessageRequest(BaseModel):
 class HeadfulActionRequest(BaseModel):
     action: Dict[str, Any]
 
+class HeadfulSkillRequest(BaseModel):
+    skill: str
+    params: Optional[Dict[str, Any]] = None
+
 @router.post("/config")
 async def update_minecraft_config(request_data: Dict[str, Any]):
     """
@@ -189,6 +193,21 @@ async def send_headful_action(req: HeadfulActionRequest):
     if ok:
         return {"status": "ok"}
     raise HTTPException(status_code=502, detail="Failed to send headful action")
+
+@router.post("/headful_skill")
+async def run_headful_skill(req: HeadfulSkillRequest):
+    """
+    执行 headful 背包/容器技能（自动装备/整理/合成等）。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    if getattr(plugin, "control_mode", "headless") != "headful":
+        raise HTTPException(status_code=400, detail="Plugin not in headful mode")
+    result = await plugin.run_headful_skill(req.skill, req.params or {})
+    if result.get("ok"):
+        return {"status": "ok", "result": result}
+    raise HTTPException(status_code=400, detail=result)
 
 @router.get("/stream", response_class=HTMLResponse)
 async def get_minecraft_stream():

@@ -8,6 +8,7 @@ from app.services.audio_service import AudioService
 from app.core.config import settings as app_settings
 from .headful_adapter import HeadfulAdapter
 from .headless_adapter import HeadlessAdapter
+from .headful_inventory import HeadfulInventoryController
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,12 @@ class MinecraftMindcraftPlugin(BasePlugin):
             log_append=self._append_log,
             on_ready=self._set_headful_ready,
             on_state=self._set_headful_state
+        )
+        self._headful_inventory = HeadfulInventoryController(
+            logger=logger,
+            log_append=self._append_log,
+            adapter=self._headful,
+            config_provider=lambda: self.config,
         )
 
     @property
@@ -92,6 +99,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
                 "language": "zh",
                 "auto_start": False,
                 "control_mode": "headless",
+                "rag_user_id": "",
                 "headful": {
                     "host": "127.0.0.1",
                     "port": 8765,
@@ -121,6 +129,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
                         "language": "zh",
                         "ntai_backend_url": "http://127.0.0.1:23456",
                         "control_mode": "headless",
+                        "rag_user_id": "",
                         "headful": {
                             "host": "127.0.0.1",
                             "port": 8765,
@@ -276,6 +285,12 @@ class MinecraftMindcraftPlugin(BasePlugin):
         """转发 headful 动作 JSON 到模组。"""
         return await self._headful.send_action(action, self.config.get("headful", {}))
 
+    async def run_headful_skill(self, skill: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """执行 headful 背包/容器技能（基于屏幕快照与槽位操作）。"""
+        if self.control_mode != "headful":
+            return {"ok": False, "error": "not_headful"}
+        return await self._headful_inventory.run(skill, params or {})
+
     async def get_status(self) -> Dict[str, Any]:
         """获取插件状态，供前端轮询"""
         return {
@@ -286,7 +301,9 @@ class MinecraftMindcraftPlugin(BasePlugin):
             "logs": self.logs[-50:] if self.logs else [],
             "control_mode": self.control_mode,
             "headful_ready": self.headful_ready,
-            "headful_state": self._headful_last_state
+            "headful_state": self._headful_last_state,
+            "headful_screen": getattr(self._headful, "last_screen", None),
+            "headful_plan": getattr(self._headful_inventory, "last_plan", None),
         }
 
 def get_plugin():

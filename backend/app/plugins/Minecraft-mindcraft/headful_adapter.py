@@ -25,6 +25,8 @@ class HeadfulAdapter:
         self._send_lock = asyncio.Lock()
         self.ready = False
         self.last_state: Optional[Dict[str, Any]] = None
+        self.last_screen: Optional[Dict[str, Any]] = None
+        self._screen_waiters: list[asyncio.Future] = []
 
     async def activate(self, config: Dict[str, Any]) -> bool:
         if self._ws_task and not self._ws_task.done():
@@ -91,6 +93,37 @@ class HeadfulAdapter:
                 self._log_append(f"Headful action send failed: {e}")
                 return False
 
+    async def request_screen_snapshot(
+        self, config: Dict[str, Any], timeout: float = 2.0
+    ) -> Optional[Dict[str, Any]]:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; screen snapshot failed.")
+            return None
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        self._screen_waiters.append(future)
+        ok = await self.send_action({"type": "screenSnapshot"}, config)
+        if not ok:
+            if not future.done():
+                future.cancel()
+            try:
+                self._screen_waiters.remove(future)
+            except ValueError:
+                pass
+            return None
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._log_append("Headful screen snapshot timeout.")
+            return None
+        finally:
+            if not future.done():
+                future.cancel()
+            try:
+                self._screen_waiters.remove(future)
+            except ValueError:
+                pass
+
     async def _run(self, config: Dict[str, Any]) -> None:
         backoff = 1
         while not self._stop_event.is_set():
@@ -141,6 +174,22 @@ class HeadfulAdapter:
             self._log_append(f"Headful event: {data.get('event')}")
         elif msg_type == "hello":
             self._log_append("Headful WS hello received.")
+        elif msg_type == "screen_snapshot":
+            self.last_screen = data
+            if self._screen_waiters:
+                waiters = list(self._screen_waiters)
+                self._screen_waiters.clear()
+                for waiter in waiters:
+                    if not waiter.done():
+                        waiter.set_result(data)
+            handler = data.get("handler")
+            screen = data.get("screenClass")
+            slots = data.get("slotsCount")
+            open_flag = data.get("screenOpen")
+            title = data.get("title")
+            self._log_append(
+                f"Headful screen: {screen or handler} slots={slots} open={open_flag} title={title}"
+            )
         elif msg_type == "error":
             self._log_append(f"Headful WS error: {data.get('error')}")
         else:

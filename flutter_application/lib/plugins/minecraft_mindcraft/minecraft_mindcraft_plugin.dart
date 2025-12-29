@@ -24,6 +24,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     modTokenController = TextEditingController();
     headfulQuickTextController = TextEditingController();
     headfulActionController = TextEditingController();
+    headfulCraftItemController = TextEditingController();
+    headfulCraftCountController = TextEditingController(text: '1');
+    headfulPlanGoalController = TextEditingController();
+    headfulRagUserIdController = TextEditingController();
   }
 
   late TextEditingController hostController;
@@ -40,6 +44,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   late TextEditingController modTokenController;
   late TextEditingController headfulQuickTextController;
   late TextEditingController headfulActionController;
+  late TextEditingController headfulCraftItemController;
+  late TextEditingController headfulCraftCountController;
+  late TextEditingController headfulPlanGoalController;
+  late TextEditingController headfulRagUserIdController;
 
   String controlMode = 'headless'; // headless: 现有无头；headful: Fabric 模组
   String authMethod = 'offline';
@@ -49,6 +57,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   int modEventIntervalMs = 200;
   int modScanRadius = 16;
   bool modVisionStream = false;
+  bool headfulPlanUseRag = true;
+  bool headfulPlanUseMindcraftDocs = true;
 
   List<String> _logs = [];
   String? _msAuthCode;
@@ -66,6 +76,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   String? _lastHeadfulStateSig;
   bool? _lastHeadfulReady;
   String? _lastBackendControlMode;
+  Map<String, dynamic>? _headfulPlan;
+  String? _lastHeadfulPlanSig;
 
   // 添加对 notifyListeners 的包装以兼容 BasePlugin
   void _notify() {
@@ -130,6 +142,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     modEventIntervalMs = prefs.getInt('${headfulPrefix}eventIntervalMs') ?? 200;
     modScanRadius = prefs.getInt('${headfulPrefix}scanRadius') ?? 16;
     modVisionStream = prefs.getBool('${headfulPrefix}visionStream') ?? false;
+    headfulRagUserIdController.text = prefs.getString('${headfulPrefix}ragUserId') ?? '';
 
     if (isEnabled) {
       _startStatusTimer();
@@ -175,6 +188,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setInt('${headfulPrefix}eventIntervalMs', modEventIntervalMs);
     await prefs.setInt('${headfulPrefix}scanRadius', modScanRadius);
     await prefs.setBool('${headfulPrefix}visionStream', modVisionStream);
+    await prefs.setString('${headfulPrefix}ragUserId', headfulRagUserIdController.text);
     await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null) {
       await prefs.setString('${prefix}agentProviderId', agentProviderId!);
@@ -259,6 +273,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "agent_model": effectiveModel,
       "agent_api_key": agentApiKey,
       "agent_base_url": agentBaseUrl,
+      "rag_user_id": headfulRagUserIdController.text.trim(),
       "auto_start": autoStart,
       "headful": headfulConfig,
     };
@@ -321,13 +336,21 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         final nextBackendControlMode = data['control_mode']?.toString();
         final nextHeadfulReady = data['headful_ready'];
         final nextHeadfulStateRaw = data['headful_state'];
+        final nextHeadfulPlanRaw = data['headful_plan'];
         Map<String, dynamic>? nextHeadfulState;
         if (nextHeadfulStateRaw is Map<String, dynamic>) {
           nextHeadfulState = nextHeadfulStateRaw;
         } else if (nextHeadfulStateRaw is Map) {
           nextHeadfulState = Map<String, dynamic>.from(nextHeadfulStateRaw);
         }
+        Map<String, dynamic>? nextHeadfulPlan;
+        if (nextHeadfulPlanRaw is Map<String, dynamic>) {
+          nextHeadfulPlan = nextHeadfulPlanRaw;
+        } else if (nextHeadfulPlanRaw is Map) {
+          nextHeadfulPlan = Map<String, dynamic>.from(nextHeadfulPlanRaw);
+        }
         final nextHeadfulStateSig = nextHeadfulState == null ? null : jsonEncode(nextHeadfulState);
+        final nextHeadfulPlanSig = nextHeadfulPlan == null ? null : jsonEncode(nextHeadfulPlan);
         final tail = trimmedLogs.isNotEmpty ? trimmedLogs.last : null;
         final changed = trimmedLogs.length != _lastLogCount ||
             tail != _lastLogTail ||
@@ -335,7 +358,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
             nextMsAuthUrl != _lastMsAuthUrl ||
             nextBackendControlMode != _lastBackendControlMode ||
             nextHeadfulReady != _lastHeadfulReady ||
-            nextHeadfulStateSig != _lastHeadfulStateSig;
+            nextHeadfulStateSig != _lastHeadfulStateSig ||
+            nextHeadfulPlanSig != _lastHeadfulPlanSig;
 
         if (!changed) return;
 
@@ -345,6 +369,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         _backendControlMode = nextBackendControlMode;
         _headfulReady = nextHeadfulReady is bool ? nextHeadfulReady : null;
         _headfulState = nextHeadfulState;
+        _headfulPlan = nextHeadfulPlan;
         _lastLogCount = trimmedLogs.length;
         _lastLogTail = tail;
         _lastMsAuthCode = nextMsAuthCode;
@@ -352,6 +377,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         _lastBackendControlMode = nextBackendControlMode;
         _lastHeadfulReady = _headfulReady;
         _lastHeadfulStateSig = nextHeadfulStateSig;
+        _lastHeadfulPlanSig = nextHeadfulPlanSig;
         _notify();
       }
     } catch (e) {
@@ -416,6 +442,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       );
       return;
     }
+    await _sendHeadfulAction(context, action);
+  }
+
+  Future<void> _sendHeadfulAction(BuildContext context, Map<String, dynamic> action) async {
     if (!action.containsKey('type')) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('动作 JSON 缺少 type 字段')),
@@ -441,6 +471,251 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         SnackBar(content: Text('动作发送失败: $e')),
       );
     }
+  }
+
+  Future<void> _sendHeadfulSkill(
+    BuildContext context,
+    String skill, {
+    Map<String, dynamic>? params,
+  }) async {
+    final controller = SettingsScope.of(context);
+    final backendUrl = controller.settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
+    final payloadParams = Map<String, dynamic>.from(params ?? {});
+    if (!payloadParams.containsKey('rag_user_id') ||
+        (payloadParams['rag_user_id'] is String && (payloadParams['rag_user_id'] as String).trim().isEmpty)) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final sessionId = prefs.getString('chat.currentSessionId');
+        if (sessionId != null && sessionId.trim().isNotEmpty) {
+          payloadParams['rag_user_id'] = sessionId.trim();
+        }
+      } catch (_) {}
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/v1/plugins/$id/headful_skill'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'skill': skill,
+          'params': payloadParams,
+        }),
+      );
+      if (!context.mounted) return;
+      final ok = response.statusCode == 200;
+      String message = ok ? '技能已发送' : '技能失败: ${response.statusCode}';
+      if (!ok) {
+        try {
+          final data = jsonDecode(response.body);
+          final detail = data is Map<String, dynamic> ? data['detail'] : null;
+          if (detail != null) {
+            message = '技能失败: $detail';
+          }
+        } catch (_) {}
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('技能发送失败: $e')),
+      );
+    }
+  }
+
+  double _stateNumber(String key, double fallback) {
+    final state = _headfulState;
+    if (state == null) return fallback;
+    final val = state[key];
+    if (val is num) return val.toDouble();
+    return fallback;
+  }
+
+  double _normalizeYaw(double yaw) {
+    var value = yaw % 360;
+    if (value < 0) value += 360;
+    return value;
+  }
+
+  double _clampPitch(double pitch) {
+    final clamped = pitch.clamp(-90.0, 90.0);
+    return clamped is num ? clamped.toDouble() : pitch;
+  }
+
+  String _formatHeadfulPlanAction(dynamic action) {
+    if (action is! Map) return action.toString();
+    final type = action['type']?.toString() ?? 'unknown';
+    switch (type) {
+      case 'equip':
+        return '装备: ${action['sourceSlot']} -> ${action['target']}';
+      case 'moveStack':
+        return '移动堆叠: ${action['fromSlot']} -> ${action['toSlot']}';
+      case 'moveOne':
+        return '移动单个: ${action['fromSlot']} -> ${action['toSlot']}';
+      case 'quickMove':
+        return '快速移动: ${action['slot']}';
+      case 'clickSlot':
+        return '点击槽位: ${action['slot']} action=${action['action']} btn=${action['button'] ?? 0}';
+      case 'openInventory':
+        return '打开背包';
+      case 'closeScreen':
+        return '关闭界面';
+      case 'screenSnapshot':
+        return '刷新快照';
+      case 'wait':
+        return '等待 ${action['ms']}ms';
+      default:
+        return jsonEncode(action);
+    }
+  }
+
+  void _showHeadfulPlanDialog(BuildContext context) {
+    final plan = _headfulPlan;
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        final actionsRaw = plan?['actions'];
+        final actions = actionsRaw is List ? actionsRaw : <dynamic>[];
+        final reason = plan?['reason']?.toString();
+        final planner = plan?['planner']?.toString();
+        final planText = plan?['plan_text']?.toString();
+        final warningsRaw = plan?['warnings'];
+        final warnings = warningsRaw is List
+            ? warningsRaw.map((w) => w.toString()).toList()
+            : <String>[];
+        final traceRaw = plan?['trace'];
+        final trace = traceRaw is List ? traceRaw : <dynamic>[];
+        final autoError = plan?['auto_error']?.toString();
+        final autoSubsteps = plan?['auto_substeps'];
+
+        return Dialog(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.article_outlined),
+                      const SizedBox(width: 8),
+                      const Text(
+                        '规划窗口',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    plan == null ? '暂无规划' : '规划器：${planner ?? "--"}',
+                    style: const TextStyle(color: Colors.black87),
+                  ),
+                  if (reason != null && reason.isNotEmpty)
+                    Text('原因：$reason'),
+                  if (autoError != null && autoError.isNotEmpty)
+                    Text('自动合成异常：$autoError', style: const TextStyle(color: Colors.redAccent)),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (planText != null && planText.isNotEmpty) ...[
+                            const Text('文本计划', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            SelectableText(
+                              planText,
+                              style: const TextStyle(fontFamily: 'monospace'),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          const Text('步骤', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          if (actions.isEmpty)
+                            const Text('暂无可执行步骤')
+                          else
+                            ...actions.asMap().entries.map(
+                                  (entry) => Text(
+                                    '${entry.key + 1}. ${_formatHeadfulPlanAction(entry.value)}',
+                                    style: const TextStyle(fontFamily: 'monospace'),
+                                  ),
+                                ),
+                          if (autoSubsteps is List && autoSubsteps.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            const Text('自动合成子步骤', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            ...autoSubsteps.map((step) => Text(step.toString())),
+                          ],
+                          if (warnings.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Text('警告：${warnings.join('；')}', style: const TextStyle(color: Colors.orange)),
+                          ],
+                          if (trace.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            const Text('回退链路', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            ...trace.map((entry) {
+                              if (entry is! Map) return Text(entry.toString());
+                              final plannerName = entry['planner']?.toString() ?? '--';
+                              final stepCount = entry['actions']?.toString() ?? '--';
+                              final entryReason = entry['reason']?.toString();
+                              final entryError = entry['error']?.toString();
+                              final parts = <String>[
+                                plannerName,
+                                'steps=$stepCount',
+                                if (entryReason != null && entryReason.isNotEmpty) entryReason,
+                                if (entryError != null && entryError.isNotEmpty) 'error=$entryError',
+                              ];
+                              return Text(parts.join(' | '));
+                            }),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _sendHeadfulLookDelta(BuildContext context, double deltaYaw, double deltaPitch) async {
+    final baseYaw = _stateNumber('yaw', 0);
+    final basePitch = _stateNumber('pitch', 0);
+    final yaw = _normalizeYaw(baseYaw + deltaYaw);
+    final pitch = _clampPitch(basePitch + deltaPitch);
+    await _sendHeadfulAction(context, {
+      'type': 'look',
+      'yaw': yaw,
+      'pitch': pitch,
+    });
+  }
+
+  Future<void> _sendHeadfulLookSmoothDelta(
+    BuildContext context,
+    double deltaYaw,
+    double deltaPitch, {
+    int durationMs = 400,
+  }) async {
+    final baseYaw = _stateNumber('yaw', 0);
+    final basePitch = _stateNumber('pitch', 0);
+    final yaw = _normalizeYaw(baseYaw + deltaYaw);
+    final pitch = _clampPitch(basePitch + deltaPitch);
+    await _sendHeadfulAction(context, {
+      'type': 'lookSmooth',
+      'yaw': yaw,
+      'pitch': pitch,
+      'durationMs': durationMs,
+    });
   }
 
   @override
@@ -499,6 +774,56 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 Text('位置：$posText  视角：$yawText/$pitchText'),
                 Text('血量：$hpText  饥饿：$foodText'),
                 Text('维度：$dimText  窗口焦点：$focusedText'),
+              ],
+            ),
+          );
+        }
+
+        Widget buildHeadfulPlanSummary(BuildContext context) {
+          final plan = _headfulPlan;
+          final goal = plan?['goal']?.toString() ?? '--';
+          final reason = plan?['reason']?.toString();
+          final planner = plan?['planner']?.toString();
+          final actionsRaw = plan?['actions'];
+          final actions = actionsRaw is List ? actionsRaw : <dynamic>[];
+          final executed = plan?['executed'];
+          final summary = plan == null
+              ? '暂无规划'
+              : '步骤 ${actions.length}，${executed != null ? "已执行 $executed" : "未执行"}';
+
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '规划摘要',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('目标：$goal'),
+                      if (planner != null && planner.isNotEmpty) Text('规划器：$planner'),
+                      if (reason != null && reason.isNotEmpty) Text('原因：$reason'),
+                      Text(summary),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: plan == null ? null : () => _showHeadfulPlanDialog(context),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('查看详情'),
+                ),
               ],
             ),
           );
@@ -566,6 +891,13 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   value: modVisionStream,
                   onChanged: (v) => _updateState(() => modVisionStream = v),
                 ),
+                TextField(
+                  controller: headfulRagUserIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'RAG 用户 ID (可选)',
+                    hintText: '留空则使用 AI 代理名称',
+                  ),
+                ),
                 const SizedBox(height: 12),
                 _buildSectionTitle('Headful 快捷控制'),
                 const Text('用于本地模组调试，可发送聊天/指令或动作 JSON。', style: TextStyle(color: Colors.grey)),
@@ -627,6 +959,522 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                       label: const Text('停止移动'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('预置动作'),
+                const Text('用于快速测试移动输入（模拟方向键）。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'forward': 1,
+                        'durationMs': 500,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_up),
+                      label: const Text('前进'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'forward': -1,
+                        'durationMs': 500,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_down),
+                      label: const Text('后退'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'strafe': -1,
+                        'durationMs': 500,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_left),
+                      label: const Text('左移'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'strafe': 1,
+                        'durationMs': 500,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_right),
+                      label: const Text('右移'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'jump': true,
+                        'durationMs': 250,
+                      }),
+                      icon: const Icon(Icons.arrow_upward),
+                      label: const Text('跳跃'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'move',
+                        'forward': 1,
+                        'sprint': true,
+                        'durationMs': 800,
+                      }),
+                      icon: const Icon(Icons.directions_run),
+                      label: const Text('冲刺前进'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'stopMove',
+                      }),
+                      icon: const Icon(Icons.stop),
+                      label: const Text('停步'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('持续按键'),
+                const Text('用于长时间按住（需要手动释放）。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'forward',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_up),
+                      label: const Text('按住前进'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'back',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_down),
+                      label: const Text('按住后退'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'left',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_left),
+                      label: const Text('按住左移'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'right',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.keyboard_arrow_right),
+                      label: const Text('按住右移'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'sprint',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.directions_run),
+                      label: const Text('按住疾跑'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'sneak',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.south),
+                      label: const Text('按住潜行'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'attack',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.gavel),
+                      label: const Text('按住攻击'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'setKey',
+                        'key': 'use',
+                        'pressed': true,
+                      }),
+                      icon: const Icon(Icons.pan_tool_alt),
+                      label: const Text('按住使用'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'releaseAllKeys',
+                      }),
+                      icon: const Icon(Icons.stop),
+                      label: const Text('释放全部'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('轻触按键'),
+                const Text('用于触发单次按键行为。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'tapKey',
+                        'key': 'attack',
+                        'durationMs': 120,
+                      }),
+                      icon: const Icon(Icons.flash_on),
+                      label: const Text('短按攻击'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'tapKey',
+                        'key': 'use',
+                        'durationMs': 120,
+                      }),
+                      icon: const Icon(Icons.touch_app),
+                      label: const Text('短按使用'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'tapKey',
+                        'key': 'drop',
+                        'durationMs': 120,
+                      }),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('丢弃手持'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'tapKey',
+                        'key': 'swap',
+                        'durationMs': 120,
+                      }),
+                      icon: const Icon(Icons.sync_alt),
+                      label: const Text('交换副手'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('界面/容器'),
+                const Text('打开/关闭界面或请求容器快照。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'openInventory',
+                      }),
+                      icon: const Icon(Icons.inventory_2),
+                      label: const Text('打开背包'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'closeScreen',
+                      }),
+                      icon: const Icon(Icons.close),
+                      label: const Text('关闭界面'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'screenSnapshot',
+                      }),
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('容器快照'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('背包/容器技能'),
+                const Text('自动装备、热键整理与容器转移（基础版）。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'auto_equip'),
+                      icon: const Icon(Icons.shield),
+                      label: const Text('自动装备'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'auto_sort_hotbar'),
+                      icon: const Icon(Icons.view_week),
+                      label: const Text('整理热键栏'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'container_transfer',
+                          params: {'direction': 'to_inventory'}),
+                      icon: const Icon(Icons.move_to_inbox),
+                      label: const Text('容器 -> 背包'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'container_transfer',
+                          params: {'direction': 'to_container'}),
+                      icon: const Icon(Icons.outbox),
+                      label: const Text('背包 -> 容器'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: headfulCraftItemController,
+                        decoration: const InputDecoration(
+                          labelText: '合成目标',
+                          hintText: 'diamond_pickaxe',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 100,
+                      child: TextField(
+                        controller: headfulCraftCountController,
+                        decoration: const InputDecoration(
+                          labelText: '数量',
+                          hintText: '1',
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        final item = headfulCraftItemController.text.trim();
+                        final count = int.tryParse(headfulCraftCountController.text.trim()) ?? 1;
+                        if (item.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('请输入合成目标')),
+                          );
+                          return;
+                        }
+                        _sendHeadfulSkill(context, 'craft', params: {
+                          'item': item,
+                          'count': count,
+                        });
+                      },
+                      icon: const Icon(Icons.build),
+                      label: const Text('执行合成'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('AI 步骤规划'),
+                const Text('主脑规划背包/容器操作步骤，可选择是否直接执行。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: headfulPlanGoalController,
+                  decoration: const InputDecoration(
+                    labelText: '规划目标',
+                    hintText: '例如：装备铁套并把盾牌放到副手',
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('启用 RAG 知识检索'),
+                  subtitle: const Text('使用向量库补充游戏知识（如果已构建）'),
+                  value: headfulPlanUseRag,
+                  onChanged: (v) => _updateState(() => headfulPlanUseRag = v),
+                ),
+                SwitchListTile(
+                  title: const Text('使用 MindCraft 文档'),
+                  subtitle: const Text('复用 MindCraft 文档记忆（首次使用会索引）'),
+                  value: headfulPlanUseMindcraftDocs,
+                  onChanged: (v) => _updateState(() => headfulPlanUseMindcraftDocs = v),
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        final goal = headfulPlanGoalController.text.trim();
+                        if (goal.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('请输入规划目标')),
+                          );
+                          return;
+                        }
+                        _sendHeadfulSkill(context, 'plan', params: {
+                          'goal': goal,
+                          'use_rag': headfulPlanUseRag,
+                          'rag_user_id': headfulRagUserIdController.text.trim(),
+                          'use_mindcraft_docs': headfulPlanUseMindcraftDocs,
+                        });
+                      },
+                      icon: const Icon(Icons.psychology),
+                      label: const Text('仅规划'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final goal = headfulPlanGoalController.text.trim();
+                        if (goal.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('请输入规划目标')),
+                          );
+                          return;
+                        }
+                        _sendHeadfulSkill(context, 'plan_execute', params: {
+                          'goal': goal,
+                          'use_rag': headfulPlanUseRag,
+                          'rag_user_id': headfulRagUserIdController.text.trim(),
+                          'use_mindcraft_docs': headfulPlanUseMindcraftDocs,
+                        });
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('规划并执行'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                buildHeadfulPlanSummary(context),
+                const SizedBox(height: 12),
+                _buildSectionTitle('视角控制'),
+                const Text('根据当前视角做相对调整，需要状态已刷新。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulLookDelta(context, -45, 0),
+                      icon: const Icon(Icons.rotate_left),
+                      label: const Text('左转 45°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookDelta(context, 45, 0),
+                      icon: const Icon(Icons.rotate_right),
+                      label: const Text('右转 45°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookDelta(context, 180, 0),
+                      icon: const Icon(Icons.replay),
+                      label: const Text('回头 180°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookDelta(context, 0, -15),
+                      icon: const Icon(Icons.arrow_upward),
+                      label: const Text('抬头 15°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookDelta(context, 0, 15),
+                      icon: const Icon(Icons.arrow_downward),
+                      label: const Text('低头 15°'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('平滑视角'),
+                const Text('缓慢转向，减少画面抖动。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulLookSmoothDelta(context, -90, 0, durationMs: 600),
+                      icon: const Icon(Icons.rotate_left),
+                      label: const Text('平滑左转 90°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 90, 0, durationMs: 600),
+                      icon: const Icon(Icons.rotate_right),
+                      label: const Text('平滑右转 90°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 180, 0, durationMs: 800),
+                      icon: const Icon(Icons.replay),
+                      label: const Text('平滑回头 180°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 0, -20, durationMs: 500),
+                      icon: const Icon(Icons.arrow_upward),
+                      label: const Text('平滑抬头 20°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 0, 20, durationMs: 500),
+                      icon: const Icon(Icons.arrow_downward),
+                      label: const Text('平滑低头 20°'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'stopLook',
+                      }),
+                      icon: const Icon(Icons.pause),
+                      label: const Text('停止平滑'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('交互快捷键'),
+                const Text('对准方块/实体后使用，可快速验证交互。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'attackTarget',
+                      }),
+                      icon: const Icon(Icons.gavel),
+                      label: const Text('攻击目标'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'useTarget',
+                      }),
+                      icon: const Icon(Icons.pan_tool_alt),
+                      label: const Text('使用/交互'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'stopInput',
+                      }),
+                      icon: const Icon(Icons.pause),
+                      label: const Text('停止输入'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('热键栏'),
+                const Text('快速切换 1-9 号槽位。', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: List.generate(9, (i) {
+                    final slot = i;
+                    return OutlinedButton(
+                      onPressed: () => _sendHeadfulAction(context, {
+                        'type': 'hotbar',
+                        'slot': slot,
+                      }),
+                      child: Text('${i + 1}'),
+                    );
+                  }),
                 ),
                 const SizedBox(height: 12),
               ],
@@ -869,9 +1717,22 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(
-        title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 18,
+            decoration: BoxDecoration(
+              color: Colors.blueGrey,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+        ],
       ),
     );
   }
