@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 from ..base import BasePlugin
 from app.services.live2d_service import manager as live2d_manager
 from app.services.audio_service import AudioService
@@ -42,7 +42,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
             logger=logger,
             log_append=self._append_log,
             on_ready=self._set_headful_ready,
-            on_state=self._set_headful_state
+            on_state=self._set_headful_state,
+            on_event=self._handle_headful_event,
         )
         self._headful_inventory = HeadfulInventoryController(
             logger=logger,
@@ -82,6 +83,96 @@ class MinecraftMindcraftPlugin(BasePlugin):
     def _set_headful_state(self, state: Dict[str, Any] | None) -> None:
         self._headful_last_state = state
 
+    def _headful_chat_config(self) -> Dict[str, Any]:
+        cfg = self.config.get("headful", {})
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _chat_sender_allowed(self, sender: str, cfg: Dict[str, Any]) -> bool:
+        whitelist = cfg.get("chat_whitelist", [])
+        if isinstance(whitelist, str):
+            whitelist = [whitelist]
+        if not isinstance(whitelist, list):
+            return True
+        normalized = [str(x).strip().lower() for x in whitelist if str(x).strip()]
+        if not normalized:
+            return True
+        if "*" in normalized:
+            return True
+        sender_norm = (sender or "").strip().lower()
+        return sender_norm in normalized
+
+    def _apply_chat_prefix(self, message: str, cfg: Dict[str, Any]) -> Optional[str]:
+        prefixes = cfg.get("chat_command_prefixes", [])
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        if not isinstance(prefixes, list):
+            return message
+        cleaned = [str(p) for p in prefixes if str(p)]
+        if not cleaned:
+            return message
+        for prefix in cleaned:
+            if message.startswith(prefix):
+                if cfg.get("chat_strip_prefix", True):
+                    return message[len(prefix):].strip()
+                return message
+        return None
+
+    async def _maybe_plan_from_chat(
+        self,
+        message: str,
+        sender: str,
+        source: str,
+        is_self: bool = False,
+    ) -> bool:
+        cfg = self._headful_chat_config()
+        if not cfg.get("chat_plan_enabled", False):
+            return False
+        if source == "game" and not cfg.get("chat_plan_game", True):
+            return False
+        if source == "frontend" and not cfg.get("chat_plan_frontend", True):
+            return False
+        if is_self and cfg.get("chat_ignore_self", True):
+            return False
+        if source == "game" and not self._chat_sender_allowed(sender, cfg):
+            return False
+        message = (message or "").strip()
+        if not message:
+            return False
+        prefixed = self._apply_chat_prefix(message, cfg)
+        if prefixed is None or not prefixed.strip():
+            return False
+        goal = prefixed.strip()
+        params: Dict[str, Any] = {"goal": goal}
+        rag_user_id = self.config.get("rag_user_id") or self.config.get("agent_name")
+        if rag_user_id:
+            params["rag_user_id"] = rag_user_id
+        if "chat_use_rag" in cfg:
+            params["use_rag"] = bool(cfg.get("chat_use_rag"))
+        if "chat_use_mindcraft_docs" in cfg:
+            params["use_mindcraft_docs"] = bool(cfg.get("chat_use_mindcraft_docs"))
+        self._append_log(f"Headful chat plan ({source}) {sender}: {goal}")
+        result = await self._headful_inventory.run("plan_execute", params)
+        if not result.get("ok"):
+            self._append_log(f"Headful chat plan failed: {result.get('error')}")
+            return False
+        return True
+
+    async def _handle_headful_event(self, payload: Dict[str, Any]) -> None:
+        event = payload.get("event")
+        if event != "chat":
+            return
+        if self.control_mode != "headful":
+            return
+        message = payload.get("message") or payload.get("text") or ""
+        sender = payload.get("sender") or payload.get("senderName") or ""
+        is_self = bool(payload.get("self", False))
+        await self._maybe_plan_from_chat(
+            str(message),
+            str(sender),
+            source="game",
+            is_self=is_self,
+        )
+
     async def setup(self):
         """初始化插件配置，从本地 settings.json 加载"""
         logger.info(f"[{self.name}] 正在初始化配置，路径: {self.config_path}")
@@ -106,7 +197,18 @@ class MinecraftMindcraftPlugin(BasePlugin):
                     "token": "",
                     "event_interval_ms": 200,
                     "scan_radius": 16,
-                    "vision_stream": False
+                    "vision_stream": False,
+                    "debug": False,
+                    "debug_chat": False,
+                    "chat_plan_enabled": True,
+                    "chat_plan_game": True,
+                    "chat_plan_frontend": True,
+                    "chat_ignore_self": True,
+                    "chat_whitelist": [],
+                    "chat_command_prefixes": [],
+                    "chat_strip_prefix": True,
+                    "chat_use_rag": True,
+                    "chat_use_mindcraft_docs": True
                 }
             }
             try:
@@ -136,10 +238,26 @@ class MinecraftMindcraftPlugin(BasePlugin):
                             "token": "",
                             "event_interval_ms": 200,
                             "scan_radius": 16,
-                            "vision_stream": False
+                            "vision_stream": False,
+                            "debug": False,
+                            "debug_chat": False,
+                            "chat_plan_enabled": True,
+                            "chat_plan_game": True,
+                            "chat_plan_frontend": True,
+                            "chat_ignore_self": True,
+                            "chat_whitelist": [],
+                            "chat_command_prefixes": [],
+                            "chat_strip_prefix": True,
+                            "chat_use_rag": True,
+                            "chat_use_mindcraft_docs": True
                         }
                     }
-                    self.config = {**default_config, **loaded_config}
+                    loaded_headful = loaded_config.get("headful")
+                    if isinstance(loaded_headful, dict):
+                        merged_headful = {**default_config["headful"], **loaded_headful}
+                    else:
+                        merged_headful = default_config["headful"]
+                    self.config = {**default_config, **loaded_config, "headful": merged_headful}
                 logger.info(f"[{self.name}] 已从本地加载配置")
             except Exception as e:
                 logger.error(f"[{self.name}] 加载本地配置失败，将使用内存中的默认值: {e}")
@@ -289,7 +407,22 @@ class MinecraftMindcraftPlugin(BasePlugin):
         """执行 headful 背包/容器技能（基于屏幕快照与槽位操作）。"""
         if self.control_mode != "headful":
             return {"ok": False, "error": "not_headful"}
-        return await self._headful_inventory.run(skill, params or {})
+        try:
+            return await self._headful_inventory.run(skill, params or {})
+        except Exception as exc:
+            logger.exception("[Minecraft-mindcraft] Headful skill failed: %s", skill)
+            self._append_log(f"Headful skill exception: {exc}")
+            return {"ok": False, "error": "exception", "detail": str(exc)}
+
+    async def handle_frontend_chat(self, message: str, sender: str = "frontend") -> bool:
+        if self.control_mode != "headful":
+            return False
+        return await self._maybe_plan_from_chat(
+            message,
+            sender,
+            source="frontend",
+            is_self=False,
+        )
 
     async def get_status(self) -> Dict[str, Any]:
         """获取插件状态，供前端轮询"""

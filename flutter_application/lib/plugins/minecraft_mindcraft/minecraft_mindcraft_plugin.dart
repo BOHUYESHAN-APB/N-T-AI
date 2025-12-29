@@ -1196,6 +1196,21 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                       icon: const Icon(Icons.camera_alt),
                       label: const Text('容器快照'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'set_debug', params: {
+                        'enabled': true,
+                        'chat': false,
+                      }),
+                      icon: const Icon(Icons.bug_report),
+                      label: const Text('开启调试'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendHeadfulSkill(context, 'set_debug', params: {
+                        'enabled': false,
+                      }),
+                      icon: const Icon(Icons.bug_report_outlined),
+                      label: const Text('关闭调试'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -1271,9 +1286,15 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                           );
                           return;
                         }
-                        _sendHeadfulSkill(context, 'craft', params: {
+                        _sendHeadfulSkill(context, 'craft_from_container', params: {
                           'item': item,
                           'count': count,
+                          'smart_pickup': true,
+                          'precise_pickup': true,
+                          'multi_container': true,
+                          'search_radius': modScanRadius,
+                          'container_radius': modScanRadius,
+                          'table_radius': modScanRadius,
                         });
                       },
                       icon: const Icon(Icons.build),

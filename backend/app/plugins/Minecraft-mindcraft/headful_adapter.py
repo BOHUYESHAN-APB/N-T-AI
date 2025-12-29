@@ -13,11 +13,13 @@ class HeadfulAdapter:
         log_append: Callable[[str], None],
         on_ready: Callable[[bool], None],
         on_state: Callable[[Optional[Dict[str, Any]]], None],
+        on_event: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ) -> None:
         self._logger = logger
         self._log_append = log_append
         self._on_ready = on_ready
         self._on_state = on_state
+        self._on_event = on_event
         self._ws_task: asyncio.Task | None = None
         self._ws = None
         self._stop_event = asyncio.Event()
@@ -27,6 +29,8 @@ class HeadfulAdapter:
         self.last_state: Optional[Dict[str, Any]] = None
         self.last_screen: Optional[Dict[str, Any]] = None
         self._screen_waiters: list[asyncio.Future] = []
+        self._pending_requests: Dict[str, asyncio.Future] = {}
+        self._request_counter = 0
 
     async def activate(self, config: Dict[str, Any]) -> bool:
         if self._ws_task and not self._ws_task.done():
@@ -124,6 +128,38 @@ class HeadfulAdapter:
             except ValueError:
                 pass
 
+    async def request_action(
+        self,
+        action: Dict[str, Any],
+        config: Dict[str, Any],
+        timeout: float = 2.0,
+    ) -> Optional[Dict[str, Any]]:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; request failed.")
+            return None
+        loop = asyncio.get_running_loop()
+        self._request_counter += 1
+        request_id = f"req_{int(time.time() * 1000)}_{self._request_counter}"
+        future: asyncio.Future = loop.create_future()
+        self._pending_requests[request_id] = future
+        payload = dict(action or {})
+        payload["requestId"] = request_id
+        ok = await self.send_action(payload, config)
+        if not ok:
+            if not future.done():
+                future.cancel()
+            self._pending_requests.pop(request_id, None)
+            return None
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._log_append("Headful request timeout.")
+            return None
+        finally:
+            if not future.done():
+                future.cancel()
+            self._pending_requests.pop(request_id, None)
+
     async def _run(self, config: Dict[str, Any]) -> None:
         backoff = 1
         while not self._stop_event.is_set():
@@ -143,6 +179,12 @@ class HeadfulAdapter:
                         sub["token"] = token
                     await ws.send(json.dumps(sub))
                     self._log_append("Headful WS connected and subscribed.")
+                    debug_enabled = bool((config or {}).get("debug", False))
+                    debug_chat = bool((config or {}).get("debug_chat", False))
+                    await self.send_action(
+                        {"type": "setDebug", "enabled": debug_enabled, "chat": debug_chat},
+                        config,
+                    )
                     async for message in ws:
                         await self._handle_message(message)
             except Exception as e:
@@ -159,6 +201,12 @@ class HeadfulAdapter:
         except Exception:
             self._log_append(f"Headful WS raw: {message}")
             return
+        req_id = data.get("requestId")
+        if req_id and req_id in self._pending_requests:
+            future = self._pending_requests.pop(req_id)
+            if not future.done():
+                future.set_result(data)
+            return
 
         msg_type = data.get("type")
         if msg_type == "state":
@@ -172,6 +220,10 @@ class HeadfulAdapter:
                 self._last_log = now
         elif msg_type == "event":
             self._log_append(f"Headful event: {data.get('event')}")
+            if self._on_event is not None:
+                result = self._on_event(data)
+                if asyncio.iscoroutine(result):
+                    await result
         elif msg_type == "hello":
             self._log_append("Headful WS hello received.")
         elif msg_type == "screen_snapshot":

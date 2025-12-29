@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -34,6 +35,11 @@ async def update_minecraft_config(request_data: Dict[str, Any]):
     
     # 获取配置数据，处理前端可能发送的 {"config": {...}} 或直接 {...}
     config = request_data.get("config", request_data)
+    if isinstance(config, dict) and isinstance(config.get("headful"), dict):
+        existing = plugin.config.get("headful", {})
+        if isinstance(existing, dict):
+            merged_headful = {**existing, **config["headful"]}
+            config = {**config, "headful": merged_headful}
     
     # 更新插件内存中的配置
     plugin.config.update(config)
@@ -164,7 +170,8 @@ async def send_message_to_agent(req: SendMessageRequest):
     if getattr(plugin, "control_mode", "headless") == "headful":
         ok = await plugin.send_headful_message(req.message)
         if ok:
-            return {"status": "ok"}
+            plan_ok = await plugin.handle_frontend_chat(req.message, sender=req.sender or "frontend")
+            return {"status": "ok", "plan_ok": plan_ok}
         raise HTTPException(status_code=502, detail="Failed to send headful message")
     ms_port = plugin.config.get("mindserver_port", 8080)
     url = f"http://localhost:{ms_port}/api/send-message"
@@ -205,9 +212,10 @@ async def run_headful_skill(req: HeadfulSkillRequest):
     if getattr(plugin, "control_mode", "headless") != "headful":
         raise HTTPException(status_code=400, detail="Plugin not in headful mode")
     result = await plugin.run_headful_skill(req.skill, req.params or {})
+    encoded = jsonable_encoder(result)
     if result.get("ok"):
-        return {"status": "ok", "result": result}
-    raise HTTPException(status_code=400, detail=result)
+        return {"status": "ok", "result": encoded}
+    raise HTTPException(status_code=400, detail=encoded)
 
 @router.get("/stream", response_class=HTMLResponse)
 async def get_minecraft_stream():
