@@ -144,6 +144,18 @@ def main():
 
         probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
         
+        def _resolve_server_info_path():
+            env_path = os.environ.get("SERVER_INFO_PATH", "").strip()
+            if env_path:
+                return env_path
+            if is_frozen:
+                base_dir = os.path.dirname(sys.executable)
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            return os.path.join(base_dir, "server_info.json")
+
+        server_info_path = _resolve_server_info_path()
+
         # Helper to write server info
         def _write_server_info(scheme, host, port):
             try:
@@ -154,7 +166,10 @@ def main():
                     "pid": os.getpid(),
                     "scheme": scheme
                 }
-                with open("server_info.json", "w") as f:
+                server_info_dir = os.path.dirname(server_info_path)
+                if server_info_dir:
+                    os.makedirs(server_info_dir, exist_ok=True)
+                with open(server_info_path, "w") as f:
                     json.dump(info, f)
                 print(f"[SERVER_INFO] {json.dumps(info)}")
             except Exception as e:
@@ -162,7 +177,11 @@ def main():
 
         # Try finding an available port if the default is taken
         start_port = port
-        disable_port_scan = os.environ.get("DISABLE_PORT_SCAN", "false").lower() == "true"
+        disable_port_scan_env = os.environ.get("DISABLE_PORT_SCAN")
+        if disable_port_scan_env is None or disable_port_scan_env.strip() == "":
+            disable_port_scan = not is_frozen
+        else:
+            disable_port_scan = disable_port_scan_env.lower() == "true"
         max_retries = 0 if disable_port_scan else 10
             
         actual_port = start_port

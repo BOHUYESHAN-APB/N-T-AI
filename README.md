@@ -368,6 +368,8 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 ## 🗺️ 开发路线图 / Roadmap
 
 ### 🔴 高优先级（当前重点） / High Priority (Current Focus)
+*   **[最高优先级] 系统架构修复与 Agent/MCP/Service 联通整治（Minecraft 插件更新后执行）**：详见 `ARCHITECTURE_IMPROVEMENTS.md`。
+    *   **[Highest Priority] Architecture fixes for Agent/MCP/Service integration (after Minecraft plugin update)**: see `ARCHITECTURE_IMPROVEMENTS.md`.
 *   **深度源集成（AEC & 元数据）/ Deep Source Integration (AEC & Metadata)**:
     *   **回声消除 (AEC)**：实现软件级锁定，防止 AI 在 TTS 播放时"听到自己"。
     *   **多源元数据**：重构消息结构，清晰区分直接消息、语音频道 (KOOK/Discord)、Minecraft 聊天和插件弹幕。

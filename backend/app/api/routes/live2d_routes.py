@@ -10,9 +10,10 @@ from app.services.motion_agent_service import MotionAgentService
 from app.services.llm_service import LLMService
 from app.services.audio_service import AudioService
 from app.services.vts_service import vts_service
-from app.core.config import settings
+from app.core.config import settings, STATIC_DIR
 import io
 import wave
+from pathlib import Path
 
 router = APIRouter(prefix="/api/live2d", tags=["live2d"])
 
@@ -103,6 +104,61 @@ class ProactiveChatRequest(BaseModel):
 async def toggle_proactive_chat(request: ProactiveChatRequest):
     priority_manager.set_proactive_chat(request.enabled)
     return {"status": "ok", "enabled": request.enabled}
+
+def _derive_emotion_mapping(config_data: Dict[str, Any]) -> Dict[str, Any]:
+    mapping = config_data.get("EmotionMapping")
+    if mapping:
+        return mapping
+    derived: Dict[str, Any] = {"motions": {}, "expressions": {}}
+    file_refs = config_data.get("FileReferences", {}) or {}
+    motions = file_refs.get("Motions", {}) or {}
+    for group_name, items in motions.items():
+        files: List[str] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            file_path = item.get("File")
+            if file_path:
+                files.append(str(file_path).replace("\\", "/"))
+        derived["motions"][group_name] = files
+    expressions = file_refs.get("Expressions", []) or []
+    for item in expressions:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("Name") or ""
+        file_path = item.get("File") or ""
+        if not file_path:
+            continue
+        file_path = str(file_path).replace("\\", "/")
+        group = name.split("_", 1)[0] if "_" in name else "neutral"
+        derived["expressions"].setdefault(group, []).append(file_path)
+    return derived
+
+@router.get("/emotion_mapping/{model_name}")
+async def get_emotion_mapping(model_name: str):
+    base_dir = (STATIC_DIR / "live2d").resolve()
+    model_dir = (base_dir / model_name).resolve()
+    if base_dir not in model_dir.parents and model_dir != base_dir:
+        return {"success": True, "config": {"motions": {}, "expressions": {}}}
+    if not model_dir.exists():
+        return {"success": True, "config": {"motions": {}, "expressions": {}}}
+    model_json_path = None
+    for candidate in model_dir.glob("*.model3.json"):
+        model_json_path = candidate
+        break
+    if model_json_path is None:
+        for candidate in model_dir.glob("*.model.json"):
+            model_json_path = candidate
+            break
+    if model_json_path is None or not model_json_path.exists():
+        return {"success": True, "config": {"motions": {}, "expressions": {}}}
+    try:
+        with model_json_path.open("r", encoding="utf-8") as f:
+            config_data = json.load(f)
+    except Exception as exc:
+        print(f"[Live2D] Emotion mapping load failed: {exc}")
+        return {"success": True, "config": {"motions": {}, "expressions": {}}}
+    return {"success": True, "config": _derive_emotion_mapping(config_data)}
 
 class VTSHotkeyRequest(BaseModel):
     hotkey: str
@@ -574,11 +630,14 @@ async def broadcast_chat(request: ChatBroadcastRequest):
     return {"status": "ok", "clients": len(manager.active_connections)}
 
 @router.post("/agent/schedule_chat")
-async def schedule_chat(request: ScheduleChatRequest):
+async def schedule_chat(request: ScheduleChatRequest, raw_request: Request):
     task_id = str(uuid.uuid4())
     delay_ms = int(request.delay_ms or 0)
     if delay_ms < 0:
         delay_ms = 0
+    target_api_key = raw_request.headers.get("X-Target-Api-Key")
+    target_base_url = raw_request.headers.get("X-Target-Base-Url")
+    target_model = raw_request.headers.get("X-Target-Model")
 
     async def _run():
         try:
@@ -590,11 +649,32 @@ async def schedule_chat(request: ScheduleChatRequest):
             await chat_service.process_message(
                 message=request.prompt,
                 user_id=request.user_id,
+                target_api_key=target_api_key,
+                target_base_url=target_base_url,
+                target_model=target_model,
                 enable_thinking=bool(request.enable_thinking),
                 enable_search=bool(request.enable_search),
                 enable_backend_tts=bool(request.enable_backend_tts),
                 tts_mode=request.tts_mode,
             )
+        except Exception as exc:
+            err_text = str(exc)
+            print(f"[Live2D] Scheduled chat failed: {err_text}")
+            if "insufficient balance" in err_text.lower() or "402" in err_text:
+                tip = "LLM 余额不足或额度受限，请更换服务商或充值后重试。"
+            else:
+                tip = f"LLM 调用失败: {err_text}"
+            try:
+                await manager.broadcast(
+                    {
+                        "type": "chat_message",
+                        "text": tip,
+                        "sender": "system",
+                        "senderName": "system",
+                    }
+                )
+            except Exception:
+                pass
         finally:
             _scheduled_chat_tasks.pop(task_id, None)
 

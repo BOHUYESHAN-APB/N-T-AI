@@ -209,7 +209,6 @@ class BackendService {
         [],
         mode: ProcessStartMode.normal, // Use normal mode to capture stdout/stderr
         workingDirectory: backendWorkDir,
-        environment: {'DISABLE_PORT_SCAN': 'true'},
       );
       
       debugPrint('[BackendService] Backend process started with PID: ${_backendProcess?.pid}');
@@ -414,22 +413,32 @@ class BackendService {
         final content = await serverInfoFile.readAsString();
         final info = jsonDecode(content);
         final url = info['url'] as String;
+        final allowDynamicPort = !kDebugMode;
         final portOk = (() {
           try {
             final u = Uri.parse(url);
-            return u.port == 23456;
+            return allowDynamicPort || u.port == 23456;
           } catch (_) {
             return false;
           }
         })();
         if (portOk && url != _backendUrl) {
-           final now = DateTime.now().millisecondsSinceEpoch;
-           final last = _lastLogMs['server_info_recovered'] ?? 0;
-           if (now - last > 3000) {
-             _lastLogMs['server_info_recovered'] = now;
-             debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
+           if (!allowDynamicPort || await _isCompatibleBackend(url)) {
+             final now = DateTime.now().millisecondsSinceEpoch;
+             final last = _lastLogMs['server_info_recovered'] ?? 0;
+             if (now - last > 3000) {
+               _lastLogMs['server_info_recovered'] = now;
+               debugPrint('[BackendService] Recovered: Backend moved to $url (found in ${serverInfoFile.path})');
+             }
+             _updateUrlAndNotify(url);
+           } else {
+             final now = DateTime.now().millisecondsSinceEpoch;
+             final last = _lastLogMs['server_info_ignored'] ?? 0;
+             if (now - last > 3000) {
+               _lastLogMs['server_info_ignored'] = now;
+               debugPrint('[BackendService] Ignored server_info URL $url (incompatible backend). Keeping $_backendUrl');
+             }
            }
-           _updateUrlAndNotify(url);
         } else if (!portOk) {
            final now = DateTime.now().millisecondsSinceEpoch;
            final last = _lastLogMs['server_info_ignored'] ?? 0;

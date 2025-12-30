@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../settings/settings_controller.dart';
+import '../../settings/settings.dart';
 import '../../settings/settings_scope.dart';
 import '../base_plugin.dart';
 
@@ -27,6 +28,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     headfulCraftItemController = TextEditingController();
     headfulCraftCountController = TextEditingController(text: '1');
     headfulPlanGoalController = TextEditingController();
+    headfulCommandController = TextEditingController();
     headfulRagUserIdController = TextEditingController();
   }
 
@@ -47,6 +49,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   late TextEditingController headfulCraftItemController;
   late TextEditingController headfulCraftCountController;
   late TextEditingController headfulPlanGoalController;
+  late TextEditingController headfulCommandController;
   late TextEditingController headfulRagUserIdController;
 
   String controlMode = 'headless'; // headless: 现有无头；headful: Fabric 模组
@@ -59,6 +62,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   bool modVisionStream = false;
   bool headfulPlanUseRag = true;
   bool headfulPlanUseMindcraftDocs = true;
+  bool headfulSmartGuard = true;
+  bool headfulSmartGather = true;
 
   List<String> _logs = [];
   String? _msAuthCode;
@@ -142,6 +147,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     modEventIntervalMs = prefs.getInt('${headfulPrefix}eventIntervalMs') ?? 200;
     modScanRadius = prefs.getInt('${headfulPrefix}scanRadius') ?? 16;
     modVisionStream = prefs.getBool('${headfulPrefix}visionStream') ?? false;
+    headfulSmartGuard = prefs.getBool('${headfulPrefix}smartGuard') ?? true;
+    headfulSmartGather = prefs.getBool('${headfulPrefix}smartGather') ?? true;
     headfulRagUserIdController.text = prefs.getString('${headfulPrefix}ragUserId') ?? '';
 
     if (isEnabled) {
@@ -188,6 +195,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setInt('${headfulPrefix}eventIntervalMs', modEventIntervalMs);
     await prefs.setInt('${headfulPrefix}scanRadius', modScanRadius);
     await prefs.setBool('${headfulPrefix}visionStream', modVisionStream);
+    await prefs.setBool('${headfulPrefix}smartGuard', headfulSmartGuard);
+    await prefs.setBool('${headfulPrefix}smartGather', headfulSmartGather);
     await prefs.setString('${headfulPrefix}ragUserId', headfulRagUserIdController.text);
     await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null) {
@@ -199,18 +208,20 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     final settings = controller.settings;
     final backendUrl = settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
     final providers = controller.providers;
+    final llmProviders = providers.where((p) => p.category == AiProviderCategory.llm).toList();
 
     String effectiveModel = agentModelController.text.trim();
-    String? agentApiKey;
-    String? agentBaseUrl;
+    String? agentCategory;
 
     if (agentProviderId == 'main-brain') {
       // Resolve Main Brain config from active provider
       dynamic selectedProvider = controller.activeProviderConfig;
       
       if (selectedProvider != null) {
-        agentApiKey = selectedProvider.apiKey;
-        agentBaseUrl = selectedProvider.baseUrl;
+        if (selectedProvider.category != AiProviderCategory.llm && llmProviders.isNotEmpty) {
+          selectedProvider = llmProviders.first;
+        }
+        agentCategory = selectedProvider.category.name;
         
         // If the model is not specified in the text field, use the provider's model
         if (effectiveModel.isEmpty) {
@@ -223,8 +234,6 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       } else {
         // Fallback to internal placeholder if something goes wrong
         effectiveModel = 'main-brain';
-        agentApiKey = 'sk-ntai-internal';
-        agentBaseUrl = '$backendUrl/api/v1';
       }
     } else {
       // Find the provider config
@@ -240,8 +249,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       }
 
       if (selectedProvider != null) {
-        agentApiKey = selectedProvider.apiKey;
-        agentBaseUrl = selectedProvider.baseUrl;
+        if (selectedProvider.category != AiProviderCategory.llm) {
+          selectedProvider = llmProviders.isNotEmpty ? llmProviders.first : controller.activeProviderConfig;
+        }
+        agentCategory = selectedProvider.category.name;
         if (effectiveModel.isEmpty) {
           effectiveModel = selectedProvider.model ?? '';
         }
@@ -255,6 +266,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "event_interval_ms": modEventIntervalMs,
       "scan_radius": modScanRadius,
       "vision_stream": modVisionStream,
+      "enable_smart_guard": headfulSmartGuard,
+      "enable_smart_gather": headfulSmartGather,
     };
 
     final config = {
@@ -271,8 +284,11 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "language": language,
       "agent_name": agentNameController.text,
       "agent_model": effectiveModel,
-      "agent_api_key": agentApiKey,
-      "agent_base_url": agentBaseUrl,
+      "agent_api_key": null,
+      "agent_base_url": null,
+      "agent_provider_id": agentProviderId,
+      "agent_provider_category": agentCategory,
+      "llm_require_frontend": true,
       "rag_user_id": headfulRagUserIdController.text.trim(),
       "auto_start": autoStart,
       "headful": headfulConfig,
@@ -421,6 +437,78 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
+  Future<void> _sendMainBrainCommand(BuildContext context) async {
+    final message = headfulCommandController.text.trim();
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入要发送的指令')),
+      );
+      return;
+    }
+    final controller = SettingsScope.of(context);
+    final backendUrl = controller.settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
+    String userId = headfulRagUserIdController.text.trim();
+    if (userId.isEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final sessionId = prefs.getString('chat.currentSessionId');
+        if (sessionId != null && sessionId.trim().isNotEmpty) {
+          userId = sessionId.trim();
+        }
+      } catch (_) {}
+    }
+    if (userId.isEmpty) {
+      userId = agentNameController.text.trim().isNotEmpty
+          ? agentNameController.text.trim()
+          : 'minecraft';
+    }
+    try {
+      final provider = _resolveLlmProvider(controller);
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+      };
+      if (provider != null) {
+        if (provider.baseUrl.isNotEmpty) {
+          headers['X-Target-Base-Url'] = provider.baseUrl;
+          headers['X-Target-Api-Key'] =
+              provider.apiKey.isNotEmpty ? provider.apiKey : 'sk-ntai-frontend';
+        } else if (provider.apiKey.isNotEmpty) {
+          headers['X-Target-Api-Key'] = provider.apiKey;
+        }
+        if (provider.model.isNotEmpty) {
+          headers['X-Target-Model'] = provider.model;
+        }
+        headers['X-Target-Provider-Id'] = provider.id;
+        headers['X-LLM-Require-Frontend'] = 'true';
+      } else {
+        headers['X-LLM-Require-Frontend'] = 'true';
+      }
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/live2d/agent/schedule_chat'),
+        headers: headers,
+        body: jsonEncode({
+          'prompt': message,
+          'user_id': userId,
+          'enable_thinking': false,
+          'enable_search': false,
+        }),
+      );
+      if (!context.mounted) return;
+      final ok = response.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? '已发送给主脑' : '发送失败: ${response.statusCode}')),
+      );
+      if (ok) {
+        headfulCommandController.clear();
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    }
+  }
+
   Future<void> _sendHeadfulActionJson(BuildContext context) async {
     final raw = headfulActionController.text.trim();
     if (raw.isEmpty) {
@@ -492,9 +580,29 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       } catch (_) {}
     }
     try {
+      final provider = _resolveLlmProvider(controller);
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+      };
+      if (provider != null) {
+        if (provider.baseUrl.isNotEmpty) {
+          headers['X-Target-Base-Url'] = provider.baseUrl;
+          headers['X-Target-Api-Key'] =
+              provider.apiKey.isNotEmpty ? provider.apiKey : 'sk-ntai-frontend';
+        } else if (provider.apiKey.isNotEmpty) {
+          headers['X-Target-Api-Key'] = provider.apiKey;
+        }
+        if (provider.model.isNotEmpty) {
+          headers['X-Target-Model'] = provider.model;
+        }
+        headers['X-Target-Provider-Id'] = provider.id;
+        headers['X-LLM-Require-Frontend'] = 'true';
+      } else {
+        headers['X-LLM-Require-Frontend'] = 'true';
+      }
       final response = await http.post(
         Uri.parse('$backendUrl/api/v1/plugins/$id/headful_skill'),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: jsonEncode({
           'skill': skill,
           'params': payloadParams,
@@ -521,6 +629,29 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         SnackBar(content: Text('技能发送失败: $e')),
       );
     }
+  }
+
+  AiProviderConfig? _resolveLlmProvider(SettingsController controller) {
+    final providers = controller.providers;
+    AiProviderConfig? selected;
+    if (agentProviderId == null || agentProviderId!.isEmpty || agentProviderId == 'main-brain') {
+      selected = controller.activeProviderConfig;
+    } else {
+      try {
+        selected = providers.firstWhere((p) => p.id == agentProviderId);
+      } catch (_) {
+        selected = controller.activeProviderConfig;
+      }
+    }
+    if (selected != null && selected.category == AiProviderCategory.llm) {
+      return selected;
+    }
+    for (final p in providers) {
+      if (p.category == AiProviderCategory.llm) {
+        return p;
+      }
+    }
+    return null;
   }
 
   double _stateNumber(String key, double fallback) {
@@ -721,6 +852,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   @override
   Widget buildSettingsWidget(BuildContext context) {
     final providers = SettingsScope.of(context).providers;
+    final llmProviders = providers.where((p) => p.category == AiProviderCategory.llm).toList();
+    final llmProviderIds = llmProviders.map((p) => p.id).toSet();
+    final selectedProviderId =
+        agentProviderId == null || agentProviderId == 'main-brain' || llmProviderIds.contains(agentProviderId)
+            ? agentProviderId
+            : null;
 
     return AnimatedBuilder(
       animation: this,
@@ -834,20 +971,32 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSectionTitle('运行模式'),
-              DropdownButtonFormField<String>(
-                value: controlMode,
-                decoration: const InputDecoration(labelText: '选择运行模式'),
-                items: const [
-                  DropdownMenuItem(value: 'headless', child: Text('无头 (MindCraft/mineflayer)')),
-                  DropdownMenuItem(value: 'headful', child: Text('有头 (Fabric 模组通讯)')),
+              _buildSectionTitle('模式页面'),
+              ToggleButtons(
+                isSelected: [controlMode == 'headless', controlMode == 'headful'],
+                onPressed: (index) => _updateState(
+                  () => controlMode = index == 0 ? 'headless' : 'headful',
+                ),
+                children: const [
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text('MindCraft (无头)'),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text('Headful (有头)'),
+                  ),
                 ],
-                onChanged: (v) => _updateState(() => controlMode = v ?? 'headless'),
               ),
+              const SizedBox(height: 6),
+              const Text('两个页面完全分离，切换后仅显示对应设置。', style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 12),
               if (controlMode == 'headful') ...[
-                _buildSectionTitle('模组通讯（本地客户端）'),
-                const Text('绑定 127.0.0.1，需在本地运行 Fabric 模组提供的 WS/HTTP。', style: TextStyle(color: Colors.green)),
+                _buildSectionTitle('Headful 设置'),
+                const Text(
+                  '仅保留主脑指令入口，主脑 LLM 负责规划并调用工具。',
+                  style: TextStyle(color: Colors.grey),
+                ),
                 const SizedBox(height: 8),
                 buildHeadfulStatusCard(),
                 const SizedBox(height: 12),
@@ -898,13 +1047,28 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                     hintText: '留空则使用 AI 代理名称',
                   ),
                 ),
+                SwitchListTile(
+                  title: const Text('智能护卫'),
+                  subtitle: const Text('自动防御附近敌对生物，遵循后端配置和范围限制'),
+                  value: headfulSmartGuard,
+                  onChanged: (v) => _updateState(() => headfulSmartGuard = v),
+                ),
+                SwitchListTile(
+                  title: const Text('智能采集'),
+                  subtitle: const Text('自动拾取掉落物，必要时收集基础木材'),
+                  value: headfulSmartGather,
+                  onChanged: (v) => _updateState(() => headfulSmartGather = v),
+                ),
                 const SizedBox(height: 12),
-                _buildSectionTitle('Headful 快捷控制'),
-                const Text('用于本地模组调试，可发送聊天/指令或动作 JSON。', style: TextStyle(color: Colors.grey)),
+                _buildSectionTitle('主脑指令'),
+                const Text('输入一句话，交给主脑决定是否调用 Minecraft 工具。', style: TextStyle(color: Colors.grey)),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: headfulQuickTextController,
-                  decoration: const InputDecoration(labelText: '聊天/指令', hintText: '你好 或 /time set day'),
+                  controller: headfulCommandController,
+                  decoration: const InputDecoration(
+                    labelText: '指令输入',
+                    hintText: '例如：合成一把铁剑并跟随我',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
@@ -912,792 +1076,261 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   runSpacing: 8,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulQuickMessage(context),
+                      onPressed: () => _sendMainBrainCommand(context),
                       icon: const Icon(Icons.send),
-                      label: const Text('发送聊天/指令'),
+                      label: const Text('发送给主脑'),
                     ),
                     OutlinedButton.icon(
-                      onPressed: () => headfulQuickTextController.clear(),
+                      onPressed: () => headfulCommandController.clear(),
                       icon: const Icon(Icons.clear),
                       label: const Text('清空输入'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+              ],
+              if (controlMode == 'headless') ...[
+                _buildSectionTitle('服务器连接'),
+                const Text(
+                  '支持版本: Java Edition（版本随 MindCraft 原始项目更新，适配 v1.21.6）',
+                  style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
                 TextField(
-                  controller: headfulActionController,
-                  minLines: 3,
-                  maxLines: 6,
-                  keyboardType: TextInputType.multiline,
+                  controller: hostController,
                   decoration: const InputDecoration(
-                    labelText: '动作 JSON',
-                    hintText: '{"type":"moveTo","x":0,"y":64,"z":0,"speed":0.25}',
+                    labelText: '服务器地址 (Host)',
+                    hintText: '127.0.0.1',
                   ),
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulActionJson(context),
-                      icon: const Icon(Icons.bolt),
-                      label: const Text('发送动作'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => headfulActionController.text =
-                          '{"type":"moveTo","x":0,"y":64,"z":0,"speed":0.25}',
-                      icon: const Icon(Icons.code),
-                      label: const Text('填充示例'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        headfulActionController.text = '{"type":"stopMove"}';
-                        _sendHeadfulActionJson(context);
-                      },
-                      icon: const Icon(Icons.stop),
-                      label: const Text('停止移动'),
-                    ),
-                  ],
+                TextField(
+                  controller: portController,
+                  decoration: const InputDecoration(
+                    labelText: '端口 (Port)',
+                    hintText: '-1 (自动检测)',
+                  ),
+                  keyboardType: TextInputType.number,
                 ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('预置动作'),
-                const Text('用于快速测试移动输入（模拟方向键）。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'forward': 1,
-                        'durationMs': 500,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_up),
-                      label: const Text('前进'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'forward': -1,
-                        'durationMs': 500,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_down),
-                      label: const Text('后退'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'strafe': -1,
-                        'durationMs': 500,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_left),
-                      label: const Text('左移'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'strafe': 1,
-                        'durationMs': 500,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_right),
-                      label: const Text('右移'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'jump': true,
-                        'durationMs': 250,
-                      }),
-                      icon: const Icon(Icons.arrow_upward),
-                      label: const Text('跳跃'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'move',
-                        'forward': 1,
-                        'sprint': true,
-                        'durationMs': 800,
-                      }),
-                      icon: const Icon(Icons.directions_run),
-                      label: const Text('冲刺前进'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'stopMove',
-                      }),
-                      icon: const Icon(Icons.stop),
-                      label: const Text('停步'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('持续按键'),
-                const Text('用于长时间按住（需要手动释放）。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'forward',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_up),
-                      label: const Text('按住前进'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'back',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_down),
-                      label: const Text('按住后退'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'left',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_left),
-                      label: const Text('按住左移'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'right',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.keyboard_arrow_right),
-                      label: const Text('按住右移'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'sprint',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.directions_run),
-                      label: const Text('按住疾跑'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'sneak',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.south),
-                      label: const Text('按住潜行'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'attack',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.gavel),
-                      label: const Text('按住攻击'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'setKey',
-                        'key': 'use',
-                        'pressed': true,
-                      }),
-                      icon: const Icon(Icons.pan_tool_alt),
-                      label: const Text('按住使用'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'releaseAllKeys',
-                      }),
-                      icon: const Icon(Icons.stop),
-                      label: const Text('释放全部'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('轻触按键'),
-                const Text('用于触发单次按键行为。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'tapKey',
-                        'key': 'attack',
-                        'durationMs': 120,
-                      }),
-                      icon: const Icon(Icons.flash_on),
-                      label: const Text('短按攻击'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'tapKey',
-                        'key': 'use',
-                        'durationMs': 120,
-                      }),
-                      icon: const Icon(Icons.touch_app),
-                      label: const Text('短按使用'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'tapKey',
-                        'key': 'drop',
-                        'durationMs': 120,
-                      }),
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('丢弃手持'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'tapKey',
-                        'key': 'swap',
-                        'durationMs': 120,
-                      }),
-                      icon: const Icon(Icons.sync_alt),
-                      label: const Text('交换副手'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('界面/容器'),
-                const Text('打开/关闭界面或请求容器快照。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'openInventory',
-                      }),
-                      icon: const Icon(Icons.inventory_2),
-                      label: const Text('打开背包'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'closeScreen',
-                      }),
-                      icon: const Icon(Icons.close),
-                      label: const Text('关闭界面'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'screenSnapshot',
-                      }),
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('容器快照'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'set_debug', params: {
-                        'enabled': true,
-                        'chat': false,
-                      }),
-                      icon: const Icon(Icons.bug_report),
-                      label: const Text('开启调试'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'set_debug', params: {
-                        'enabled': false,
-                      }),
-                      icon: const Icon(Icons.bug_report_outlined),
-                      label: const Text('关闭调试'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('背包/容器技能'),
-                const Text('自动装备、热键整理与容器转移（基础版）。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'auto_equip'),
-                      icon: const Icon(Icons.shield),
-                      label: const Text('自动装备'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'auto_sort_hotbar'),
-                      icon: const Icon(Icons.view_week),
-                      label: const Text('整理热键栏'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'container_transfer',
-                          params: {'direction': 'to_inventory'}),
-                      icon: const Icon(Icons.move_to_inbox),
-                      label: const Text('容器 -> 背包'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulSkill(context, 'container_transfer',
-                          params: {'direction': 'to_container'}),
-                      icon: const Icon(Icons.outbox),
-                      label: const Text('背包 -> 容器'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: headfulCraftItemController,
+                        controller: minecraftVersionController,
                         decoration: const InputDecoration(
-                          labelText: '合成目标',
-                          hintText: 'diamond_pickaxe',
+                          labelText: 'MC 版本',
+                          hintText: 'auto 或 1.21.6',
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 100,
-                      child: TextField(
-                        controller: headfulCraftCountController,
-                        decoration: const InputDecoration(
-                          labelText: '数量',
-                          hintText: '1',
-                        ),
-                        keyboardType: TextInputType.number,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        final item = headfulCraftItemController.text.trim();
-                        final count = int.tryParse(headfulCraftCountController.text.trim()) ?? 1;
-                        if (item.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('请输入合成目标')),
-                          );
-                          return;
-                        }
-                        _sendHeadfulSkill(context, 'craft_from_container', params: {
-                          'item': item,
-                          'count': count,
-                          'smart_pickup': true,
-                          'precise_pickup': true,
-                          'multi_container': true,
-                          'search_radius': modScanRadius,
-                          'container_radius': modScanRadius,
-                          'table_radius': modScanRadius,
-                        });
-                      },
-                      icon: const Icon(Icons.build),
-                      label: const Text('执行合成'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('AI 步骤规划'),
-                const Text('主脑规划背包/容器操作步骤，可选择是否直接执行。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: headfulPlanGoalController,
-                  decoration: const InputDecoration(
-                    labelText: '规划目标',
-                    hintText: '例如：装备铁套并把盾牌放到副手',
-                  ),
-                ),
-                SwitchListTile(
-                  title: const Text('启用 RAG 知识检索'),
-                  subtitle: const Text('使用向量库补充游戏知识（如果已构建）'),
-                  value: headfulPlanUseRag,
-                  onChanged: (v) => _updateState(() => headfulPlanUseRag = v),
-                ),
-                SwitchListTile(
-                  title: const Text('使用 MindCraft 文档'),
-                  subtitle: const Text('复用 MindCraft 文档记忆（首次使用会索引）'),
-                  value: headfulPlanUseMindcraftDocs,
-                  onChanged: (v) => _updateState(() => headfulPlanUseMindcraftDocs = v),
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        final goal = headfulPlanGoalController.text.trim();
-                        if (goal.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('请输入规划目标')),
-                          );
-                          return;
-                        }
-                        _sendHeadfulSkill(context, 'plan', params: {
-                          'goal': goal,
-                          'use_rag': headfulPlanUseRag,
-                          'rag_user_id': headfulRagUserIdController.text.trim(),
-                          'use_mindcraft_docs': headfulPlanUseMindcraftDocs,
-                        });
-                      },
-                      icon: const Icon(Icons.psychology),
-                      label: const Text('仅规划'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        final goal = headfulPlanGoalController.text.trim();
-                        if (goal.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('请输入规划目标')),
-                          );
-                          return;
-                        }
-                        _sendHeadfulSkill(context, 'plan_execute', params: {
-                          'goal': goal,
-                          'use_rag': headfulPlanUseRag,
-                          'rag_user_id': headfulRagUserIdController.text.trim(),
-                          'use_mindcraft_docs': headfulPlanUseMindcraftDocs,
-                        });
-                      },
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('规划并执行'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                buildHeadfulPlanSummary(context),
-                const SizedBox(height: 12),
-                _buildSectionTitle('视角控制'),
-                const Text('根据当前视角做相对调整，需要状态已刷新。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulLookDelta(context, -45, 0),
-                      icon: const Icon(Icons.rotate_left),
-                      label: const Text('左转 45°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookDelta(context, 45, 0),
-                      icon: const Icon(Icons.rotate_right),
-                      label: const Text('右转 45°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookDelta(context, 180, 0),
-                      icon: const Icon(Icons.replay),
-                      label: const Text('回头 180°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookDelta(context, 0, -15),
-                      icon: const Icon(Icons.arrow_upward),
-                      label: const Text('抬头 15°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookDelta(context, 0, 15),
-                      icon: const Icon(Icons.arrow_downward),
-                      label: const Text('低头 15°'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('平滑视角'),
-                const Text('缓慢转向，减少画面抖动。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulLookSmoothDelta(context, -90, 0, durationMs: 600),
-                      icon: const Icon(Icons.rotate_left),
-                      label: const Text('平滑左转 90°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 90, 0, durationMs: 600),
-                      icon: const Icon(Icons.rotate_right),
-                      label: const Text('平滑右转 90°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 180, 0, durationMs: 800),
-                      icon: const Icon(Icons.replay),
-                      label: const Text('平滑回头 180°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 0, -20, durationMs: 500),
-                      icon: const Icon(Icons.arrow_upward),
-                      label: const Text('平滑抬头 20°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulLookSmoothDelta(context, 0, 20, durationMs: 500),
-                      icon: const Icon(Icons.arrow_downward),
-                      label: const Text('平滑低头 20°'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'stopLook',
-                      }),
-                      icon: const Icon(Icons.pause),
-                      label: const Text('停止平滑'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('交互快捷键'),
-                const Text('对准方块/实体后使用，可快速验证交互。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'attackTarget',
-                      }),
-                      icon: const Icon(Icons.gavel),
-                      label: const Text('攻击目标'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'useTarget',
-                      }),
-                      icon: const Icon(Icons.pan_tool_alt),
-                      label: const Text('使用/交互'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'stopInput',
-                      }),
-                      icon: const Icon(Icons.pause),
-                      label: const Text('停止输入'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildSectionTitle('热键栏'),
-                const Text('快速切换 1-9 号槽位。', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: List.generate(9, (i) {
-                    final slot = i;
-                    return OutlinedButton(
-                      onPressed: () => _sendHeadfulAction(context, {
-                        'type': 'hotbar',
-                        'slot': slot,
-                      }),
-                      child: Text('${i + 1}'),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 12),
-              ],
-              _buildSectionTitle('服务器连接'),
-              const Text('支持版本: Java Edition（版本随 MindCraft 原始项目更新，适配 v1.21.6）', 
-                  style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              TextField(
-                controller: hostController,
-                decoration: const InputDecoration(labelText: '服务器地址 (Host)', hintText: '127.0.0.1'),
-              ),
-              TextField(
-                controller: portController,
-                decoration: const InputDecoration(labelText: '端口 (Port)', hintText: '-1 (自动检测)'),
-                keyboardType: TextInputType.number,
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: minecraftVersionController,
-                      decoration: const InputDecoration(labelText: 'MC 版本', hintText: 'auto 或 1.21.6'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: mindServerPortController,
-                      decoration: const InputDecoration(labelText: '管理端口', hintText: '8080'),
-                    ),
-                  ),
-                ],
-              ),
-              DropdownButtonFormField<String>(
-                value: authMethod,
-                decoration: const InputDecoration(labelText: '登录方式'),
-                items: const [
-                  DropdownMenuItem(value: 'offline', child: Text('离线模式 (Offline)')),
-                  DropdownMenuItem(value: 'microsoft', child: Text('微软登录 (Microsoft)')),
-                ],
-                onChanged: (v) => _updateState(() => authMethod = v!),
-              ),
-              if (authMethod == 'microsoft') ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: msEmailController,
-                        decoration: const InputDecoration(labelText: '微软邮箱 (可选)', hintText: 'example@outlook.com'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
-                        controller: msPasswordController,
-                        decoration: const InputDecoration(labelText: '密码 (可选)', hintText: '******'),
-                        obscureText: true,
+                        controller: mindServerPortController,
+                        decoration: const InputDecoration(
+                          labelText: '管理端口',
+                          hintText: '8080',
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const Padding(
-                  padding: EdgeInsets.only(top: 8, left: 4),
-                  child: Text('注：填写账号密码可尝试自动登录，留空则使用验证码登录。', 
-                    style: TextStyle(color: Colors.grey, fontSize: 12)),
+                DropdownButtonFormField<String>(
+                  value: authMethod,
+                  decoration: const InputDecoration(labelText: '登录方式'),
+                  items: const [
+                    DropdownMenuItem(value: 'offline', child: Text('离线模式 (Offline)')),
+                    DropdownMenuItem(value: 'microsoft', child: Text('微软登录 (Microsoft)')),
+                  ],
+                  onChanged: (v) => _updateState(() => authMethod = v!),
                 ),
-              ],
-              const SizedBox(height: 16),
-              _buildSectionTitle('AI 代理配置'),
-              DropdownButtonFormField<String?>(
-                value: agentProviderId,
-                decoration: const InputDecoration(labelText: 'AI 服务商'),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('使用系统当前激活的服务商')),
-                  const DropdownMenuItem(value: 'main-brain', child: Text('主脑 (代理到主系统的 LLM 设置)')),
-                  ...providers.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))),
-                ],
-                onChanged: (v) => _updateState(() => agentProviderId = v),
-              ),
-              TextField(
-                controller: agentNameController,
-                decoration: const InputDecoration(labelText: 'AI 代理名称 (必须与游戏内角色名一致)', hintText: 'andy'),
-              ),
-              TextField(
-                controller: agentModelController,
-                decoration: const InputDecoration(labelText: '模型名称', hintText: '留空则使用服务商默认模型'),
-              ),
-              TextField(
-                controller: initMessageController,
-                decoration: const InputDecoration(labelText: '初始化消息'),
-              ),
-              SwitchListTile(
-                title: const Text('加载记忆 (Load Memory)'),
-                value: loadMemory,
-                onChanged: (v) => _updateState(() => loadMemory = v),
-              ),
-              SwitchListTile(
-                title: const Text('启动时自动开启 (Auto Start)'),
-                subtitle: const Text('当后端服务启动时，自动初始化并运行此插件'),
-                value: autoStart,
-                onChanged: (v) => _updateState(() => autoStart = v),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final controller = SettingsScope.of(context);
-                        await _saveLocalConfig();
-                        if (!context.mounted) return;
-                        final success = await syncConfigToBackend(controller);
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(success ? '配置已同步并尝试重启插件' : '同步失败，请检查后端连接')),
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        backgroundColor: Colors.blue.withValues(alpha: 0.1),
-                      ),
-                      icon: const Icon(Icons.sync),
-                      label: const Text('同步配置并重启插件'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: controlMode == 'headless' ? () => _openWebUI() : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
-                    icon: const Icon(Icons.open_in_browser),
-                    label: Text(controlMode == 'headless' ? 'MindCraft 管理页面' : 'Headful 模式无需管理页面'),
-                  ),
-                ],
-              ),
-              if (authMethod == 'microsoft') ...[
-                const SizedBox(height: 24),
-                _buildSectionTitle('微软登录验证流程'),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _msAuthCode != null
-                        ? Colors.orange.withValues(alpha: 0.1)
-                        : Colors.grey.withValues(alpha: 0.1),
-                    border: Border.all(color: _msAuthCode != null ? Colors.orange : Colors.grey),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                if (authMethod == 'microsoft') ...[
+                  const SizedBox(height: 12),
+                  Row(
                     children: [
-                      if (_msAuthCode == null) ...[
-                        const Row(
-                          children: [
-                            SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(child: Text('等待后端捕获验证码...\n请确保已点击“同步配置”且插件正在启动。', style: TextStyle(color: Colors.grey))),
-                          ],
-                        ),
-                      ] else ...[
-                        const Text('第一步：复制下方 8 位验证码', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                      Expanded(
+                        child: TextField(
+                          controller: msEmailController,
+                          decoration: const InputDecoration(
+                            labelText: '微软邮箱 (可选)',
+                            hintText: 'example@outlook.com',
                           ),
-                          child: Center(
-                            child: SelectableText(
-                              _msAuthCode!,
-                              style: const TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orange,
-                                letterSpacing: 4,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: msPasswordController,
+                          decoration: const InputDecoration(
+                            labelText: '密码 (可选)',
+                            hintText: '******',
+                          ),
+                          obscureText: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8, left: 4),
+                    child: Text(
+                      '注：填写账号密码可尝试自动登录，留空则使用验证码登录。',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _buildSectionTitle('AI 代理配置'),
+                DropdownButtonFormField<String?>(
+                  value: selectedProviderId,
+                  decoration: const InputDecoration(labelText: 'AI 服务商'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('使用系统当前激活的 LLM 服务商')),
+                    const DropdownMenuItem(value: 'main-brain', child: Text('主脑 (代理到主系统的 LLM 设置)')),
+                    ...llmProviders.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name))),
+                  ],
+                  onChanged: (v) => _updateState(() => agentProviderId = v),
+                ),
+                TextField(
+                  controller: agentNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'AI 代理名称 (必须与游戏内角色名一致)',
+                    hintText: 'andy',
+                  ),
+                ),
+                TextField(
+                  controller: agentModelController,
+                  decoration: const InputDecoration(
+                    labelText: '模型名称',
+                    hintText: '留空则使用服务商默认模型',
+                  ),
+                ),
+                TextField(
+                  controller: initMessageController,
+                  decoration: const InputDecoration(labelText: '初始化消息'),
+                ),
+                SwitchListTile(
+                  title: const Text('加载记忆 (Load Memory)'),
+                  value: loadMemory,
+                  onChanged: (v) => _updateState(() => loadMemory = v),
+                ),
+                SwitchListTile(
+                  title: const Text('启动时自动开启 (Auto Start)'),
+                  subtitle: const Text('当后端服务启动时，自动初始化并运行此插件'),
+                  value: autoStart,
+                  onChanged: (v) => _updateState(() => autoStart = v),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          final controller = SettingsScope.of(context);
+                          await _saveLocalConfig();
+                          if (!context.mounted) return;
+                          final success = await syncConfigToBackend(controller);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(success ? '配置已同步并尝试重启插件' : '同步失败，请检查后端连接')),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          backgroundColor: Colors.blue.withValues(alpha: 0.1),
+                        ),
+                        icon: const Icon(Icons.sync),
+                        label: const Text('同步配置并重启插件'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: controlMode == 'headless' ? () => _openWebUI() : null,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      ),
+                      icon: const Icon(Icons.open_in_browser),
+                      label: Text(controlMode == 'headless' ? 'MindCraft 管理页面' : 'Headful 模式无需管理页面'),
+                    ),
+                  ],
+                ),
+                if (authMethod == 'microsoft') ...[
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('微软登录验证流程'),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _msAuthCode != null
+                          ? Colors.orange.withValues(alpha: 0.1)
+                          : Colors.grey.withValues(alpha: 0.1),
+                      border: Border.all(
+                        color: _msAuthCode != null ? Colors.orange : Colors.grey,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_msAuthCode == null) ...[
+                          const Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  '等待后端捕获验证码...\n请确保已点击“同步配置”且插件正在启动。',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ] else ...[
+                          const Text(
+                            '第一步：复制下方 8 位验证码',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                            ),
+                            child: Center(
+                              child: SelectableText(
+                                _msAuthCode!,
+                                style: const TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange,
+                                  letterSpacing: 4,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text('第二步：点击下方按钮前往微软页面输入代码', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          onPressed: () => _launchUrl(_msAuthUrl),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
+                          const SizedBox(height: 16),
+                          const Text(
+                            '第二步：点击下方按钮前往微软页面输入代码',
+                            style: TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          icon: const Icon(Icons.vpn_key),
-                          label: const Text('前往微软验证页面'),
-                        ),
+                          const SizedBox(height: 12),
+                          ElevatedButton.icon(
+                            onPressed: () => _launchUrl(_msAuthUrl),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.vpn_key),
+                            label: const Text('前往微软验证页面'),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ],
               const SizedBox(height: 24),
               _buildSectionTitle('实时运行日志'),

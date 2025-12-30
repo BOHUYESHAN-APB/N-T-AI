@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import re
@@ -115,6 +116,203 @@ class Recipe:
     shape: Optional[List[List[Optional[str]]]] = None
     ingredients: Optional[List[str]] = None
 
+
+def _recipe_requirements_static(recipe: Recipe) -> Dict[str, int]:
+    req: Dict[str, int] = {}
+    if recipe.shaped and recipe.shape:
+        for row in recipe.shape:
+            for cell in row:
+                if cell is None:
+                    continue
+                name = _normalize_item_name(cell)
+                if name:
+                    req[name] = req.get(name, 0) + 1
+    elif recipe.ingredients:
+        for cell in recipe.ingredients:
+            name = _normalize_item_name(cell)
+            if name:
+                req[name] = req.get(name, 0) + 1
+    return req
+
+
+class ResourceGraph:
+    """构建物品转换图（合成/熔炼等），支持后续规划使用。"""
+
+    def __init__(
+        self,
+        recipe_book: RecipeBook,
+        smelting_outputs: Dict[str, List[str]],
+        extra_recipe_paths: Optional[List[Path]] = None,
+    ) -> None:
+        self.recipe_book = recipe_book
+        self.smelting_outputs = smelting_outputs
+        self.extra_recipe_paths = extra_recipe_paths or []
+        self.edges_by_output: Dict[str, List[Dict[str, Any]]] = {}
+        self._build_graph()
+
+    def _add_edge(self, edge: Dict[str, Any]) -> None:
+        out = edge.get("output")
+        if not out:
+            return
+        out = _normalize_item_name(str(out))
+        edge["output"] = out
+        self.edges_by_output.setdefault(out, []).append(edge)
+
+    def _build_graph(self) -> None:
+        # 合成（来自 recipe_book）
+        for item in self.recipe_book.craftable_items():
+            recipes = self.recipe_book.get_recipes(item)
+            for recipe in recipes:
+                requirements = _recipe_requirements_static(recipe)
+                if not requirements:
+                    continue
+                self._add_edge(
+                    {
+                        "type": "craft",
+                        "output": recipe.result_name,
+                        "count": max(int(recipe.result_count), 1),
+                        "inputs": requirements,
+                        "requires_table": True
+                        if recipe.shaped and len(requirements) > 4
+                        else False,
+                    }
+                )
+        # 熔炼（内建映射）
+        for output, inputs in self.smelting_outputs.items():
+            for inp in inputs:
+                self._add_edge(
+                    {
+                        "type": "smelt",
+                        "output": output,
+                        "count": 1,
+                        "inputs": {_normalize_item_name(inp): 1},
+                        "station": "furnace",
+                    }
+                )
+        # 高炉（blasting）
+        for output, inputs in BLASTING_OUTPUTS.items():
+            for inp in inputs:
+                self._add_edge(
+                    {
+                        "type": "smelt",
+                        "output": output,
+                        "count": 1,
+                        "inputs": {_normalize_item_name(inp): 1},
+                        "station": "blast_furnace",
+                    }
+                )
+        # 烟熏炉（smoking）
+        for output, inputs in SMOKING_OUTPUTS.items():
+            for inp in inputs:
+                self._add_edge(
+                    {
+                        "type": "smelt",
+                        "output": output,
+                        "count": 1,
+                        "inputs": {_normalize_item_name(inp): 1},
+                        "station": "smoker",
+                    }
+                )
+        # 额外配方（为模组/自定义预留，放在 world/.mindcraft/recipes_custom.json）
+        for path in self.extra_recipe_paths:
+            try:
+                if not path.exists():
+                    continue
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    for edge in data:
+                        if isinstance(edge, dict):
+                            self._add_edge(edge)
+            except Exception:
+                continue
+
+    def plan(
+        self,
+        target: str,
+        count: int,
+        inventory: Dict[str, int],
+        allow_smelting: bool = True,
+        chain: Optional[List[str]] = None,
+        depth: int = 0,
+        max_depth: int = 5,
+    ) -> Dict[str, Any]:
+        target = _normalize_item_name(target)
+        if not target or count <= 0:
+            return {"ok": False, "error": "invalid_target"}
+        if chain is None:
+            chain = []
+        if target in chain or depth > max_depth:
+            return {"ok": False, "error": "cycle_or_depth"}
+        available = inventory.get(target, 0)
+        if available >= count:
+            return {
+                "ok": True,
+                "type": "use_existing",
+                "output": target,
+                "consume": count,
+                "missing": 0,
+                "substeps": [],
+            }
+        need = max(0, count - available)
+        best_plan: Optional[Dict[str, Any]] = None
+        edges = self.edges_by_output.get(target, [])
+        for edge in edges:
+            if edge.get("type") == "smelt" and not allow_smelting:
+                continue
+            # 需要多少次该配方
+            per = max(int(edge.get("count", 1)), 1)
+            times = int(math.ceil(need / per))
+            substeps = []
+            missing_total = 0
+            new_chain = list(chain)
+            new_chain.append(target)
+            ok = True
+            for inp, req in (edge.get("inputs") or {}).items():
+                req_need = int(req) * times
+                subplan = self.plan(
+                    inp,
+                    req_need,
+                    inventory,
+                    allow_smelting=allow_smelting,
+                    chain=new_chain,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
+                substeps.append(subplan)
+                if not subplan.get("ok"):
+                    ok = False
+                missing_total += int(subplan.get("missing", req_need))
+            candidate = {
+                "ok": ok,
+                "type": edge.get("type"),
+                "output": target,
+                "count": count,
+                "per_craft": per,
+                "times": times,
+                "inputs": edge.get("inputs"),
+                "requires_table": edge.get("requires_table", False),
+                "station": edge.get("station"),
+                "substeps": substeps,
+                "missing": missing_total if not ok else 0,
+            }
+            if best_plan is None:
+                best_plan = candidate
+            else:
+                best_missing = int(best_plan.get("missing", 0))
+                cand_missing = int(candidate.get("missing", 0))
+                if cand_missing < best_missing:
+                    best_plan = candidate
+        if best_plan:
+            return best_plan
+        # 没有配方
+        return {
+            "ok": False,
+            "type": "missing_recipe",
+            "output": target,
+            "missing": need,
+            "substeps": [],
+        }
 
 class RecipeBook:
     def __init__(self, data_root: Path) -> None:
@@ -428,6 +626,28 @@ HOSTILE_ENTITY_TYPES = {
     "endermite",
 }
 
+HOSTILE_PRIORITY = {
+    "creeper": 5,
+    "witch": 4,
+    "evoker": 4,
+    "ravager": 4,
+    "ghast": 4,
+    "blaze": 3,
+    "skeleton": 3,
+    "stray": 3,
+    "pillager": 3,
+    "phantom": 3,
+    "enderman": 3,
+    "zombie": 2,
+    "husk": 2,
+    "drowned": 2,
+    "spider": 2,
+    "cave_spider": 2,
+    "magma_cube": 2,
+    "slime": 2,
+    "piglin_brute": 2,
+}
+
 SMELTING_OUTPUTS: Dict[str, List[str]] = {
     "iron_ingot": ["raw_iron", "iron_ore", "deepslate_iron_ore"],
     "gold_ingot": ["raw_gold", "gold_ore", "deepslate_gold_ore", "nether_gold_ore"],
@@ -449,11 +669,30 @@ SMELTING_OUTPUTS: Dict[str, List[str]] = {
 
 SMELT_LOG_OUTPUTS = {"charcoal"}
 
+BLASTING_OUTPUTS: Dict[str, List[str]] = {
+    "iron_ingot": ["raw_iron", "iron_ore", "deepslate_iron_ore"],
+    "gold_ingot": ["raw_gold", "gold_ore", "deepslate_gold_ore", "nether_gold_ore"],
+    "copper_ingot": ["raw_copper", "copper_ore", "deepslate_copper_ore"],
+}
+
+SMOKING_OUTPUTS: Dict[str, List[str]] = {
+    "cooked_beef": ["raw_beef"],
+    "cooked_porkchop": ["raw_porkchop"],
+    "cooked_chicken": ["raw_chicken"],
+    "cooked_mutton": ["raw_mutton"],
+    "cooked_rabbit": ["raw_rabbit"],
+    "cooked_cod": ["raw_cod"],
+    "cooked_salmon": ["raw_salmon"],
+    "baked_potato": ["potato"],
+    "dried_kelp": ["kelp"],
+}
+
 FUEL_PRIORITY = (
-    "coal_block",
     "coal",
     "charcoal",
-    "lava_bucket",
+    "coal_block",
+    "dried_kelp_block",
+    "dried_kelp",
     "blaze_rod",
 )
 
@@ -529,6 +768,7 @@ class HeadfulInventoryController:
         log_append: Callable[[str], None],
         adapter,
         config_provider: Callable[[], Dict[str, Any]],
+        alert_callback: Optional[Callable[[str, Dict[str, Any] | None], Any]] = None,
         data_root: Optional[Path] = None,
     ) -> None:
         self._logger = logger
@@ -537,14 +777,20 @@ class HeadfulInventoryController:
         self._config_provider = config_provider
         self._lock = asyncio.Lock()
         self._recipe_book: Optional[RecipeBook] = None
+        self._resource_graph: Optional[ResourceGraph] = None
         self._data_root = data_root
         self._llm = LLMService()
         self._memory = MemorySystemService()
         self.last_plan: Optional[Dict[str, Any]] = None
         self._person_service = PersonService()
+        self._alert_callback = alert_callback
         self._mindcraft_docs_user_id = "mindcraft_docs"
         self._mindcraft_docs_indexed: set[str] = set()
         self._craftable_catalog: Optional[Dict[str, Any]] = None
+        self._registry_lock = asyncio.Lock()
+        self._container_registry_cache: Optional[Dict[str, Any]] = None
+        self._container_registry_path: Optional[Path] = None
+        self._container_registry_loaded_at = 0.0
 
     def _get_recipe_book(self) -> RecipeBook:
         if self._recipe_book is not None:
@@ -580,6 +826,29 @@ class HeadfulInventoryController:
         self._recipe_book = RecipeBook(self._data_root)
         return self._recipe_book
 
+    def _get_resource_graph(self) -> ResourceGraph:
+        if self._resource_graph is not None:
+            return self._resource_graph
+        recipe_book = self._get_recipe_book()
+        extra_paths: List[Path] = []
+        try:
+            base_dir = self._registry_base_dir()
+            extra_paths.extend(
+                [
+                    base_dir / "recipes_custom.json",
+                    base_dir / "recipes_brewing.json",
+                    base_dir / "recipes_smithing.json",
+                    base_dir / "recipes_trading.json",
+                    base_dir / "recipes_blasting.json",
+                    base_dir / "recipes_smoking.json",
+                    base_dir / "recipes_enchanting.json",
+                ]
+            )
+        except Exception:
+            pass
+        self._resource_graph = ResourceGraph(recipe_book, SMELTING_OUTPUTS, extra_paths)
+        return self._resource_graph
+
     def _config(self) -> Dict[str, Any]:
         cfg = self._config_provider() or {}
         return cfg if isinstance(cfg, dict) else {}
@@ -598,6 +867,180 @@ class HeadfulInventoryController:
         if not self._debug_enabled(params):
             return
         self._log_append(f"[headful-debug] {message}")
+
+    async def _emit_alert(
+        self, message: str, payload: Optional[Dict[str, Any]] = None
+    ) -> None:
+        if not message:
+            return
+        alert_payload = {"message": message, "timestamp": time.time()}
+        if payload:
+            alert_payload.update(payload)
+        if self._alert_callback:
+            try:
+                result = self._alert_callback(message, alert_payload)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                self._log_append(f"[llm-alert] callback failed: {exc}")
+        self._log_append(f"[llm-alert] {message}")
+
+    def _current_dimension(self) -> str:
+        state = getattr(self._adapter, "last_state", None)
+        if isinstance(state, dict):
+            return str(state.get("dimension") or "")
+        return ""
+
+    def _registry_base_dir(self) -> Path:
+        cfg = self._headful_config()
+        state = getattr(self._adapter, "last_state", None)
+        world_path = None
+        if isinstance(state, dict):
+            world_path = state.get("worldPath") or state.get("savePath") or state.get("world_path")
+        if world_path:
+            return Path(str(world_path)) / ".mindcraft"
+        fallback = cfg.get("world_cache_dir") or cfg.get("cache_dir")
+        if fallback:
+            return Path(str(fallback))
+        return Path(__file__).resolve().parent / ".mindcraft"
+
+    def _registry_file_path(self) -> Path:
+        return self._registry_base_dir() / "container_registry.json"
+
+    async def _load_container_registry(self) -> Dict[str, Any]:
+        async with self._registry_lock:
+            path = self._registry_file_path()
+            if self._container_registry_cache is not None and path == self._container_registry_path:
+                return self._container_registry_cache
+            data: Dict[str, Any] = {"version": 1, "containers": {}, "updated_at": 0}
+            try:
+                if path.exists():
+                    with path.open("r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data.update(loaded)
+            except Exception:
+                data = {"version": 1, "containers": {}, "updated_at": 0}
+            self._container_registry_cache = data
+            self._container_registry_path = path
+            self._container_registry_loaded_at = time.time()
+            return data
+
+    async def _save_container_registry(self, registry: Dict[str, Any]) -> None:
+        async with self._registry_lock:
+            path = self._registry_file_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            registry["updated_at"] = time.time()
+            tmp_path = path.with_suffix(".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(registry, f, ensure_ascii=True, indent=2)
+            tmp_path.replace(path)
+            self._container_registry_cache = registry
+            self._container_registry_path = path
+            self._container_registry_loaded_at = time.time()
+
+    def _container_key(self, pos: Dict[str, Any]) -> Optional[str]:
+        try:
+            x = int(pos.get("x"))
+            y = int(pos.get("y"))
+            z = int(pos.get("z"))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        dimension = self._current_dimension()
+        return f"{dimension}:{x}:{y}:{z}"
+
+    async def _register_found_positions(self, positions: List[Dict[str, Any]]) -> None:
+        if not positions:
+            return
+        registry = await self._load_container_registry()
+        containers = registry.setdefault("containers", {})
+        updated = False
+        now = time.time()
+        dimension = self._current_dimension()
+        for pos in positions:
+            key = self._container_key(pos)
+            if not key:
+                continue
+            entry = containers.get(key, {})
+            entry.update(
+                {
+                    "x": int(pos.get("x")),
+                    "y": int(pos.get("y")),
+                    "z": int(pos.get("z")),
+                    "dimension": dimension,
+                    "block": str(pos.get("block", entry.get("block", ""))),
+                    "last_seen": now,
+                }
+            )
+            containers[key] = entry
+            updated = True
+        if updated:
+            await self._save_container_registry(registry)
+
+    async def _update_container_registry(
+        self, pos: Dict[str, Any], snapshot: ScreenSnapshot
+    ) -> None:
+        key = self._container_key(pos)
+        if not key:
+            return
+        items: Dict[str, int] = {}
+        for slot in snapshot.slots:
+            if slot.group.startswith("container") and slot.item is not None:
+                items[slot.item.name] = items.get(slot.item.name, 0) + slot.item.count
+        registry = await self._load_container_registry()
+        containers = registry.setdefault("containers", {})
+        now = time.time()
+        entry = containers.get(key, {})
+        entry.update(
+            {
+                "x": int(pos.get("x")),
+                "y": int(pos.get("y")),
+                "z": int(pos.get("z")),
+                "dimension": self._current_dimension(),
+                "block": str(pos.get("block", entry.get("block", ""))),
+                "last_seen": now,
+                "last_open": now,
+                "items": items,
+            }
+        )
+        containers[key] = entry
+        await self._save_container_registry(registry)
+
+    def _registry_positions_within_radius(
+        self, registry: Dict[str, Any], radius: int
+    ) -> List[Dict[str, Any]]:
+        player_pos = self._player_pos()
+        if not player_pos:
+            return []
+        containers = registry.get("containers") if isinstance(registry, dict) else None
+        if not isinstance(containers, dict):
+            return []
+        dimension = self._current_dimension()
+        radius = max(1, int(radius))
+        radius_sq = radius * radius
+        positions: List[Dict[str, Any]] = []
+        for entry in containers.values():
+            if not isinstance(entry, dict):
+                continue
+            if dimension and entry.get("dimension") and entry.get("dimension") != dimension:
+                continue
+            try:
+                dx = float(entry.get("x")) - float(player_pos[0])
+                dy = float(entry.get("y")) - float(player_pos[1])
+                dz = float(entry.get("z")) - float(player_pos[2])
+            except (TypeError, ValueError):
+                continue
+            if dx * dx + dy * dy + dz * dz > radius_sq:
+                continue
+            positions.append(
+                {
+                    "x": entry.get("x"),
+                    "y": entry.get("y"),
+                    "z": entry.get("z"),
+                    "block": entry.get("block", ""),
+                }
+            )
+        return positions
 
     def _normalize_block_name(self, name: str | None) -> str:
         raw = (name or "").strip().lower()
@@ -641,6 +1084,72 @@ class HeadfulInventoryController:
             return float(state.get("x")), float(state.get("y")), float(state.get("z"))
         except (TypeError, ValueError):
             return None
+
+    async def _ensure_hotbar_slot_for_item(
+        self, snapshot: ScreenSnapshot, item_names: Iterable[str]
+    ) -> Tuple[Optional[int], ScreenSnapshot]:
+        names = {_normalize_item_name(n) for n in item_names if n}
+        if not names:
+            return None, snapshot
+        target_slot = next(
+            (
+                slot
+                for slot in snapshot.slots
+                if slot.item is not None and slot.item.name in names
+            ),
+            None,
+        )
+        if target_slot is None:
+            return None, snapshot
+        hotbar_index = self._hotbar_index_for_slot(snapshot, target_slot)
+        if hotbar_index is None:
+            hotbar_slots = [s for s in snapshot.slots if s.group == "player_hotbar"]
+            hotbar_slots.sort(key=lambda s: (s.item is not None, s.x, s.y, s.slot))
+            target_hotbar = next((s for s in hotbar_slots if s.item is None), None) or (
+                hotbar_slots[0] if hotbar_slots else None
+            )
+            if target_hotbar and target_hotbar.slot != target_slot.slot:
+                await self._send_sequence(
+                    [
+                        {
+                            "type": "moveStack",
+                            "fromSlot": target_slot.slot,
+                            "toSlot": target_hotbar.slot,
+                        }
+                    ]
+                )
+                raw = await self._get_snapshot(refresh=True)
+                snapshot = ScreenSnapshot.from_dict(raw) or snapshot
+                target_slot = target_hotbar
+                hotbar_index = self._hotbar_index_for_slot(snapshot, target_slot)
+        if hotbar_index is not None:
+            await self._send_sequence([{"type": "hotbar", "slot": hotbar_index}])
+        return hotbar_index, snapshot
+
+    async def _place_block_from_hotbar(
+        self,
+        snapshot: ScreenSnapshot,
+        face: str = "up",
+        look_duration_ms: int = 200,
+    ) -> bool:
+        player_pos = self._player_pos()
+        if not player_pos:
+            return False
+        x, y, z = player_pos
+        candidates = [
+            {"x": int(x), "y": int(y) - 1, "z": int(z)},
+            {"x": int(x) + 1, "y": int(y) - 1, "z": int(z)},
+            {"x": int(x) - 1, "y": int(y) - 1, "z": int(z)},
+            {"x": int(x), "y": int(y) - 1, "z": int(z) + 1},
+            {"x": int(x), "y": int(y) - 1, "z": int(z) - 1},
+        ]
+        for base in candidates:
+            await self._look_at_position(base, duration_ms=look_duration_ms)
+            if await self._use_block_at(base, str(face)):
+                return True
+        # 最后尝试 useTarget 兜底
+        await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+        return False
 
     def _player_yaw_pitch(self) -> Optional[Tuple[float, float]]:
         state = getattr(self._adapter, "last_state", None)
@@ -716,6 +1225,26 @@ class HeadfulInventoryController:
             return False
         norm = self._normalize_entity_type(target)
         return raw_type == norm or raw_type.endswith(f":{target}")
+
+    def _select_nearest_hostile_entity(
+        self, max_distance_sq: float = 144.0
+    ) -> Optional[Dict[str, Any]]:
+        best = None
+        best_priority = -1
+        best_dist = max_distance_sq
+        for e in self._nearby_entities():
+            etype = str(e.get("type", "")).split(":")[-1]
+            if etype not in HOSTILE_ENTITY_TYPES:
+                continue
+            dist = float(e.get("dist", 1e9))
+            if dist > max_distance_sq:
+                continue
+            priority = int(HOSTILE_PRIORITY.get(etype, 0))
+            if priority > best_priority or (priority == best_priority and dist < best_dist):
+                best = e
+                best_priority = priority
+                best_dist = dist
+        return best
 
     def _select_nearest_entity(
         self,
@@ -820,9 +1349,22 @@ class HeadfulInventoryController:
         return 5
 
     def _sort_container_positions(
-        self, positions: List[Dict[str, Any]]
+        self,
+        positions: List[Dict[str, Any]],
+        registry: Optional[Dict[str, Any]] = None,
+        remaining: Optional[Dict[str, int]] = None,
+        smelt_groups: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         player_pos = self._player_pos()
+        containers = {}
+        if isinstance(registry, dict):
+            containers = registry.get("containers") or {}
+        group_items = {}
+        group_remaining = {}
+        if isinstance(smelt_groups, dict):
+            group_items = smelt_groups.get("group_items") or {}
+            group_remaining = smelt_groups.get("group_remaining") or {}
+        now = time.time()
 
         def distance_sq(pos: Dict[str, Any]) -> float:
             if not player_pos:
@@ -835,10 +1377,38 @@ class HeadfulInventoryController:
                 return 0.0
             return dx * dx + dy * dy + dz * dz
 
+        def match_score(entry: Dict[str, Any]) -> int:
+            if not remaining:
+                return 0
+            items = entry.get("items")
+            if not isinstance(items, dict):
+                return 0
+            score = 0
+            for item, need in remaining.items():
+                if need <= 0:
+                    continue
+                count = items.get(item, 0)
+                if count > 0:
+                    score += min(int(need), int(count))
+            if group_items and group_remaining:
+                for group_id, candidates in group_items.items():
+                    needed = int(group_remaining.get(group_id, 0))
+                    if needed <= 0:
+                        continue
+                    for cand in candidates:
+                        count = items.get(cand, 0)
+                        if count > 0:
+                            score += min(needed, int(count))
+                            break
+            return score
+
         return sorted(
             positions,
             key=lambda pos: (
                 self._container_priority(str(pos.get("block", ""))),
+                0 if containers.get(self._container_key(pos) or "") else 1,
+                -match_score(containers.get(self._container_key(pos) or "", {})),
+                now - float(containers.get(self._container_key(pos) or "", {}).get("last_seen", now)),
                 distance_sq(pos),
             ),
         )
@@ -967,6 +1537,62 @@ class HeadfulInventoryController:
             await asyncio.sleep(0.2)
         return None
 
+    async def _wait_for_handler(
+        self,
+        handler_keywords: Tuple[str, ...],
+        title_keywords: Tuple[str, ...],
+        timeout: float = 2.0,
+    ) -> Optional[ScreenSnapshot]:
+        start = time.time()
+        while time.time() - start < timeout:
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot and snapshot.screen_open:
+                handler = (snapshot.handler or "").lower()
+                title = str(snapshot.title or "")
+                if any(keyword in handler for keyword in handler_keywords):
+                    return snapshot
+                if any(keyword in title for keyword in title_keywords):
+                    return snapshot
+            await asyncio.sleep(0.2)
+        return None
+
+    async def _wait_for_brewing_stand(
+        self, timeout: float = 2.0
+    ) -> Optional[ScreenSnapshot]:
+        return await self._wait_for_handler(
+            ("brewing",),
+            ("酿造", "Brewing", "brewing"),
+            timeout=timeout,
+        )
+
+    async def _wait_for_smithing_table(
+        self, timeout: float = 2.0
+    ) -> Optional[ScreenSnapshot]:
+        return await self._wait_for_handler(
+            ("smithing",),
+            ("锻造", "Smithing", "smithing"),
+            timeout=timeout,
+        )
+
+    async def _wait_for_enchanting_table(
+        self, timeout: float = 2.0
+    ) -> Optional[ScreenSnapshot]:
+        return await self._wait_for_handler(
+            ("enchant",),
+            ("附魔", "Enchanting", "enchant"),
+            timeout=timeout,
+        )
+
+    async def _wait_for_trade_screen(
+        self, timeout: float = 2.0
+    ) -> Optional[ScreenSnapshot]:
+        return await self._wait_for_handler(
+            ("merchant", "villager"),
+            ("交易", "Trading", "Merchant", "Villager"),
+            timeout=timeout,
+        )
+
     def _is_redstone_item(self, item_name: str) -> bool:
         return any(keyword in item_name for keyword in REDSTONE_KEYWORDS)
 
@@ -1023,9 +1649,6 @@ class HeadfulInventoryController:
                 available_for_choice[item_name] = available_for_choice.get(item_name, 0) - available_count
 
         if allow_smelting and self._is_smelt_output(item_name):
-            input_item = self._select_smelt_input(item_name, available_for_choice)
-            if input_item:
-                return {input_item: count}
             return {item_name: count}
 
         recipe_book = self._get_recipe_book()
@@ -1077,9 +1700,6 @@ class HeadfulInventoryController:
             inventory_counts[item_name] = 0
 
         if allow_smelting and self._is_smelt_output(item_name):
-            input_item = self._select_smelt_input(item_name, available_for_choice)
-            if input_item:
-                return {input_item: count}
             return {item_name: count}
 
         recipe_book = self._get_recipe_book()
@@ -1112,6 +1732,7 @@ class HeadfulInventoryController:
         needed: Dict[str, int],
         max_slots: int = 54,
         precise: bool = True,
+        allow_smelting: bool = True,
         smelt_groups: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not needed:
@@ -1136,6 +1757,11 @@ class HeadfulInventoryController:
             item_to_group = smelt_groups.get("item_to_group") or {}
             group_items = smelt_groups.get("group_items") or {}
             group_remaining = smelt_groups.get("group_remaining") or {}
+        smelt_input_to_output: Dict[str, List[str]] = {}
+        if allow_smelting:
+            for output_item, inputs in SMELTING_OUTPUTS.items():
+                for inp in inputs:
+                    smelt_input_to_output.setdefault(inp, []).append(output_item)
         container_slots = [
             slot
             for slot in snapshot.slots
@@ -1148,20 +1774,32 @@ class HeadfulInventoryController:
                 item = slot.item
                 if not item:
                     continue
+                used_group = False
+                used_smelt_output = False
                 group_id = item_to_group.get(item.name)
-                want = (
-                    group_remaining.get(group_id, 0)
-                    if group_id
-                    else remaining.get(item.name, 0)
-                )
+                want = remaining.get(item.name, 0)
+                if want <= 0 and allow_smelting:
+                    for output_item in smelt_input_to_output.get(item.name, []):
+                        if remaining.get(output_item, 0) > 0:
+                            used_smelt_output = True
+                            want = remaining.get(output_item, 0)
+                            break
+                if want <= 0 and group_id:
+                    used_group = True
+                    want = group_remaining.get(group_id, 0)
                 if want <= 0:
                     continue
                 actions.append({"type": "quickMove", "slot": slot.slot})
                 moved = min(item.count, want)
-                if group_id:
+                if used_group:
                     group_remaining[group_id] = max(0, want - moved)
                     for candidate in group_items.get(group_id, []):
                         remaining[candidate] = group_remaining[group_id]
+                elif used_smelt_output:
+                    for output_item in smelt_input_to_output.get(item.name, []):
+                        if remaining.get(output_item, 0) > 0:
+                            remaining[output_item] = max(0, want - moved)
+                            break
                 else:
                     remaining[item.name] = max(0, want - moved)
             ok = await self._send_sequence(actions)
@@ -1178,12 +1816,19 @@ class HeadfulInventoryController:
             item = slot.item
             if not item:
                 continue
+            used_group = False
+            used_smelt_output = False
             group_id = item_to_group.get(item.name)
-            want = (
-                group_remaining.get(group_id, 0)
-                if group_id
-                else remaining.get(item.name, 0)
-            )
+            want = remaining.get(item.name, 0)
+            if want <= 0 and allow_smelting:
+                for output_item in smelt_input_to_output.get(item.name, []):
+                    if remaining.get(output_item, 0) > 0:
+                        used_smelt_output = True
+                        want = remaining.get(output_item, 0)
+                        break
+            if want <= 0 and group_id:
+                used_group = True
+                want = group_remaining.get(group_id, 0)
             if want <= 0:
                 continue
             default_max = item.max_count if item.max_count > 0 else 64
@@ -1236,10 +1881,15 @@ class HeadfulInventoryController:
                         "action": "pickup",
                     }
                 )
-            if group_id:
+            if used_group:
                 group_remaining[group_id] = max(0, want - moved)
                 for candidate in group_items.get(group_id, []):
                     remaining[candidate] = group_remaining[group_id]
+            elif used_smelt_output:
+                for output_item in smelt_input_to_output.get(item.name, []):
+                    if remaining.get(output_item, 0) > 0:
+                        remaining[output_item] = max(0, want - moved)
+                        break
             else:
                 remaining[item.name] = max(0, want - moved)
             processed += 1
@@ -1341,6 +1991,10 @@ class HeadfulInventoryController:
                 return await self.attack_nearest(params)
             if name in {"defend_self", "defend"}:
                 return await self.defend_self(params)
+            if name in {"smart_guard"}:
+                return await self.smart_guard(params)
+            if name in {"smart_gather"}:
+                return await self.smart_gather(params)
             if name in {"pickup_nearby_items", "pickup_items"}:
                 return await self.pickup_nearby_items(params)
             if name in {"collect_block", "collect"}:
@@ -1349,6 +2003,14 @@ class HeadfulInventoryController:
                 return await self.open_container(params)
             if name in {"open_crafting_table", "open_workbench", "open_table"}:
                 return await self.open_crafting_table(params)
+            if name in {"open_brewing_stand", "open_brew_stand", "open_brew"}:
+                return await self.open_brewing_stand(params)
+            if name in {"open_smithing_table", "open_smithing"}:
+                return await self.open_smithing_table(params)
+            if name in {"open_enchanting_table", "open_enchant"}:
+                return await self.open_enchanting_table(params)
+            if name in {"open_trade", "open_villager_trade", "open_merchant"}:
+                return await self.open_trade(params)
             if name in {"view_container", "view_chest"}:
                 return await self.view_container(params)
             if name in {"take_from_container", "take_from_chest", "loot_container"}:
@@ -1361,6 +2023,14 @@ class HeadfulInventoryController:
                 return await self.craft_item(params)
             if name in {"smelt", "smelt_item", "smeltitem"}:
                 return await self.smelt_item(params)
+            if name in {"brew", "brew_item"}:
+                return await self.brew_item(params)
+            if name in {"smith", "smith_item"}:
+                return await self.smith_item(params)
+            if name in {"enchant", "enchant_item"}:
+                return await self.enchant_item(params)
+            if name in {"trade", "trade_item"}:
+                return await self.trade_item(params)
             if name in {"plan", "plan_only", "planner"}:
                 return await self.plan_actions(params, execute=False)
             if name in {"plan_execute", "plan_and_execute", "planrun"}:
@@ -1424,9 +2094,60 @@ class HeadfulInventoryController:
         if not result.get("ok"):
             return result
         positions = result.get("positions")
-        if not isinstance(positions, list) or not positions:
+        pos = None
+        if isinstance(positions, list) and positions:
+            pos = positions[0]
+        # 可选：没有容器时放置一个箱子
+        if pos is None and bool(params.get("place_if_missing", False)):
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot:
+                chest_slot = next(
+                    (
+                        slot
+                        for slot in snapshot.slots
+                        if slot.item and slot.item.name in {"chest", "trapped_chest"}
+                    ),
+                    None,
+                )
+                if chest_slot is None:
+                    craft_chest = await self.craft_item(
+                        {
+                            "item": "chest",
+                            "count": 1,
+                            "auto_open_table": True,
+                            "recursive": True,
+                        }
+                    )
+                    if craft_chest.get("ok"):
+                        raw = await self._get_snapshot(refresh=True)
+                        snapshot = ScreenSnapshot.from_dict(raw) or snapshot
+                        chest_slot = next(
+                            (
+                                slot
+                                for slot in snapshot.slots
+                                if slot.item and slot.item.name in {"chest", "trapped_chest"}
+                            ),
+                            None,
+                        )
+                if chest_slot:
+                    _, snapshot = await self._ensure_hotbar_slot_for_item(
+                        snapshot, ["chest", "trapped_chest"]
+                    )
+                    placed = await self._place_block_from_hotbar(
+                        snapshot, face=str(face), look_duration_ms=look_duration_ms
+                    )
+                    if placed:
+                        await asyncio.sleep(0.4)
+                        result_retry = await self._find_blocks(
+                            targets, radius=radius, timeout=timeout
+                        )
+                        positions = result_retry.get("positions") if isinstance(result_retry, dict) else None
+                        if isinstance(positions, list) and positions:
+                            pos = positions[0]
+        if pos is None:
             return {"ok": False, "error": "block_not_found"}
-        pos = positions[0]
+        pos = pos
         if move:
             await self._move_near_position(pos)
         if look_at:
@@ -1453,11 +2174,54 @@ class HeadfulInventoryController:
         faces = [str(f) for f in faces if f]
         result = await self._find_blocks([CRAFTING_TABLE_BLOCK], radius=radius, timeout=timeout)
         if not result.get("ok"):
-            return result
+            result = {"ok": False, "error": "crafting_table_not_found"}
         positions = result.get("positions")
-        if not isinstance(positions, list) or not positions:
+        pos = None
+        if isinstance(positions, list) and positions:
+            pos = positions[0]
+        # 如果附近没有工作台，尝试用 2x2 合成一个并放下
+        if pos is None and bool(params.get("place_if_missing", True)):
+            raw = await self._get_snapshot(refresh=True)
+            snap = ScreenSnapshot.from_dict(raw)
+            if snap and not self._inventory_has_item(snap, "crafting_table", 1):
+                craft_table = await self.craft_item(
+                    {
+                        "item": "crafting_table",
+                        "count": 1,
+                        "auto_open_table": False,
+                        "open_table": False,
+                        "recursive": True,
+                    }
+                )
+                if not craft_table.get("ok"):
+                    return {
+                        "ok": False,
+                        "error": "crafting_table_not_found",
+                        "detail": craft_table,
+                    }
+                raw = await self._get_snapshot(refresh=True)
+                snap = ScreenSnapshot.from_dict(raw) or snap
+            if snap:
+                if not self._inventory_has_item(snap, "crafting_table", 1):
+                    return {"ok": False, "error": "crafting_table_missing_after_craft"}
+                _, snap = await self._ensure_hotbar_slot_for_item(
+                    snap, ["crafting_table"]
+                )
+                placed = await self._place_block_from_hotbar(
+                    snap, face=str(face), look_duration_ms=look_duration_ms
+                )
+                if placed:
+                    await asyncio.sleep(0.5)
+                    result_retry = await self._find_blocks(
+                        [CRAFTING_TABLE_BLOCK], radius=radius, timeout=timeout
+                    )
+                    positions = result_retry.get("positions") if isinstance(result_retry, dict) else None
+                    if isinstance(positions, list) and positions:
+                        pos = positions[0]
+            if pos is None:
+                return {"ok": False, "error": "crafting_table_place_failed"}
+        elif pos is None:
             return {"ok": False, "error": "crafting_table_not_found"}
-        pos = positions[0]
         attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
         snapshot = await self._wait_for_crafting_table(timeout=0.1)
         if snapshot:
@@ -1506,6 +2270,170 @@ class HeadfulInventoryController:
             self._debug_log(f"open_crafting_table retry {attempt}/{retries} failed", params)
         return {"ok": False, "error": "crafting_table_open_failed", "position": pos}
 
+    async def open_brewing_stand(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        radius = int(params.get("radius", 8))
+        timeout = float(params.get("timeout", 4.0))
+        move = bool(params.get("move", True))
+        look_at = bool(params.get("look_at", True))
+        look_duration_ms = int(params.get("look_duration_ms", 200))
+        face = params.get("face", "up")
+        retries = max(1, int(params.get("retries", 3)))
+        result = await self._find_blocks(["brewing_stand"], radius=radius, timeout=timeout)
+        if not result.get("ok"):
+            return {"ok": False, "error": "brewing_stand_not_found"}
+        positions = result.get("positions")
+        if not isinstance(positions, list) or not positions:
+            return {"ok": False, "error": "brewing_stand_not_found"}
+        pos = positions[0]
+        snapshot = await self._wait_for_brewing_stand(timeout=0.1)
+        if snapshot:
+            return {"ok": True, "position": pos, "snapshot": snapshot, "already_open": True}
+        attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
+        await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
+        for attempt in range(1, retries + 1):
+            if move:
+                await self._move_near_position(pos)
+            if look_at:
+                await self._look_at_position(pos, duration_ms=look_duration_ms)
+            used = await self._use_block_at(pos, str(face))
+            if used:
+                snapshot = await self._wait_for_brewing_stand(timeout=attempt_timeout)
+                if snapshot:
+                    return {
+                        "ok": True,
+                        "position": pos,
+                        "snapshot": snapshot,
+                        "attempt": attempt,
+                    }
+            await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+            snapshot = await self._wait_for_brewing_stand(timeout=attempt_timeout)
+            if snapshot:
+                return {"ok": True, "position": pos, "snapshot": snapshot, "attempt": attempt}
+        return {"ok": False, "error": "brewing_stand_open_failed", "position": pos}
+
+    async def open_smithing_table(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        radius = int(params.get("radius", 8))
+        timeout = float(params.get("timeout", 4.0))
+        move = bool(params.get("move", True))
+        look_at = bool(params.get("look_at", True))
+        look_duration_ms = int(params.get("look_duration_ms", 200))
+        face = params.get("face", "up")
+        retries = max(1, int(params.get("retries", 3)))
+        result = await self._find_blocks(["smithing_table"], radius=radius, timeout=timeout)
+        if not result.get("ok"):
+            return {"ok": False, "error": "smithing_table_not_found"}
+        positions = result.get("positions")
+        if not isinstance(positions, list) or not positions:
+            return {"ok": False, "error": "smithing_table_not_found"}
+        pos = positions[0]
+        snapshot = await self._wait_for_smithing_table(timeout=0.1)
+        if snapshot:
+            return {"ok": True, "position": pos, "snapshot": snapshot, "already_open": True}
+        attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
+        await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
+        for attempt in range(1, retries + 1):
+            if move:
+                await self._move_near_position(pos)
+            if look_at:
+                await self._look_at_position(pos, duration_ms=look_duration_ms)
+            used = await self._use_block_at(pos, str(face))
+            if used:
+                snapshot = await self._wait_for_smithing_table(timeout=attempt_timeout)
+                if snapshot:
+                    return {
+                        "ok": True,
+                        "position": pos,
+                        "snapshot": snapshot,
+                        "attempt": attempt,
+                    }
+            await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+            snapshot = await self._wait_for_smithing_table(timeout=attempt_timeout)
+            if snapshot:
+                return {"ok": True, "position": pos, "snapshot": snapshot, "attempt": attempt}
+        return {"ok": False, "error": "smithing_table_open_failed", "position": pos}
+
+    async def open_enchanting_table(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        radius = int(params.get("radius", 8))
+        timeout = float(params.get("timeout", 4.0))
+        move = bool(params.get("move", True))
+        look_at = bool(params.get("look_at", True))
+        look_duration_ms = int(params.get("look_duration_ms", 200))
+        face = params.get("face", "up")
+        retries = max(1, int(params.get("retries", 3)))
+        result = await self._find_blocks(["enchanting_table"], radius=radius, timeout=timeout)
+        if not result.get("ok"):
+            return {"ok": False, "error": "enchanting_table_not_found"}
+        positions = result.get("positions")
+        if not isinstance(positions, list) or not positions:
+            return {"ok": False, "error": "enchanting_table_not_found"}
+        pos = positions[0]
+        snapshot = await self._wait_for_enchanting_table(timeout=0.1)
+        if snapshot:
+            return {"ok": True, "position": pos, "snapshot": snapshot, "already_open": True}
+        attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
+        await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
+        for attempt in range(1, retries + 1):
+            if move:
+                await self._move_near_position(pos)
+            if look_at:
+                await self._look_at_position(pos, duration_ms=look_duration_ms)
+            used = await self._use_block_at(pos, str(face))
+            if used:
+                snapshot = await self._wait_for_enchanting_table(timeout=attempt_timeout)
+                if snapshot:
+                    return {
+                        "ok": True,
+                        "position": pos,
+                        "snapshot": snapshot,
+                        "attempt": attempt,
+                    }
+            await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+            snapshot = await self._wait_for_enchanting_table(timeout=attempt_timeout)
+            if snapshot:
+                return {"ok": True, "position": pos, "snapshot": snapshot, "attempt": attempt}
+        return {"ok": False, "error": "enchanting_table_open_failed", "position": pos}
+
+    async def open_trade(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        radius = float(params.get("radius", params.get("range", 6.0)))
+        timeout = float(params.get("timeout", 4.0))
+        move = bool(params.get("move", True))
+        look_at = bool(params.get("look_at", True))
+        look_duration_ms = int(params.get("look_duration_ms", 200))
+        retries = max(1, int(params.get("retries", 3)))
+        entity = self._select_nearest_entity(
+            target_type="minecraft:villager", max_distance=radius
+        )
+        if entity is None:
+            entity = self._select_nearest_entity(
+                target_type="minecraft:wandering_trader", max_distance=radius
+            )
+        if entity is None:
+            return {"ok": False, "error": "trader_not_found"}
+        snapshot = await self._wait_for_trade_screen(timeout=0.1)
+        if snapshot:
+            return {"ok": True, "entity": entity, "snapshot": snapshot, "already_open": True}
+        attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
+        await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
+        for attempt in range(1, retries + 1):
+            if move:
+                await self._move_near_position(entity, distance=2.5, timeout=timeout)
+            if look_at:
+                await self._look_at_position(entity, duration_ms=look_duration_ms)
+            await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+            snapshot = await self._wait_for_trade_screen(timeout=attempt_timeout)
+            if snapshot:
+                return {
+                    "ok": True,
+                    "entity": entity,
+                    "snapshot": snapshot,
+                    "attempt": attempt,
+                }
+        return {"ok": False, "error": "trade_open_failed", "entity": entity}
+
     async def open_furnace(self, params: Dict[str, Any]) -> Dict[str, Any]:
         radius = int(params.get("radius", 8))
         timeout = float(params.get("timeout", 4.0))
@@ -1525,11 +2453,107 @@ class HeadfulInventoryController:
             targets = list(SMELTING_BLOCKS)
         result = await self._find_blocks(targets, radius=radius, timeout=timeout)
         if not result.get("ok"):
-            return result
+            result = {"ok": False, "error": "smelting_block_not_found"}
         positions = result.get("positions")
-        if not isinstance(positions, list) or not positions:
-            return {"ok": False, "error": "smelting_block_not_found"}
-        pos = positions[0]
+        pos = None
+        if isinstance(positions, list) and positions:
+            pos = positions[0]
+        # 如果附近没有熔炉类方块，尝试放置一个（使用手上/背包里的 furnace/blast_furnace/smoker）
+        if pos is None:
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot:
+                # 尝试从附近容器/背包取出已有的炉子（不强制合成）
+                inv_counts = self._inventory_counts(snapshot)
+                if inv_counts.get("furnace", 0) + inv_counts.get("blast_furnace", 0) + inv_counts.get("smoker", 0) <= 0 and bool(
+                    params.get("take_furnace_from_containers", True)
+                ):
+                    for target in ("furnace", "blast_furnace", "smoker"):
+                        take_result = await self.craft_from_container(
+                            {
+                                "item": target,
+                                "count": 1,
+                                "skip_craft": True,
+                                "open_table": False,
+                                "smart_pickup": True,
+                                "precise_pickup": True,
+                                "multi_container": True,
+                                "use_llm_orchestrator": False,
+                                "_no_llm_orchestrator": True,
+                            }
+                        )
+                        if take_result.get("ok"):
+                            raw = await self._get_snapshot(refresh=True)
+                            snapshot = ScreenSnapshot.from_dict(raw) or snapshot
+                            inv_counts = self._inventory_counts(snapshot)
+                            break
+                # 先找现成的炉子
+                furnace_slot = next(
+                    (
+                        slot
+                        for slot in snapshot.slots
+                        if slot.item
+                        and slot.item.name in {"furnace", "blast_furnace", "smoker"}
+                    ),
+                    None,
+                )
+                # 没有的话尝试合成一个（需要工作台，依赖前面 open_crafting_table 可自放置）
+                if furnace_slot is None and bool(params.get("craft_if_missing", True)):
+                    if not self._inventory_has_item(snapshot, "furnace", 1):
+                        craft_furnace = await self.craft_item(
+                            {
+                                "item": "furnace",
+                                "count": 1,
+                                "auto_open_table": True,
+                                "recursive": True,
+                            }
+                        )
+                        if not craft_furnace.get("ok"):
+                            return {
+                                "ok": False,
+                                "error": "furnace_craft_failed",
+                                "detail": craft_furnace,
+                            }
+                        raw = await self._get_snapshot(refresh=True)
+                        snapshot = ScreenSnapshot.from_dict(raw) or snapshot
+                    furnace_slot = next(
+                        (
+                            slot
+                            for slot in snapshot.slots
+                            if slot.item
+                            and slot.item.name in {"furnace", "blast_furnace", "smoker"}
+                        ),
+                        None,
+                    )
+                if furnace_slot:
+                    _, snapshot = await self._ensure_hotbar_slot_for_item(
+                        snapshot, ["furnace", "blast_furnace", "smoker"]
+                    )
+                    placed = await self._place_block_from_hotbar(
+                        snapshot, face=str(face), look_duration_ms=look_duration_ms
+                    )
+                    if placed:
+                        await asyncio.sleep(0.5)
+                        raw_place = await self._get_snapshot(refresh=True)
+                        snap_place = ScreenSnapshot.from_dict(raw_place)
+                        if snap_place and self._snapshot_has_smelting_container(snap_place):
+                            return {
+                                "ok": True,
+                                "position": self._player_pos() or {"x": 0, "y": 0, "z": 0},
+                                "snapshot": snap_place,
+                                "placed": True,
+                            }
+                        # 重新找一下（可能方块放下了但界面没开）
+                        result = await self._find_blocks(
+                            targets, radius=radius, timeout=timeout
+                        )
+                        positions = result.get("positions")
+                        if isinstance(positions, list) and positions:
+                            pos = positions[0]
+                    else:
+                        return {"ok": False, "error": "furnace_place_failed"}
+            if pos is None:
+                return {"ok": False, "error": "smelting_block_not_found"}
         attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
         snapshot = await self._wait_for_smelting_container(timeout=0.1)
         if snapshot:
@@ -1633,6 +2657,7 @@ class HeadfulInventoryController:
         if not snapshot:
             return {"ok": False, "error": "container_open_failed", "position": pos}
         snapshot = await self._stabilize_container_snapshot(snapshot, settle_ms)
+        await self._update_container_registry(pos, snapshot)
         return {"ok": True, "position": pos, "snapshot": snapshot}
 
     async def set_debug(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1892,6 +2917,12 @@ class HeadfulInventoryController:
         count = int(params.get("count", 1))
         if not item_name:
             return {"ok": False, "error": "missing_item"}
+        cfg = self._headful_config()
+        use_llm_orchestrator = bool(
+            params.get("use_llm_orchestrator", cfg.get("use_llm_orchestrator", False))
+        )
+        if use_llm_orchestrator and not bool(params.get("_no_llm_orchestrator", False)):
+            return await self._llm_orchestrate_craft(params)
         results: List[Dict[str, Any]] = []
         raw = await self._get_snapshot(refresh=True)
         snapshot = ScreenSnapshot.from_dict(raw)
@@ -1911,7 +2942,6 @@ class HeadfulInventoryController:
         verify_transfer = bool(params.get("verify_transfer", True))
         specific_items = bool(container_item or isinstance(container_items, list))
         close_container = bool(params.get("close_container", True))
-        cfg = self._headful_config()
         deny_raw = params.get("container_denylist", cfg.get("container_denylist"))
         if deny_raw is None:
             deny_raw = ["ender_chest"]
@@ -1922,8 +2952,12 @@ class HeadfulInventoryController:
         else:
             deny_list = []
         deny_set = {self._normalize_block_name(item).split(":", 1)[1] for item in deny_list}
+        default_radius = int(cfg.get("container_radius_default", 5))
         container_radius = int(
-            params.get("container_radius", params.get("search_radius", params.get("radius", 8)))
+            params.get(
+                "container_radius",
+                params.get("search_radius", params.get("radius", default_radius)),
+            )
         )
         container_timeout = float(params.get("container_timeout", params.get("timeout", 4.0)))
         move = bool(params.get("move", True))
@@ -1997,6 +3031,7 @@ class HeadfulInventoryController:
                 current_remaining,
                 max_slots=max_slots,
                 precise=precise_pickup,
+                allow_smelting=allow_smelting,
                 smelt_groups=smelt_groups,
             )
             next_remaining = transfer.get("remaining", current_remaining)
@@ -2024,6 +3059,7 @@ class HeadfulInventoryController:
                         next_remaining,
                         max_slots=max_slots,
                         precise=precise_pickup,
+                        allow_smelting=allow_smelting,
                         smelt_groups=smelt_groups,
                     )
                     if needed is not None:
@@ -2090,6 +3126,25 @@ class HeadfulInventoryController:
                 await self._wait_for_screen_closed(timeout=close_timeout_ms / 1000.0)
                 await asyncio.sleep(0.2)
 
+        expand_raw = params.get("container_search_radii", cfg.get("container_search_radii"))
+        if isinstance(expand_raw, list):
+            expand_radii = []
+            for value in expand_raw:
+                try:
+                    expand_radii.append(int(value))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            expand_radii = [15, 50]
+        search_radii = [container_radius]
+        for radius in expand_radii:
+            try:
+                value = int(radius)
+            except (TypeError, ValueError):
+                continue
+            if value > search_radii[-1]:
+                search_radii.append(value)
+
         if (not container_open) or (remaining and multi_container):
             positions: List[Dict[str, Any]] = []
             if multi_container:
@@ -2111,19 +3166,31 @@ class HeadfulInventoryController:
                         if self._normalize_block_name(t).split(":", 1)[1] not in deny_set
                     ]
                 max_containers = int(params.get("max_containers", params.get("max_results", 6)))
-                find_result = await self._find_blocks(
-                    targets,
-                    radius=container_radius,
-                    max_results=max_containers,
-                    timeout=container_timeout,
-                )
-                results.append({"step": "find_containers", "result": find_result})
-                if find_result.get("ok"):
-                    positions = [
-                        pos
-                        for pos in (find_result.get("positions") or [])
-                        if isinstance(pos, dict)
-                    ]
+                registry = await self._load_container_registry()
+                for radius in search_radii:
+                    find_result = await self._find_blocks(
+                        targets,
+                        radius=radius,
+                        max_results=max_containers,
+                        timeout=container_timeout,
+                    )
+                    results.append(
+                        {"step": "find_containers", "radius": radius, "result": find_result}
+                    )
+                    if find_result.get("ok"):
+                        positions = [
+                            pos
+                            for pos in (find_result.get("positions") or [])
+                            if isinstance(pos, dict)
+                        ]
+                        if positions:
+                            await self._register_found_positions(positions)
+                            break
+                    positions = []
+                if not positions and registry:
+                    positions = self._registry_positions_within_radius(
+                        registry, search_radii[-1]
+                    )
                 if deny_set and positions:
                     filtered_positions = []
                     for pos in positions:
@@ -2134,7 +3201,9 @@ class HeadfulInventoryController:
                         filtered_positions.append(pos)
                     positions = filtered_positions
                 if positions:
-                    positions = self._sort_container_positions(positions)
+                    positions = self._sort_container_positions(
+                        positions, registry, remaining, smelt_groups
+                    )
                 if remaining and not positions:
                     return {
                         "ok": False,
@@ -2144,21 +3213,25 @@ class HeadfulInventoryController:
                     }
 
             if not positions and not container_open:
-                open_result = await self.open_container(
-                    {
-                        "block": params.get("container_block"),
-                        "blocks": params.get("container_blocks"),
-                        "radius": container_radius,
-                        "move": move,
-                        "face": face,
-                        "timeout": container_timeout,
-                        "ensure_closed": True,
-                        "close_timeout_ms": close_timeout_ms,
-                    }
-                )
+                open_params = {
+                    "block": params.get("container_block"),
+                    "blocks": params.get("container_blocks"),
+                    "radius": container_radius,
+                    "move": move,
+                    "face": face,
+                    "timeout": container_timeout,
+                    "ensure_closed": True,
+                    "close_timeout_ms": close_timeout_ms,
+                    "place_if_missing": bool(params.get("place_container_if_missing", False)),
+                }
+                open_result = await self.open_container(open_params)
                 results.append({"step": "open_container", "result": open_result})
                 if not open_result.get("ok"):
-                    return {"ok": False, "error": "open_container_failed", "steps": results}
+                    # 如果完全找不到容器且不强制需要容器，则跳过继续后续步骤
+                    if not remaining:
+                        pass
+                    else:
+                        return {"ok": False, "error": "open_container_failed", "steps": results}
                 snapshot = open_result.get("snapshot")
                 if snapshot is None:
                     raw = await self._get_snapshot(refresh=True)
@@ -2386,6 +3459,78 @@ class HeadfulInventoryController:
             summary["items"] = items
         return summary
 
+    async def _resolve_bed_position(self, radius: int = 8) -> Optional[Dict[str, Any]]:
+        bed_targets = [
+            "white_bed",
+            "red_bed",
+            "blue_bed",
+            "black_bed",
+            "cyan_bed",
+            "gray_bed",
+            "green_bed",
+            "light_blue_bed",
+            "light_gray_bed",
+            "lime_bed",
+            "magenta_bed",
+            "orange_bed",
+            "pink_bed",
+            "purple_bed",
+            "yellow_bed",
+            "brown_bed",
+        ]
+        result = await self._find_blocks(
+            bed_targets,
+            radius=radius,
+            max_results=3,
+            timeout=2.0,
+        )
+        if result.get("ok") and isinstance(result.get("positions"), list) and result["positions"]:
+            return result["positions"][0]
+        registry = await self._load_container_registry()
+        if registry and isinstance(registry.get("containers"), dict):
+            for _, meta in registry["containers"].items():
+                block = str(meta.get("block", ""))
+                if block.endswith("_bed"):
+                    pos = meta.get("pos")
+                    if pos:
+                        return pos
+        return None
+
+    async def _ensure_bed(self) -> Dict[str, Any]:
+        pos = await self._resolve_bed_position(radius=8)
+        if pos:
+            return {"ok": True, "position": pos, "found": True}
+        raw = await self._get_snapshot(refresh=True)
+        snapshot = ScreenSnapshot.from_dict(raw)
+        if snapshot:
+            bed_items = [slot for slot in snapshot.slots if slot.item and slot.item.name.endswith("_bed")]
+            if bed_items:
+                _, snap = await self._ensure_hotbar_slot_for_item(
+                    snapshot, [bed_items[0].item.name]
+                )
+                placed = await self._place_block_from_hotbar(snap, face="up", look_duration_ms=200)
+                if placed:
+                    pos = await self._resolve_bed_position(radius=8)
+                    if pos:
+                        return {"ok": True, "position": pos, "placed": True}
+        return {"ok": False, "error": "bed_not_found"}
+
+    async def _sleep_in_bed(self) -> Dict[str, Any]:
+        pos = await self._resolve_bed_position(radius=10)
+        if not pos:
+            ensured = await self._ensure_bed()
+            if not ensured.get("ok"):
+                return ensured
+            pos = ensured.get("position")
+        if not pos:
+            return {"ok": False, "error": "bed_not_found"}
+        await self._move_near_position(pos, distance=1.6, timeout=4.0)
+        await self._look_at_position(pos, duration_ms=200)
+        used = await self._use_block_at(pos, face="up")
+        if used:
+            return {"ok": True, "position": pos}
+        return {"ok": False, "error": "sleep_failed", "position": pos}
+
     def _crafting_allowlist(self) -> Optional[set[str]]:
         cfg = self._headful_config()
         allow = cfg.get("crafting_allowlist")
@@ -2418,6 +3563,104 @@ class HeadfulInventoryController:
                 continue
             counts[slot.item.name] = counts.get(slot.item.name, 0) + slot.item.count
         return counts
+
+    def _inventory_counts(self, snapshot: ScreenSnapshot) -> Dict[str, int]:
+        return self._build_counts(snapshot.slots, ("player_main", "player_hotbar"))
+
+    def _inventory_has_item(
+        self, snapshot: ScreenSnapshot, item_name: str, count: int = 1
+    ) -> bool:
+        if count <= 0:
+            return True
+        inventory = self._inventory_counts(snapshot)
+        return inventory.get(_normalize_item_name(item_name), 0) >= count
+
+    def _state_summary_for_llm(self, plan_graph: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        state = getattr(self._adapter, "last_state", {}) or {}
+        summary: Dict[str, Any] = {}
+        try:
+            dim = state.get("dimension")
+            world_time = int(state.get("worldTime", 0))
+            day_time = world_time % 24000
+            summary["dimension"] = dim
+            summary["world_time"] = world_time
+            summary["day_time"] = day_time
+            summary["is_night"] = bool(day_time >= 13000 and day_time <= 23000)
+            summary["env"] = state.get("envSample")
+        except Exception:
+            pass
+        try:
+            cfg = self._headful_config()
+            summary["smart_guard_enabled"] = bool(cfg.get("enable_smart_guard", True))
+            summary["smart_gather_enabled"] = bool(cfg.get("enable_smart_gather", True))
+        except Exception:
+            pass
+        try:
+            entities = state.get("nearbyEntities", {})
+            if isinstance(entities, dict):
+                items = entities.get("items") or []
+                players = []
+                hostiles = []
+                for e in items:
+                    etype = (e.get("type") or "").split(":")[-1]
+                    name = e.get("name") or ""
+                    dist = e.get("dist")
+                    if etype == "player":
+                        players.append({"name": name, "dist": dist})
+                    elif etype:
+                        hostiles.append({"type": etype, "dist": dist})
+                summary["nearby_players"] = players[:5]
+                summary["nearby_hostiles"] = hostiles[:5]
+        except Exception:
+            pass
+        try:
+            registry = None
+            if self._container_registry_cache is not None:
+                registry = self._container_registry_cache
+            summary["known_stations"] = []
+            summary["known_containers"] = []
+            if registry and isinstance(registry, dict):
+                containers = registry.get("containers") or {}
+                for pos_key, meta in containers.items():
+                    block = meta.get("block") or ""
+                    if not block:
+                        continue
+                    if any(
+                        block.endswith(suf)
+                        for suf in (
+                            "crafting_table",
+                            "furnace",
+                            "blast_furnace",
+                            "smoker",
+                            "brewing_stand",
+                            "enchanting_table",
+                            "anvil",
+                            "smithing_table",
+                            "grindstone",
+                            "loom",
+                            "stonecutter",
+                            "cartography_table",
+                            "fletching_table",
+                            "bed",
+                            "chest",
+                            "barrel",
+                        )
+                    ):
+                        summary["known_stations"].append(
+                            {"block": block, "pos": meta.get("pos")}
+                        )
+                    summary["known_containers"].append(
+                        {
+                            "block": block,
+                            "pos": meta.get("pos"),
+                            "last_seen": meta.get("last_seen"),
+                        }
+                    )
+        except Exception:
+            pass
+        if plan_graph:
+            summary["plan_graph"] = plan_graph
+        return summary
 
     def _slots_by_group(self, slots: Iterable[SlotInfo], groups: Tuple[str, ...]) -> List[SlotInfo]:
         return [slot for slot in slots if slot.group in groups]
@@ -2540,6 +3783,14 @@ class HeadfulInventoryController:
             ("README.md", base / "README.md"),
             ("FAQ.md", base / "FAQ.md"),
         ]
+        try:
+            extra_dir = self._registry_base_dir() / "docs"
+            if extra_dir.exists():
+                extra_files = list(extra_dir.glob("*.md")) + list(extra_dir.glob("*.txt"))
+                for path in sorted(extra_files)[:12]:
+                    docs.append((path.name, path))
+        except Exception:
+            pass
         results: List[Tuple[str, str]] = []
         for name, path in docs:
             if path.exists():
@@ -2861,6 +4112,603 @@ class HeadfulInventoryController:
                 await self._get_snapshot(refresh=True)
         return executed
 
+    def _resolve_llm_config(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._config()
+        require_frontend_raw = params.get(
+            "llm_require_frontend", cfg.get("llm_require_frontend", False)
+        )
+        if isinstance(require_frontend_raw, str):
+            require_frontend = require_frontend_raw.lower() in {"1", "true", "yes", "on"}
+        else:
+            require_frontend = bool(require_frontend_raw)
+
+        param_api_key = params.get("llm_api_key") or params.get("agent_api_key")
+        param_base_url = params.get("llm_base_url") or params.get("agent_base_url")
+        param_model = params.get("llm_model") or params.get("agent_model")
+
+        if require_frontend:
+            if not param_api_key and not param_base_url:
+                return {"ok": False, "error": "llm_config_missing"}
+            return {
+                "ok": True,
+                "api_key": param_api_key,
+                "base_url": param_base_url,
+                "model": param_model or cfg.get("agent_model"),
+            }
+
+        return {
+            "ok": True,
+            "api_key": param_api_key or cfg.get("agent_api_key"),
+            "base_url": param_base_url or cfg.get("agent_base_url"),
+            "model": param_model or cfg.get("agent_model"),
+        }
+
+    def _validate_orchestrator_actions(
+        self, actions: List[Any]
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        allowed = {
+            "ensure_crafting_table",
+            "ensure_furnace",
+            "ensure_bed",
+            "ensure_chest",
+            "gather_item",
+            "smelt_output",
+            "craft_item",
+            "brew_item",
+            "smith_item",
+            "enchant_item",
+            "trade_item",
+            "sleep",
+            "follow_player",
+            "guard_player",
+            "smart_guard",
+            "smart_gather",
+            "store_inventory",
+            "set_respawn",
+            "move_to",
+            "pickup_nearby",
+            "open_container",
+            "open_crafting_table",
+            "open_furnace",
+            "open_brewing_stand",
+            "open_smithing_table",
+            "open_enchanting_table",
+            "open_trade",
+            "collect_block",
+            "alert_main_brain",
+            "close_screen",
+            "wait",
+        }
+        cleaned: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        for idx, action in enumerate(actions):
+            if not isinstance(action, dict):
+                warnings.append(f"step {idx}: action_not_object")
+                continue
+            action_type = str(action.get("type") or "")
+            if action_type not in allowed:
+                warnings.append(f"step {idx}: action_not_allowed:{action_type}")
+                continue
+            normalized = {"type": action_type}
+            if action_type in {
+                "gather_item",
+                "smelt_output",
+                "craft_item",
+                "brew_item",
+                "smith_item",
+                "enchant_item",
+                "trade_item",
+            }:
+                item = _normalize_item_name(action.get("item"))
+                count = int(action.get("count", 1))
+                if not item:
+                    warnings.append(f"step {idx}: missing_item")
+                    continue
+                normalized["item"] = item
+                normalized["count"] = max(1, count)
+            elif action_type in {"follow_player", "guard_player"}:
+                target = action.get("player") or action.get("name") or action.get("target")
+                if target:
+                    normalized["player"] = str(target)
+                normalized["duration_sec"] = float(action.get("duration_sec", 20.0))
+            elif action_type == "wait":
+                normalized["ms"] = int(action.get("ms", 200))
+            elif action_type in {"smart_guard", "smart_gather"}:
+                pass
+            elif action_type == "move_to":
+                try:
+                    normalized["x"] = float(action.get("x"))
+                    normalized["y"] = float(action.get("y"))
+                    normalized["z"] = float(action.get("z"))
+                except Exception:
+                    warnings.append(f"step {idx}: move_to invalid coords")
+                    continue
+            elif action_type in {
+                "open_container",
+                "open_crafting_table",
+                "open_furnace",
+                "open_brewing_stand",
+                "open_smithing_table",
+                "open_enchanting_table",
+                "open_trade",
+                "collect_block",
+            }:
+                pass
+            elif action_type == "alert_main_brain":
+                msg = action.get("message") or action.get("msg") or ""
+                normalized["message"] = str(msg)
+            cleaned.append(normalized)
+        return cleaned, warnings
+
+    async def _run_llm_orchestrator_plan(
+        self, goal: str, state: Dict[str, Any], params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        llm_cfg = self._resolve_llm_config(params)
+        if not llm_cfg.get("ok"):
+            return {
+                "ok": False,
+                "error": llm_cfg.get("error"),
+                "actions": [],
+                "planner": "llm_orchestrator",
+            }
+        api_key = llm_cfg.get("api_key")
+        base_url = llm_cfg.get("base_url")
+        model = llm_cfg.get("model")
+        system_prompt = (
+            "You are a Minecraft task orchestrator. "
+            "Output JSON only with the schema: {\"actions\":[...],\"reason\":\"\"}. "
+            "Choose only allowed actions. Keep steps minimal and safe. "
+            "Avoid taking whole stacks if not needed. Prefer nearby containers/shulkers. "
+            "Do not use ender_chest. If bed exists at night, sleep to set spawn. "
+            "Use crafting grid appropriately (2x2 vs 3x3). If cursor holds item, store it first. "
+            "If a required station or trade target is missing, alert_main_brain with context."
+        )
+        actions_spec = {
+            "ensure_crafting_table": {},
+            "ensure_furnace": {},
+            "ensure_bed": {},
+            "ensure_chest": {},
+            "gather_item": {"item": "raw_gold", "count": 3},
+            "smelt_output": {"item": "gold_ingot", "count": 3},
+            "craft_item": {"item": "golden_axe", "count": 1},
+            "brew_item": {"item": "awkward_potion", "count": 1},
+            "smith_item": {"item": "netherite_sword", "count": 1},
+            "enchant_item": {"item": "diamond_pickaxe", "count": 1},
+            "trade_item": {"item": "emerald", "count": 5},
+            "sleep": {},
+            "follow_player": {"player": "player_name", "duration_sec": 20},
+            "guard_player": {"player": "player_name", "duration_sec": 20},
+            "smart_guard": {},
+            "smart_gather": {},
+            "store_inventory": {},
+            "set_respawn": {},
+            "move_to": {"x": 0, "y": 0, "z": 0},
+            "pickup_nearby": {},
+            "open_container": {},
+            "open_crafting_table": {},
+            "open_furnace": {},
+            "open_brewing_stand": {},
+            "open_smithing_table": {},
+            "open_enchanting_table": {},
+            "open_trade": {},
+            "collect_block": {"block": "log", "count": 1},
+            "alert_main_brain": {"message": "text"},
+            "close_screen": {},
+            "wait": {"ms": 200},
+        }
+        user_payload = {
+            "goal": goal,
+            "state": state,
+            "allowed_actions": actions_spec,
+            "constraints": [
+                "Avoid ender_chest.",
+                "Prefer shulker boxes and nearby containers.",
+                "Only take required items, do not loot all stacks.",
+                "If a workstation is missing, ensure it by crafting/placing when possible.",
+                "If it's night and a bed exists, use sleep to set spawn.",
+                "For brewing/smithing/enchanting/trading, open the station first, then act.",
+            ],
+        }
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+        ]
+        try:
+            response = await self._llm.get_response(
+                messages=messages,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                temperature=float(params.get("temperature", 0.2)),
+                timeout=float(params.get("timeout", 60.0)),
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"llm_error: {exc}",
+                "actions": [],
+                "planner": "llm_orchestrator",
+            }
+        plan = self._extract_json_object(response)
+        if not plan:
+            return {
+                "ok": False,
+                "error": "plan_parse_failed",
+                "actions": [],
+                "planner": "llm_orchestrator",
+            }
+        raw_actions = plan.get("actions")
+        if not isinstance(raw_actions, list):
+            return {
+                "ok": False,
+                "error": "plan_missing_actions",
+                "actions": [],
+                "planner": "llm_orchestrator",
+            }
+        actions, warnings = self._validate_orchestrator_actions(raw_actions)
+        reason = plan.get("reason") if isinstance(plan.get("reason"), str) else None
+        return {
+            "ok": True,
+            "actions": actions,
+            "reason": reason,
+            "warnings": warnings,
+            "planner": "llm_orchestrator",
+        }
+
+    async def _execute_orchestrator_actions(
+        self,
+        actions: List[Dict[str, Any]],
+        target_item: str,
+        target_count: int,
+        params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        steps: List[Dict[str, Any]] = []
+        for idx, action in enumerate(actions):
+            action_type = action.get("type")
+            result: Dict[str, Any] = {"ok": False}
+            if action_type == "ensure_crafting_table":
+                result = await self.open_crafting_table(
+                    {"radius": 8, "move": True, "place_if_missing": True}
+                )
+            elif action_type == "ensure_furnace":
+                result = await self.open_furnace(
+                    {
+                        "radius": 8,
+                        "move": True,
+                        "craft_if_missing": True,
+                        "take_furnace_from_containers": True,
+                    }
+                )
+            elif action_type == "ensure_bed":
+                result = await self._ensure_bed()
+            elif action_type == "gather_item":
+                result = await self.craft_from_container(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "skip_craft": True,
+                        "open_table": False,
+                        "smart_pickup": True,
+                        "precise_pickup": True,
+                        "multi_container": True,
+                        "use_llm_orchestrator": False,
+                        "_no_llm_orchestrator": True,
+                    }
+                )
+            elif action_type == "smelt_output":
+                result = await self._smelt_output_target(
+                    str(action.get("item")), int(action.get("count", 1))
+                )
+            elif action_type == "craft_item":
+                result = await self.craft_item(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "recursive": True,
+                    }
+                )
+            elif action_type == "brew_item":
+                result = await self.brew_item(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "use_rag": params.get("use_rag", True),
+                        "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+                        "rag_user_id": params.get("rag_user_id"),
+                    }
+                )
+            elif action_type == "smith_item":
+                result = await self.smith_item(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "use_rag": params.get("use_rag", True),
+                        "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+                        "rag_user_id": params.get("rag_user_id"),
+                    }
+                )
+            elif action_type == "enchant_item":
+                result = await self.enchant_item(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "use_rag": params.get("use_rag", True),
+                        "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+                        "rag_user_id": params.get("rag_user_id"),
+                    }
+                )
+            elif action_type == "trade_item":
+                result = await self.trade_item(
+                    {
+                        "item": action.get("item"),
+                        "count": action.get("count", 1),
+                        "use_rag": params.get("use_rag", True),
+                        "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+                        "rag_user_id": params.get("rag_user_id"),
+                    }
+                )
+            elif action_type == "sleep":
+                result = await self._sleep_in_bed()
+            elif action_type == "follow_player":
+                result = await self.follow_player(
+                    {
+                        "player_name": action.get("player"),
+                        "duration_sec": action.get("duration_sec", 20.0),
+                        "distance": 3.0,
+                    }
+                )
+            elif action_type == "guard_player":
+                result = await self.follow_player(
+                    {
+                        "player_name": action.get("player"),
+                        "duration_sec": action.get("duration_sec", 20.0),
+                        "distance": 2.5,
+                    }
+                )
+            elif action_type == "smart_guard":
+                result = await self.smart_guard({})
+            elif action_type == "smart_gather":
+                result = await self.smart_gather({})
+            elif action_type == "ensure_chest":
+                result = await self.open_container(
+                    {"place_if_missing": True, "move": True, "radius": 6, "face": "up"}
+                )
+                if not result.get("ok"):
+                    crafted = await self.craft_item(
+                        {"item": "chest", "count": 1, "recursive": True}
+                    )
+                    if crafted.get("ok"):
+                        result = await self.open_container(
+                            {
+                                "block": "chest",
+                                "place_if_missing": True,
+                                "move": True,
+                                "radius": 6,
+                                "face": "up",
+                            }
+                        )
+            elif action_type == "store_inventory":
+                result = await self.container_transfer(
+                    {
+                        "direction": "from_inventory",
+                        "item": None,
+                        "max_slots": 54,
+                        "to_block": params.get("store_block"),
+                        "place_if_missing": True,
+                    }
+                )
+            elif action_type == "set_respawn":
+                result = await self._sleep_in_bed()
+            elif action_type == "move_to":
+                result = await self.go_to_position(
+                    {
+                        "x": action.get("x"),
+                        "y": action.get("y"),
+                        "z": action.get("z"),
+                        "distance": action.get("distance", 1.2),
+                        "timeout": action.get("timeout", 8.0),
+                    }
+                )
+            elif action_type == "pickup_nearby":
+                result = await self.pickup_nearby_items(
+                    {
+                        "range": action.get("range", 8.0),
+                        "timeout": action.get("timeout", 4.0),
+                    }
+                )
+            elif action_type == "open_container":
+                result = await self.open_container(
+                    {
+                        "block": action.get("block"),
+                        "blocks": action.get("blocks"),
+                        "radius": action.get("radius", 6),
+                        "move": True,
+                        "place_if_missing": True,
+                    }
+                )
+            elif action_type == "open_crafting_table":
+                result = await self.open_crafting_table(
+                    {"radius": action.get("radius", 6), "move": True, "place_if_missing": True}
+                )
+            elif action_type == "open_furnace":
+                result = await self.open_furnace(
+                    {"radius": action.get("radius", 6), "move": True, "craft_if_missing": False}
+                )
+            elif action_type == "open_brewing_stand":
+                result = await self.open_brewing_stand(
+                    {"radius": action.get("radius", 6), "move": True}
+                )
+            elif action_type == "open_smithing_table":
+                result = await self.open_smithing_table(
+                    {"radius": action.get("radius", 6), "move": True}
+                )
+            elif action_type == "open_enchanting_table":
+                result = await self.open_enchanting_table(
+                    {"radius": action.get("radius", 6), "move": True}
+                )
+            elif action_type == "open_trade":
+                result = await self.open_trade(
+                    {"radius": action.get("radius", 6), "move": True}
+                )
+            elif action_type == "collect_block":
+                result = await self.collect_block(
+                    {
+                        "block": action.get("block"),
+                        "count": action.get("count", 1),
+                        "radius": action.get("radius", 6),
+                    }
+                )
+            elif action_type == "alert_main_brain":
+                message = action.get("message") or action.get("msg") or ""
+                if message:
+                    await self._emit_alert(
+                        str(message),
+                        {"source": "llm_orchestrator", "action": action},
+                    )
+                result = {"ok": True}
+            elif action_type == "close_screen":
+                await self._adapter.send_action(
+                    {"type": "closeScreen"}, self._headful_config()
+                )
+                result = {"ok": True}
+            elif action_type == "wait":
+                await asyncio.sleep(max(0, int(action.get("ms", 200))) / 1000.0)
+                result = {"ok": True}
+            steps.append({"step": action, "result": result})
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot and self._inventory_has_item(snapshot, target_item, target_count):
+                return {"ok": True, "steps": steps, "completed": True}
+            if not result.get("ok"):
+                return {"ok": False, "steps": steps, "failed_step": idx}
+        return {"ok": False, "steps": steps, "completed": False}
+
+    async def _llm_orchestrate_craft(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = _normalize_item_name(params.get("item"))
+        count = int(params.get("count", 1))
+        if not item_name:
+            return {"ok": False, "error": "missing_item"}
+        max_rounds = int(params.get("llm_rounds", 2))
+        allow_smelting = bool(params.get("allow_smelting", True))
+        last_error: Optional[Dict[str, Any]] = None
+        for round_idx in range(max_rounds):
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot is None:
+                break
+            inventory = self._inventory_counts(snapshot)
+            graph = self._get_resource_graph()
+            plan_graph = graph.plan(
+                item_name, count, dict(inventory), allow_smelting=allow_smelting
+            )
+            state = self._state_summary_for_llm(plan_graph=plan_graph)
+            state["inventory"] = inventory
+            state["round"] = round_idx
+            goal = params.get("goal") or f"craft {item_name} x{count}"
+            llm_plan = await self._run_llm_orchestrator_plan(goal, state, params)
+            if not llm_plan.get("ok") or not llm_plan.get("actions"):
+                last_error = llm_plan
+                break
+            exec_result = await self._execute_orchestrator_actions(
+                llm_plan.get("actions") or [],
+                item_name,
+                count,
+                params,
+            )
+            if exec_result.get("ok"):
+                return {
+                    "ok": True,
+                    "planner": "llm_orchestrator",
+                    "plan": llm_plan,
+                    "steps": exec_result.get("steps", []),
+                }
+            last_error = exec_result
+        fallback = await self.craft_from_container(
+            {**params, "use_llm_orchestrator": False, "_no_llm_orchestrator": True}
+        )
+        if last_error:
+            fallback["llm_error"] = last_error
+        return fallback
+
+    async def smart_guard(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        if not bool(cfg.get("enable_smart_guard", True)):
+            return {"ok": False, "error": "smart_guard_disabled"}
+        player_name = params.get("player") or params.get("player_name")
+        threat = self._select_nearest_hostile_entity(
+            max_distance_sq=(params.get("range", 12.0) ** 2)
+        )
+        if threat:
+            etype = str(threat.get("type", "")).split(":")[-1]
+            return await self.attack_nearest(
+                {
+                    "entity_type": etype,
+                    "duration_sec": params.get("duration_sec", 12.0),
+                    "range": params.get("range", 12.0),
+                }
+            )
+        if player_name:
+            return await self.follow_player(
+                {
+                    "player_name": player_name,
+                    "duration_sec": params.get("duration_sec", 12.0),
+                    "distance": params.get("distance", 3.0),
+                }
+            )
+        # 没有威胁时轻度巡逻/防御
+        return await self.defend_self(
+            {
+                "range": params.get("range", 12.0),
+                "duration_sec": params.get("duration_sec", 12.0),
+            }
+        )
+
+    async def smart_gather(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        if not bool(cfg.get("enable_smart_gather", True)):
+            return {"ok": False, "error": "smart_gather_disabled"}
+        # 先捡掉落物
+        result = await self.pickup_nearby_items(
+            {
+                "range": params.get("range", 10.0),
+                "timeout": params.get("timeout", 6.0),
+            }
+        )
+        if result.get("ok"):
+            return result
+        raw = await self._get_snapshot(refresh=True)
+        snapshot = ScreenSnapshot.from_dict(raw)
+        available = self._inventory_counts(snapshot) if snapshot else {}
+        fuel_total = sum(available.get(item, 0) for item in FUEL_PRIORITY)
+        log_total = sum(
+            count
+            for name, count in available.items()
+            if name.endswith("_log") or name.endswith("_wood")
+        )
+        plank_total = sum(
+            count for name, count in available.items() if name.endswith("_planks")
+        )
+        min_fuel = int(params.get("min_fuel", 2))
+        min_wood = int(params.get("min_wood", 4))
+        if fuel_total < min_fuel:
+            block = params.get("fuel_block", "log")
+            count = int(params.get("fuel_count", 4))
+            return await self.collect_block(
+                {"block": block, "count": count, "radius": params.get("radius", 8)}
+            )
+        if log_total + plank_total < min_wood:
+            block = params.get("wood_block", "log")
+            count = int(params.get("wood_count", 4))
+            return await self.collect_block(
+                {"block": block, "count": count, "radius": params.get("radius", 8)}
+            )
+        # 默认采集基础方块（避免空转）
+        block = params.get("block", "log")
+        count = int(params.get("count", 4))
+        return await self.collect_block(
+            {"block": block, "count": count, "radius": params.get("radius", 8)}
+        )
+
     async def _run_llm_plan(
         self,
         goal: str,
@@ -2868,9 +4716,17 @@ class HeadfulInventoryController:
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         cfg = self._config()
-        api_key = cfg.get("agent_api_key")
-        base_url = cfg.get("agent_base_url")
-        model = cfg.get("agent_model")
+        llm_cfg = self._resolve_llm_config(params)
+        if not llm_cfg.get("ok"):
+            return {
+                "ok": False,
+                "error": llm_cfg.get("error"),
+                "actions": [],
+                "planner": "llm",
+            }
+        api_key = llm_cfg.get("api_key")
+        base_url = llm_cfg.get("base_url")
+        model = llm_cfg.get("model")
         user_id = (
             params.get("rag_user_id")
             or cfg.get("rag_user_id")
@@ -2901,7 +4757,11 @@ class HeadfulInventoryController:
         system_prompt = (
             "You are a Minecraft GUI action planner. "
             "Output JSON only with the schema: {\"actions\":[...],\"reason\":\"\"}. "
-            "Use only allowed actions. If unsure, return empty actions with a reason."
+            "Use only allowed actions. If unsure, return empty actions with a reason. "
+            "Prefer minimal clicks and avoid taking more items than needed. "
+            "Do not use ender_chest. Prefer shulker boxes, chests nearby. "
+            "If cursor holds item, place it into inventory first. "
+            "Use crafting grid slots from snapshot; if grid is 2x2, only craft simple recipes."
         )
         actions_spec = {
             "openInventory": {},
@@ -4117,6 +5977,35 @@ class HeadfulInventoryController:
                     [{"type": "quickMove", "slot": output_slot.slot}]
                 )
                 continue
+            # 如果燃料用尽且输入还在，补充燃料
+            fuel_slot = next(
+                (slot for slot in snapshot.slots if slot.group == "container_fuel"),
+                None,
+            )
+            input_slot = next(
+                (slot for slot in snapshot.slots if slot.group == "container_input"),
+                None,
+            )
+            if fuel_slot and (fuel_slot.item is None or fuel_slot.item.count <= 0):
+                available = self._build_counts(
+                    snapshot.slots, ("player_main", "player_hotbar")
+                )
+                fuel_item = self._select_fuel_item(available)
+                if fuel_item:
+                    fuel_source = next(
+                        (
+                            slot
+                            for slot in snapshot.slots
+                            if slot.group in {"player_main", "player_hotbar"}
+                            and slot.item is not None
+                            and slot.item.name == fuel_item
+                        ),
+                        None,
+                    )
+                    if fuel_source:
+                        await self._send_sequence(
+                            [{"type": "quickMove", "slot": fuel_source.slot}]
+                        )
             input_slot = next(
                 (slot for slot in snapshot.slots if slot.group == "container_input"),
                 None,
@@ -4130,6 +6019,82 @@ class HeadfulInventoryController:
             "output": output_name,
             "smelted": total_smelted,
         }
+
+    async def brew_item(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = _normalize_item_name(params.get("item"))
+        count = int(params.get("count", 1))
+        if not item_name:
+            return {"ok": False, "error": "missing_item"}
+        open_result = await self.open_brewing_stand({"radius": params.get("radius", 8), "move": True})
+        if not open_result.get("ok"):
+            return {"ok": False, "error": "brewing_stand_open_failed", "detail": open_result}
+        goal = params.get("goal") or f"brew {item_name} x{count}"
+        plan_params = {
+            "goal": goal,
+            "use_rag": params.get("use_rag", True),
+            "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+        }
+        if params.get("rag_user_id"):
+            plan_params["rag_user_id"] = params.get("rag_user_id")
+        return await self.plan_actions(plan_params, execute=True)
+
+    async def smith_item(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = _normalize_item_name(params.get("item"))
+        count = int(params.get("count", 1))
+        if not item_name:
+            return {"ok": False, "error": "missing_item"}
+        open_result = await self.open_smithing_table(
+            {"radius": params.get("radius", 8), "move": True}
+        )
+        if not open_result.get("ok"):
+            return {"ok": False, "error": "smithing_table_open_failed", "detail": open_result}
+        goal = params.get("goal") or f"smith {item_name} x{count}"
+        plan_params = {
+            "goal": goal,
+            "use_rag": params.get("use_rag", True),
+            "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+        }
+        if params.get("rag_user_id"):
+            plan_params["rag_user_id"] = params.get("rag_user_id")
+        return await self.plan_actions(plan_params, execute=True)
+
+    async def enchant_item(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = _normalize_item_name(params.get("item"))
+        count = int(params.get("count", 1))
+        if not item_name:
+            return {"ok": False, "error": "missing_item"}
+        open_result = await self.open_enchanting_table(
+            {"radius": params.get("radius", 8), "move": True}
+        )
+        if not open_result.get("ok"):
+            return {"ok": False, "error": "enchanting_table_open_failed", "detail": open_result}
+        goal = params.get("goal") or f"enchant {item_name} x{count}"
+        plan_params = {
+            "goal": goal,
+            "use_rag": params.get("use_rag", True),
+            "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+        }
+        if params.get("rag_user_id"):
+            plan_params["rag_user_id"] = params.get("rag_user_id")
+        return await self.plan_actions(plan_params, execute=True)
+
+    async def trade_item(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        item_name = _normalize_item_name(params.get("item"))
+        count = int(params.get("count", 1))
+        if not item_name:
+            return {"ok": False, "error": "missing_item"}
+        open_result = await self.open_trade({"radius": params.get("radius", 6), "move": True})
+        if not open_result.get("ok"):
+            return {"ok": False, "error": "trade_open_failed", "detail": open_result}
+        goal = params.get("goal") or f"trade for {item_name} x{count}"
+        plan_params = {
+            "goal": goal,
+            "use_rag": params.get("use_rag", True),
+            "use_mindcraft_docs": params.get("use_mindcraft_docs", True),
+        }
+        if params.get("rag_user_id"):
+            plan_params["rag_user_id"] = params.get("rag_user_id")
+        return await self.plan_actions(plan_params, execute=True)
 
     async def smelt_item(self, params: Dict[str, Any]) -> Dict[str, Any]:
         input_item = _normalize_item_name(params.get("item"))
@@ -4404,6 +6369,37 @@ class HeadfulInventoryController:
         working_params = dict(params)
         substeps: List[Dict[str, Any]] = []
         max_rounds = int(working_params.get("max_rounds", 3))
+
+        # 规划输出（资源图）
+        try:
+            allow_smelting = bool(working_params.get("allow_smelting", True))
+            snap_plan_raw = await self._get_snapshot(refresh=True)
+            snap_plan = ScreenSnapshot.from_dict(snap_plan_raw)
+            available_counts: Dict[str, int] = {}
+            if snap_plan is not None:
+                available_counts = self._build_counts(
+                    snap_plan.slots, ("player_main", "player_hotbar")
+                )
+            graph = self._get_resource_graph()
+            plan_graph = graph.plan(
+                item_name,
+                count,
+                available_counts,
+                allow_smelting=allow_smelting,
+                max_depth=max_depth,
+            )
+            self.last_plan = {"item": item_name, "count": count, "plan": plan_graph}
+            if self._debug_enabled(working_params):
+                try:
+                    self._debug_log(
+                        f"graph_plan {item_name}x{count} -> "
+                        f"{json.dumps(plan_graph, ensure_ascii=False)[:900]}",
+                        working_params,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            self._logger.exception("graph_plan_failed")
 
         for round_idx in range(max_rounds + 1):
             result = await self._craft_item_once(working_params, execute=True)

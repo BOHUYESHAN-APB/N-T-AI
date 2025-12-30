@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import httpx
 from typing import Any, Dict, Optional
 from ..base import BasePlugin
 from app.services.live2d_service import manager as live2d_manager
@@ -50,6 +51,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
             log_append=self._append_log,
             adapter=self._headful,
             config_provider=lambda: self.config,
+            alert_callback=self._notify_main_brain,
         )
 
     @property
@@ -395,6 +397,24 @@ class MinecraftMindcraftPlugin(BasePlugin):
         
         await live2d_manager.broadcast(payload)
 
+    async def _notify_main_brain(
+        self, message: str, payload: Optional[Dict[str, Any]] = None
+    ) -> None:
+        if not message:
+            return
+        agent_name = self.config.get("agent_name") or "minecraft"
+        packet = {
+            "type": "chat_message",
+            "text": message,
+            "sender": "minecraft_alert",
+            "senderName": agent_name,
+            "alert": True,
+        }
+        if payload:
+            packet["meta"] = payload
+        self._append_log(f"[main-brain-alert] {message}")
+        await live2d_manager.broadcast(packet)
+
     async def send_headful_message(self, message: str) -> bool:
         """将文本消息发送给 headful 模组（chat/command 兼容）。"""
         return await self._headful.send_message(message, self.config.get("headful", {}))
@@ -413,6 +433,46 @@ class MinecraftMindcraftPlugin(BasePlugin):
             logger.exception("[Minecraft-mindcraft] Headful skill failed: %s", skill)
             self._append_log(f"Headful skill exception: {exc}")
             return {"ok": False, "error": "exception", "detail": str(exc)}
+
+    async def handle_event(self, event_type: str, data: Any) -> Optional[Any]:
+        if event_type != "minecraft_command":
+            return None
+        payload = data or {}
+        goal = payload.get("goal") or payload.get("command") or payload.get("message")
+        if not goal:
+            return {"status": "error", "error": "missing_goal"}
+        sender = payload.get("sender") or "main-brain"
+        if self.control_mode == "headful":
+            params: Dict[str, Any] = {"goal": str(goal)}
+            rag_user_id = self.config.get("rag_user_id") or self.config.get("agent_name")
+            if rag_user_id:
+                params["rag_user_id"] = rag_user_id
+            cfg = self._headful_chat_config()
+            if "chat_use_rag" in cfg:
+                params["use_rag"] = bool(cfg.get("chat_use_rag"))
+            if "chat_use_mindcraft_docs" in cfg:
+                params["use_mindcraft_docs"] = bool(cfg.get("chat_use_mindcraft_docs"))
+            self._append_log(f"[main-brain] command: {goal}")
+            result = await self._headful_inventory.run("plan_execute", params)
+            if not result.get("ok"):
+                self._append_log(f"[main-brain] command failed: {result.get('error')}")
+                return {"status": "error", "detail": result}
+            return {"status": "received", "result": result}
+
+        ms_port = self.config.get("mindserver_port", 8080)
+        url = f"http://localhost:{ms_port}/api/send-message"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    json={"agent": self.config.get("agent_name"), "from": sender, "message": str(goal)},
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    return {"status": "received"}
+                return {"status": "error", "detail": resp.text}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
 
     async def handle_frontend_chat(self, message: str, sender: str = "frontend") -> bool:
         if self.control_mode != "headful":

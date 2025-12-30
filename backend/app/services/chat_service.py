@@ -1084,19 +1084,29 @@ class ChatService:
                 if not goal:
                     return "Error: Missing 'goal' argument."
                 from app.plugins import get_plugin
+                from app.core.logger import logger
                 minecraft = get_plugin("minecraft")
                 if not minecraft:
+                    logger.info("[MinecraftTool] plugin not found")
                     return "Error: Minecraft plugin not found or not registered."
                 
                 # Check if it's active
                 if not getattr(minecraft, "is_active", False):
+                    append_log = getattr(minecraft, "_append_log", None)
+                    if callable(append_log):
+                        append_log("[main-brain] Minecraft plugin is not active.")
                     return "Error: Minecraft AI is not currently running. Please enable it in the plugin settings first."
 
-                print(f"[AGENT] Executing play_minecraft: {goal}")
+                logger.info(f"[MinecraftTool] play_minecraft: {goal}")
+                append_log = getattr(minecraft, "_append_log", None)
+                if callable(append_log):
+                    append_log(f"[main-brain] play_minecraft: {goal}")
                 # We send an event to the plugin
                 res = await minecraft.handle_event("minecraft_command", {"goal": goal})
                 if res and res.get("status") == "received":
                     return f"Minecraft AI has received the task: {goal}. It is now working on it in the background."
+                if callable(append_log):
+                    append_log(f"[main-brain] minecraft_command failed: {res}")
                 return f"Failed to send task to Minecraft AI: {res}"
 
             tool_map = {

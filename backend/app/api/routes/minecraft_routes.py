@@ -202,7 +202,7 @@ async def send_headful_action(req: HeadfulActionRequest):
     raise HTTPException(status_code=502, detail="Failed to send headful action")
 
 @router.post("/headful_skill")
-async def run_headful_skill(req: HeadfulSkillRequest):
+async def run_headful_skill(req: HeadfulSkillRequest, request: Request):
     """
     执行 headful 背包/容器技能（自动装备/整理/合成等）。
     """
@@ -211,7 +211,23 @@ async def run_headful_skill(req: HeadfulSkillRequest):
         raise HTTPException(status_code=404, detail="Minecraft plugin not found")
     if getattr(plugin, "control_mode", "headless") != "headful":
         raise HTTPException(status_code=400, detail="Plugin not in headful mode")
-    result = await plugin.run_headful_skill(req.skill, req.params or {})
+    params = dict(req.params or {})
+    llm_api_key = request.headers.get("X-Target-Api-Key")
+    llm_base_url = request.headers.get("X-Target-Base-Url")
+    llm_model = request.headers.get("X-Target-Model")
+    llm_provider_id = request.headers.get("X-Target-Provider-Id")
+    llm_require_frontend = request.headers.get("X-LLM-Require-Frontend")
+    if llm_api_key:
+        params["llm_api_key"] = llm_api_key
+    if llm_base_url:
+        params["llm_base_url"] = llm_base_url
+    if llm_model:
+        params["llm_model"] = llm_model
+    if llm_provider_id:
+        params["llm_provider_id"] = llm_provider_id
+    if llm_require_frontend:
+        params["llm_require_frontend"] = llm_require_frontend
+    result = await plugin.run_headful_skill(req.skill, params)
     encoded = jsonable_encoder(result)
     if result.get("ok"):
         return {"status": "ok", "result": encoded}

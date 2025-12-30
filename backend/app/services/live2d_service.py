@@ -1,4 +1,5 @@
 from fastapi import WebSocket
+from starlette.websockets import WebSocketState
 from typing import Set
 import json
 from app.core.logger import logger
@@ -25,9 +26,16 @@ class Live2DConnectionManager:
         disconnected = set()
         
         for connection in self.active_connections:
+            if connection.client_state != WebSocketState.CONNECTED or connection.application_state != WebSocketState.CONNECTED:
+                disconnected.add(connection)
+                continue
             try:
                 await connection.send_text(message_str)
             except Exception as e:
+                err_text = str(e)
+                if "websocket.send" in err_text or "response already completed" in err_text:
+                    disconnected.add(connection)
+                    continue
                 logger.error(f"[Live2D WS] Send failed: {e}")
                 disconnected.add(connection)
         
