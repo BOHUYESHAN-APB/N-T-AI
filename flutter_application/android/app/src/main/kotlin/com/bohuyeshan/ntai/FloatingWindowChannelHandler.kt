@@ -29,6 +29,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "initialize" -> handleInitialize(call, result)
+                    "updateBackendUrl" -> handleUpdateBackendUrl(call, result)
                     "createFloatingWindow" -> handleCreateFloatingWindow(call, result)
                     "showFloatingWindow" -> handleShowFloatingWindow(call, result)
                     "hideFloatingWindow" -> handleHideFloatingWindow(call, result)
@@ -75,8 +76,9 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             val modelPath = call.argument<String>("modelPath") ?: ""
             val width = call.argument<Double>("width") ?: 600.0
             val height = call.argument<Double>("height") ?: 800.0
+            val showControls = call.argument<Boolean>("showControls") ?: false
 
-            Log.d(TAG, "Create floating window: model=$modelPath, ${width}x$height")
+            Log.d(TAG, "Create floating window: model=$modelPath, ${width}x$height, controls=$showControls")
 
             // 请求权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -89,10 +91,24 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             }
 
             // 启动浮窗服务，并传入 backendUrl
-            FloatingWindowService.startService(activity, modelPath, backendUrl)
+            FloatingWindowService.startService(activity, modelPath, backendUrl, showControls, width, height)
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Create floating window error", e)
+            result.error("ERROR", e.message, null)
+        }
+    }
+
+    private fun handleUpdateBackendUrl(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val provided = call.argument<String>("backendUrl")
+            if (provided != null && provided.isNotEmpty()) {
+                backendUrl = provided
+                Log.d(TAG, "Backend URL updated to $backendUrl")
+            }
+            result.success(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Update backend URL error", e)
             result.error("ERROR", e.message, null)
         }
     }

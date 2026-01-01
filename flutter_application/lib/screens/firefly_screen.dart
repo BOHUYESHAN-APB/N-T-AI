@@ -11,7 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
-import '../widgets/expressive_face.dart';
 import '../widgets/character_display.dart';
 import '../widgets/live2d_controller.dart';
 import '../widgets/glass.dart';
@@ -51,7 +50,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
   Uint8List? _pendingImageBytes;
-  late final ExpressionController _faceController;
   bool _historyOpen = false; // 左侧历史与功能面板
 
   String? _latestDanmakuSummary;
@@ -73,7 +71,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
   Completer<void>? _interruptCompleter;
 
   StreamSubscription? _historySubscription;
-  StreamSubscription? _faceSubscription;
   StreamSubscription? _ttsSubscription;
   StreamSubscription? _wsSubscription;
   StreamSubscription? _initiativeSubscription;
@@ -96,9 +93,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
     super.initState();
     // logToFile("FireflyScreen.initState started");
     globalPluginManager.ensureInitialized();
-    _faceController = ExpressionController();
-    // Bind expression stream to UI controller (best-effort)
-    _faceSubscription = _brain.expressionAgent.bind(_faceController);
+    // Expression island removed; no local expression controller binding.
     // logToFile("FireflyScreen.initState: Agents bound");
     
     _loadSessions();
@@ -475,7 +470,13 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _lastEnableTts = settings.enableTts;
 
     final initiativeMode = settings.ai.initiativeMode;
-    if (initiativeMode && !_initiativeLoopActive) {
+    final backendEnabled = settings.enablePythonBackend;
+    if (backendEnabled) {
+      if (_initiativeLoopActive) {
+        _initiativeLoopActive = false;
+        _brain.stopInitiativeLoop();
+      }
+    } else if (initiativeMode && !_initiativeLoopActive) {
       _initiativeLoopActive = true;
       _brain.startInitiativeLoop();
     } else if (!initiativeMode && _initiativeLoopActive) {
@@ -542,6 +543,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           modelPath: modelPath,
           width: 400,
           height: 600,
+          showControls: false,
         );
         await _floatingWindowService!.executeJavaScript(
           "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;",
@@ -763,7 +765,6 @@ ${capped.map((e) => '- $e').join('\n')}
   @override
   void dispose() {
     _historySubscription?.cancel();
-    _faceSubscription?.cancel();
     _ttsSubscription?.cancel();
     _wsSubscription?.cancel();
     _initiativeSubscription?.cancel();
@@ -773,7 +774,6 @@ ${capped.map((e) => '- $e').join('\n')}
     _floatingWindowService?.dispose();
     _controller.dispose();
     _scrollController.dispose();
-    _faceController.dispose();
     _focusNode.dispose();
     _floatingControlsHideTimer?.cancel(); // Added back just in case
     _autoMicRecorder.dispose();
@@ -1960,20 +1960,6 @@ ${capped.map((e) => '- $e').join('\n')}
                   ),
                 ),
               ),
-              if (settings.showExpressionFace)
-                Positioned(
-                  top: 12,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: SafeArea(
-                      child: _DynamicIsland(
-                        faceController: _faceController,
-                        statusStream: _brain.statusStream,
-                      ),
-                    ),
-                  ),
-                ),
               if (settings.enableLive2D && settings.showLive2DMiniWindow)
                 _buildLive2DMiniWindowOverlay(context, settings),
             ],
@@ -2012,14 +1998,14 @@ ${capped.map((e) => '- $e').join('\n')}
     // 图标与当前激活模式一致
     IconData currentIcon;
     bool isActive;
-    if (settings.showExpressionFace) {
-      currentIcon = Icons.face_retouching_natural; // 表情系统模式
-      isActive = true;
-    } else if (settings.enableFloatingWindow) {
+    if (settings.enableFloatingWindow) {
       currentIcon = Icons.open_in_new; // 悬浮窗模式
       isActive = true;
     } else if (settings.showLive2D) {
       currentIcon = Icons.view_sidebar; // 侧边栏模式
+      isActive = true;
+    } else if (settings.showLive2DMiniWindow) {
+      currentIcon = Icons.open_in_new; // 应用内小窗
       isActive = true;
     } else {
       currentIcon = Icons.visibility_off; // 隐藏模式
@@ -2084,6 +2070,7 @@ ${capped.map((e) => '- $e').join('\n')}
 
     // Initiative Mode Toggle (搭话模式)
     if (settings.agentEnabled) {
+      final initiativeDisabled = settings.enablePythonBackend;
       widgets.add(
         Container(
           decoration: BoxDecoration(
@@ -2097,7 +2084,17 @@ ${capped.map((e) => '- $e').join('\n')}
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(24),
-              onTap: () {
+              onTap: initiativeDisabled
+                  ? () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('后端模式下由后端负责搭话/主动循环'),
+                          duration: Duration(seconds: 1),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
+                  : () {
                 final newValue = !settings.ai.initiativeMode;
                 settingsController.updateAiSettings(settings.ai.copyWith(initiativeMode: newValue));
                 
@@ -2116,7 +2113,9 @@ ${capped.map((e) => '- $e').join('\n')}
                     Icon(
                       Icons.record_voice_over, 
                       size: 20, 
-                      color: settings.ai.initiativeMode ? Colors.green : Colors.grey
+                      color: initiativeDisabled
+                          ? Colors.grey
+                          : (settings.ai.initiativeMode ? Colors.green : Colors.grey)
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -2124,7 +2123,9 @@ ${capped.map((e) => '- $e').join('\n')}
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: settings.ai.initiativeMode ? Colors.green : Colors.grey,
+                        color: initiativeDisabled
+                            ? Colors.grey
+                            : (settings.ai.initiativeMode ? Colors.green : Colors.grey),
                       ),
                     ),
                   ],
@@ -2271,15 +2272,11 @@ ${capped.map((e) => '- $e').join('\n')}
           ),
           onSelected: (value) {
             // Mutually exclusive logic: Disable all first
-            settingsController.setShowExpressionFace(false);
             settingsController.setShowLive2D(false);
             settingsController.setEnableFloatingWindow(false);
             settingsController.setShowLive2DMiniWindow(false);
 
             switch (value) {
-              case 'expression':
-                settingsController.setShowExpressionFace(true);
-                break;
               case 'sidebar':
                 settingsController.setShowLive2D(true);
                 break;
@@ -2295,21 +2292,6 @@ ${capped.map((e) => '- $e').join('\n')}
             }
           },
           itemBuilder: (context) => [
-            PopupMenuItem(
-              value: 'expression',
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.face_retouching_natural,
-                    color: settings.showExpressionFace
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  const Text('表情系统（灵动岛）'),
-                ],
-              ),
-            ),
             PopupMenuItem(
               value: 'sidebar',
               child: Row(
@@ -2364,7 +2346,6 @@ ${capped.map((e) => '- $e').join('\n')}
                     Icons.visibility_off,
                     color: !settings.showLive2D &&
                             !settings.enableFloatingWindow &&
-                            !settings.showExpressionFace &&
                             !settings.showLive2DMiniWindow
                         ? Theme.of(context).colorScheme.primary
                         : null,
@@ -2745,21 +2726,6 @@ ${capped.map((e) => '- $e').join('\n')}
             ],
           ),
         ),
-        // 顶部居中动态岛（表情）- 与 Live2D 互斥
-        if (settings.showExpressionFace)
-          Positioned(
-            top: 12,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: SafeArea(
-                child: _DynamicIsland(
-                  faceController: _faceController,
-                  statusStream: _brain.statusStream,
-                ),
-              ),
-            ),
-          ),
         // 左上角历史按钮
         Positioned(
           top: 12,
@@ -2809,8 +2775,6 @@ ${capped.map((e) => '- $e').join('\n')}
     String? titleFontFamily,
   ) {
     final hasScenario = settings.scenarioContext.isNotEmpty || settings.scenarioTasks.isNotEmpty;
-
-    if (settings.showExpressionFace) return const SizedBox.shrink();
 
     final actions = _buildHeaderActions(context, settings, settingsController);
 
@@ -3129,11 +3093,6 @@ ${capped.map((e) => '- $e').join('\n')}
                         ),
                       );
                       break;
-                    case 'expression_toggle':
-                      settingsController.setShowExpressionFace(
-                        !settings.showExpressionFace,
-                      );
-                      break;
                     case 'tts_toggle':
                       settingsController.setEnableTts(!settings.enableTts);
                       break;
@@ -3155,8 +3114,6 @@ ${capped.map((e) => '- $e').join('\n')}
                   final hasCompress = quickActions.contains('compress');
                   final hasNewChat = quickActions.contains('new_chat');
                   final hasMemory = quickActions.contains('memory');
-                  final hasExpressionToggle =
-                      quickActions.contains('expression_toggle');
 
                   // 自动监听快捷开关
                   if (settings.enableStt) {
@@ -3283,26 +3240,6 @@ ${capped.map((e) => '- $e').join('\n')}
                             const Icon(Icons.memory, size: 18),
                             const SizedBox(width: 10),
                             Text(l10n.quickActionMemory),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
-
-                  if (hasExpressionToggle) {
-                    items.add(
-                      PopupMenuItem(
-                        value: 'expression_toggle',
-                        child: Row(
-                          children: [
-                            Icon(
-                              settings.showExpressionFace
-                                  ? Icons.emoji_emotions
-                                  : Icons.emoji_emotions_outlined,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(l10n.quickActionExpression),
                           ],
                         ),
                       ),
@@ -3521,72 +3458,6 @@ class _ActionChip extends StatelessWidget {
             Icon(icon, size: 16),
             const SizedBox(width: 4),
             Text(label, style: const TextStyle(fontSize: 12)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// 动态岛组件（带状态动画与宽度自适应）
-class _DynamicIsland extends StatefulWidget {
-  final ExpressionController faceController;
-  final Stream<String> statusStream;
-  const _DynamicIsland({
-    required this.faceController,
-    required this.statusStream,
-  });
-  @override
-  State<_DynamicIsland> createState() => _DynamicIslandState();
-}
-
-class _DynamicIslandState extends State<_DynamicIsland> {
-  String _status = '待机';
-  StreamSubscription<String>? _sub;
-  @override
-  void initState() {
-    super.initState();
-    _sub = widget.statusStream.listen((v) {
-      setState(() {
-        _status = v.isEmpty ? '待机' : v;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    const minW = 160.0;
-    final text = _status.length > 24 ? '${_status.substring(0, 24)}…' : _status;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-      constraints: const BoxConstraints(minWidth: minW, maxWidth: 340),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(34)),
-      child: Glass(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        borderRadius: BorderRadius.circular(28),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ExpressiveFace(controller: widget.faceController, size: 62),
-            const SizedBox(width: 12),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              transitionBuilder: (child, anim) =>
-                  FadeTransition(opacity: anim, child: child),
-              child: Text(
-                text,
-                key: ValueKey(text),
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
           ],
         ),
       ),

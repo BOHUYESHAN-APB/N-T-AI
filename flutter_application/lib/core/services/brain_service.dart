@@ -1001,6 +1001,13 @@ exit 0
     debugPrint("[BrainService] Starting Initiative Loop...");
     
     SharedPreferences.getInstance().then((prefs) {
+      final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
+      if (backendEnabled) {
+        debugPrint("[BrainService] Initiative Loop disabled in backend mode.");
+        _initiativeLoopRequested = false;
+        _statusController.add("Backend 模式下由后端负责搭话/主动循环。");
+        return;
+      }
       if (!_initiativeLoopRequested) return;
       final interval = prefs.getInt('settings.ai.danmakuBatchInterval') ?? 20;
       final safeInterval = interval < 5 ? 5 : interval;
@@ -1363,20 +1370,11 @@ Based on these comments, do you want to proactively say something to the audienc
     );
 
     // Dynamic Capabilities Injection based on active avatar system
-    final showExpressionFace = prefs.getBool('settings.ui.showExpressionFace') ?? true;
     final showLive2D = prefs.getBool('settings.ui.showLive2D') ?? false;
     // Future: final showLive3D = prefs.getBool('settings.ui.showLive3D') ?? false;
 
     String capabilitiesText = "";
-    if (showExpressionFace) {
-       capabilitiesText = """
-**表情系统限制**：
-*   你当前连接的是【简易表情系统】。
-*   你只能展示基本的静态表情（如开心、悲伤、生气、惊讶）。
-*   **请务必不要**描述复杂的身体动作（如“挥手”、“转圈”、“左右看”），因为你的形象无法执行这些动作。
-*   请专注于语言本身的表达。
-""";
-    } else if (showLive2D) {
+    if (showLive2D) {
        capabilitiesText = """
 **Live2D 形象能力**：
 *   你当前拥有一个灵动的【Live2D 形象】。

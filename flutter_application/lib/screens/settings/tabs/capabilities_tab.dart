@@ -86,16 +86,6 @@ class CapabilitiesTab extends StatelessWidget {
                     color: settings.ai.initiativeMode ? Theme.of(context).colorScheme.primary : Colors.grey,
                   ),
                 ),
-                SwitchListTile(
-                  title: const Text('允许 AI 使用表情'),
-                  subtitle: const Text('允许 AI 回复中包含 emoji/表情符号'),
-                  value: settings.ai.allowEmojis,
-                  onChanged: (v) => controller.updateAiSettings(settings.ai.copyWith(allowEmojis: v)),
-                  secondary: Icon(
-                    Icons.emoji_emotions_outlined,
-                    color: settings.ai.allowEmojis ? Theme.of(context).colorScheme.primary : Colors.grey,
-                  ),
-                ),
                 if (settings.ai.initiativeMode)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -334,50 +324,6 @@ class CapabilitiesTab extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        _buildSectionHeader(context, '表情 Agent'),
-        Card(
-          child: Column(
-            children: [
-              SwitchListTile(
-                title: const Text('启用表情 Agent'),
-                subtitle: const Text('分析情绪并驱动表情'),
-                value: settings.enableExpressionAgent,
-                onChanged: (v) => controller.setEnableExpressionAgent(v),
-              ),
-              SwitchListTile(
-                title: const Text('显示动态表情（灵动岛）'),
-                subtitle: const Text('简约圆脸表情系统'),
-                value: settings.showExpressionFace,
-                onChanged: (v) => controller.setShowExpressionFace(v),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: DropdownButtonFormField<String>(
-                  value: settings.activeExpressionProviderId ?? 'follow_main',
-                  decoration: const InputDecoration(
-                    labelText: '表情推理模型',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: 'follow_main',
-                      child: Text('跟随主脑'),
-                    ),
-                    for (final p in controller.providers)
-                      DropdownMenuItem(
-                        value: p.id,
-                        child: Text('${p.name} (${p.model})'),
-                      ),
-                  ],
-                  onChanged: (v) => controller.setActiveExpressionProvider(
-                    v == 'follow_main' ? null : v,
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
         const SizedBox(height: 16),

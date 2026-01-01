@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../services/expression_service.dart';
 import '../../services/live2d_broadcast_service.dart';
 import '../../widgets/expressive_face.dart';
+import 'expression_state_bus.dart';
 
 class MotionRequest {
   final String userText;
@@ -75,6 +76,7 @@ class ExpressionAgentService {
       } catch (_) {}
       _last = expr;
       _streamCtrl.add(expr);
+      ExpressionStateBus().set(expr);
 
       // 同时广播到所有 Live2D 客户端
       _broadcast.broadcastExpression(

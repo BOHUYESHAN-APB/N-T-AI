@@ -21,7 +21,7 @@ class _AgentsTabState extends State<AgentsTab> {
           padding: const EdgeInsets.all(12.0),
           children: [
             const Text(
-              '配置独立 Agent，用于分离任务（表情/视觉/自定义）',
+              '配置独立 Agent，用于分离任务（视觉/工具/自定义）',
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
             const SizedBox(height: 12),
@@ -174,24 +174,6 @@ class _AgentsTabState extends State<AgentsTab> {
                 '选择视觉服务商',
                 ctrl.settings.activeVisionProviderId,
                 (id) => ctrl.setActiveVisionProvider(id),
-              ),
-            ),
-
-            // Expression Agent
-            ListTile(
-              leading: const Icon(Icons.face),
-              title: const Text('拟人表情 (Expression)'),
-              subtitle: Text(
-                '当前: ${getProviderName(ctrl.settings.activeExpressionProviderId)}',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showProviderSelector(
-                context,
-                ctrl,
-                providers,
-                '选择表情推理服务商',
-                ctrl.settings.activeExpressionProviderId,
-                (id) => ctrl.setActiveExpressionProvider(id),
               ),
             ),
 

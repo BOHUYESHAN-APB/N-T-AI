@@ -77,6 +77,15 @@ class ScheduleChatRequest(BaseModel):
     enable_thinking: bool = False
     enable_search: bool = False
     tts_mode: str = "sentence"
+    target_api_key: Optional[str] = None
+    target_base_url: Optional[str] = None
+    target_model: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+    embedding_model: Optional[str] = None
+    disable_memory: bool = False
+    force_tool: Optional[str] = None
+    force_tool_goal: Optional[str] = None
 
 class CancelScheduledChatRequest(BaseModel):
     task_id: str
@@ -635,9 +644,25 @@ async def schedule_chat(request: ScheduleChatRequest, raw_request: Request):
     delay_ms = int(request.delay_ms or 0)
     if delay_ms < 0:
         delay_ms = 0
-    target_api_key = raw_request.headers.get("X-Target-Api-Key")
-    target_base_url = raw_request.headers.get("X-Target-Base-Url")
-    target_model = raw_request.headers.get("X-Target-Model")
+    target_api_key = raw_request.headers.get("X-Target-Api-Key") or request.target_api_key
+    target_base_url = raw_request.headers.get("X-Target-Base-Url") or request.target_base_url
+    target_model = raw_request.headers.get("X-Target-Model") or request.target_model
+    embedding_api_key = raw_request.headers.get("X-Embedding-Api-Key") or request.embedding_api_key
+    embedding_base_url = raw_request.headers.get("X-Embedding-Base-Url") or request.embedding_base_url
+    embedding_model = raw_request.headers.get("X-Embedding-Model") or request.embedding_model
+    require_frontend = raw_request.headers.get("X-LLM-Require-Frontend")
+    if require_frontend:
+        require_frontend = require_frontend.strip().lower() in {"1", "true", "yes", "on"}
+    if require_frontend and not (target_api_key or target_base_url):
+        return {
+            "status": "error",
+            "error": "llm_config_required",
+            "detail": "frontend LLM config is required but missing X-Target-* headers.",
+        }
+    if target_base_url or target_model:
+        print(f"[Live2D] schedule_chat LLM base_url={target_base_url or '-'} model={target_model or '-'}")
+    if embedding_base_url or embedding_model:
+        print(f"[Live2D] schedule_chat Embedding base_url={embedding_base_url or '-'} model={embedding_model or '-'}")
 
     async def _run():
         try:
@@ -652,8 +677,14 @@ async def schedule_chat(request: ScheduleChatRequest, raw_request: Request):
                 target_api_key=target_api_key,
                 target_base_url=target_base_url,
                 target_model=target_model,
+                embedding_api_key=embedding_api_key,
+                embedding_base_url=embedding_base_url,
+                embedding_model=embedding_model,
                 enable_thinking=bool(request.enable_thinking),
                 enable_search=bool(request.enable_search),
+                disable_memory=bool(request.disable_memory),
+                force_tool=request.force_tool,
+                force_tool_goal=request.force_tool_goal,
                 enable_backend_tts=bool(request.enable_backend_tts),
                 tts_mode=request.tts_mode,
             )

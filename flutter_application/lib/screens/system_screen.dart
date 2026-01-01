@@ -74,76 +74,6 @@ class _SystemScreenState extends State<SystemScreen> {
               onChanged: (v) => controller.setAgentEnabled(v),
             ),
           ),
-          // Expression & Emotion Section
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text('表情与情绪推理', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          ),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  secondary: const Icon(Icons.emoji_emotions_outlined),
-                  title: const Text('启用表情 Agent 调用'),
-                  subtitle: const Text('单独调用轻量模型或关键词推理出表情，不占主脑上下文'),
-                  value: controller.settings.enableExpressionAgent,
-                  onChanged: (v) => controller.setEnableExpressionAgent(v),
-                ),
-                SwitchListTile(
-                  secondary: const Icon(Icons.face_retouching_natural_outlined),
-                  title: const Text('显示动态表情（灵动岛）'),
-                  value: controller.settings.showExpressionFace,
-                  onChanged: (v) => controller.setShowExpressionFace(v),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Row(
-                    children: [
-                      const Text('推理模型：'),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: DropdownButton<String>(
-                          isExpanded: true,
-                          value: controller.settings.activeExpressionProviderId ?? 'follow_main',
-                          items: [
-                            const DropdownMenuItem(value: 'follow_main', child: Text('跟随主脑（共享模型）')),
-                            for (final p in providers) DropdownMenuItem(value: p.id, child: Text('${p.name} · ${p.model.isEmpty ? '未配置模型' : p.model}')),
-                          ],
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            if (v == 'follow_main') {
-                              await controller.setActiveExpressionProvider(null);
-                            } else {
-                              await controller.setActiveExpressionProvider(v);
-                            }
-                            if (!mounted) return;
-                            setState(() {});
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.25)),
-                    ),
-                    padding: const EdgeInsets.all(10),
-                    child: const Text(
-                      '架构说明：主脑生成完整回复后，独立“表情推理”层以关键词或轻量模型二次分析情绪（愉悦/思考/关怀等），再由渲染层驱动画面。这样可避免在主脑提示中插入 JSON，降低 Token 成本。建议选择 7B~8B 或 mini 系列模型。',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
           ListTile(
             leading: const Icon(Icons.psychology),
             title: const Text('主脑 (Main Brain)'),
@@ -347,7 +277,7 @@ class _SystemScreenState extends State<SystemScreen> {
           ListTile(
             leading: const Icon(Icons.settings_remote),
             title: const Text('Agent 管理'),
-            subtitle: const Text('管理独立的 Agent（表情/视觉/自定义）配置'),
+            subtitle: const Text('管理独立的 Agent（视觉/工具/自定义）配置'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const AgentsScreen()));
@@ -855,7 +785,6 @@ class _SystemScreenState extends State<SystemScreen> {
                               'compress' => '压缩上下文',
                               'new_chat' => '新对话',
                               'memory' => '记忆库',
-                              'expression_toggle' => '切换表情',
                               _ => id,
                             }),
                             avatar: Icon(switch (id) {
@@ -863,7 +792,6 @@ class _SystemScreenState extends State<SystemScreen> {
                               'compress' => Icons.cleaning_services_outlined,
                               'new_chat' => Icons.add_comment_outlined,
                               'memory' => Icons.memory,
-                              'expression_toggle' => Icons.emoji_emotions_outlined,
                               _ => Icons.extension,
                             }, size: 16),
                           ),
@@ -879,7 +807,7 @@ class _SystemScreenState extends State<SystemScreen> {
                           showDialog(
                             context: context,
                             builder: (ctx) {
-                              final all = ['attach_image','compress','new_chat','memory','expression_toggle'];
+                              final all = ['attach_image','compress','new_chat','memory'];
                               final selected = List<String>.from(s.quickActions);
                               return AlertDialog(
                                 title: const Text('编辑快捷按钮'),
@@ -898,7 +826,6 @@ class _SystemScreenState extends State<SystemScreen> {
                                                 'compress' => '压缩上下文',
                                                 'new_chat' => '新对话',
                                                 'memory' => '记忆库',
-                                                'expression_toggle' => '切换表情面板',
                                                 _ => id,
                                               }),
                                               dense: true,

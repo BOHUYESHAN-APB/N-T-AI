@@ -12,14 +12,19 @@ import 'settings/settings_scope.dart';
 import 'licenses/register_licenses.dart';
 import 'services/logger_service.dart';
 import 'services/live2d_broadcast_service.dart';
+import 'services/android/expression_notification_service.dart';
 import 'services/diagnostics_service.dart';
 import 'core/services/backend_service.dart';
 import 'utils/http_overrides.dart';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
-// Simple file logger for Release mode debugging
+const bool _enableBuildLog =
+    bool.fromEnvironment('ENABLE_BUILD_LOG', defaultValue: false);
+
+// Simple file logger for Release mode debugging (throttled & opt-in)
 void logToFile(String message) {
+  if (!_enableBuildLog && kReleaseMode) return;
   try {
     final file = File('startup_log.txt');
     final timestamp = DateTime.now().toIso8601String();
@@ -90,6 +95,7 @@ Future<void> main(List<String> args) async {
       try {
         Live2DBroadcastService().setBackendUrl(controller.settings.pythonBackendUrl);
       } catch (_) {}
+      ExpressionNotificationService().start();
       await registerThirdPartyLicenses();
       
       logToFile("Running App...");
@@ -161,7 +167,6 @@ class NTApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    logToFile("NTApp.build started");
     return SettingsScope(
       controller: controller,
       child: AnimatedBuilder(

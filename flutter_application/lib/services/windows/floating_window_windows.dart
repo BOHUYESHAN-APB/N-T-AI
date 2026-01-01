@@ -25,6 +25,7 @@ class FloatingWindowWindows implements FloatingWindowService {
   Webview? _webview;
   VoidCallback? _onCloseCallback;
   String? _currentModelPath;
+  bool _showControls = false;
   StreamSubscription? _urlSubscription;
 
   FloatingWindowWindows({required this.backendUrl});
@@ -61,7 +62,7 @@ class FloatingWindowWindows implements FloatingWindowService {
       final prefs = await SharedPreferences.getInstance();
       final debug = prefs.getBool('settings.live2dDebug') ?? false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=false';
+          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=$_showControls';
       
       if (_webview != null) {
         _webview!.launch(url);
@@ -82,6 +83,7 @@ class FloatingWindowWindows implements FloatingWindowService {
     required String modelPath,
     required double width,
     required double height,
+    bool showControls = false,
   }) async {
     if (!_isInitialized) {
       throw StateError('FloatingWindowWindows not initialized');
@@ -117,6 +119,7 @@ class FloatingWindowWindows implements FloatingWindowService {
     }
 
     _currentModelPath = modelPath;
+    _showControls = showControls;
 
     try {
       // 如果当前实例已经存在浮窗，先关闭
@@ -136,7 +139,7 @@ class FloatingWindowWindows implements FloatingWindowService {
       // 构建 Live2D URL，根据设置决定是否开启调试
       final debug = prefs.getBool('settings.live2dDebug') ?? false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=false';
+          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=$showControls';
 
       // 创建独立 WebView 窗口（隐藏标题栏和工具栏，只显示纯 WebView 内容）
       _webview = await WebviewWindow.create(

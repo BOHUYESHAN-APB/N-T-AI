@@ -23,6 +23,12 @@ class _ProvidersTabState extends State<ProvidersTab> {
   String? _lastForProvider;
   List<String> _fetchedModels = []; // Store models fetched from API
 
+  static const List<Map<String, String>> _llmClassOptions = [
+    {'value': 'realtime', 'label': 'Realtime (通用对话)'},
+    {'value': 'omni', 'label': 'Realtime Omni (多模态)'},
+    {'value': 'vllm', 'label': 'VLLM (视觉主导/可作视觉Agent)'},
+  ];
+
   static const List<Map<String, dynamic>> _providerPresets = [
     {
       'name': 'DeepSeek',
@@ -469,7 +475,7 @@ class _ProvidersTabState extends State<ProvidersTab> {
             DropdownMenuItem(value: AiProviderCategory.embedding, child: Text('Embedding (向量嵌入)')),
             DropdownMenuItem(value: AiProviderCategory.tts, child: Text('TTS (语音合成)')),
             DropdownMenuItem(value: AiProviderCategory.stt, child: Text('STT (语音识别)')),
-            DropdownMenuItem(value: AiProviderCategory.motion, child: Text('Motion (动作驱动)')),
+            DropdownMenuItem(value: AiProviderCategory.motion, child: Text('Motion (动作驱动/规则)')),
           ],
           onChanged: (v) async {
             if (v == null) return;
@@ -479,6 +485,36 @@ class _ProvidersTabState extends State<ProvidersTab> {
           },
         ),
         const SizedBox(height: 16),
+        if (cfg.category == AiProviderCategory.llm) ...[
+          DropdownButtonFormField<String>(
+            value: (cfg.meta['llm_class'] as String?) ?? 'realtime',
+            decoration: const InputDecoration(labelText: 'LLM 类型', border: OutlineInputBorder()),
+            items: _llmClassOptions
+                .map((e) => DropdownMenuItem(value: e['value'], child: Text(e['label'] ?? '')))
+                .toList(),
+            onChanged: (v) async {
+              if (v == null) return;
+              final meta = Map<String, dynamic>.from(cfg.meta);
+              meta['llm_class'] = v;
+              await controller.addOrUpdateProvider(cfg.copyWith(meta: meta));
+              if (!mounted) return;
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Realtime: 通用对话；Omni: 多模态主脑；VLLM: 视觉主导/可用作视觉 Agent。',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (cfg.category == AiProviderCategory.motion) ...[
+          const Text(
+            'Motion 通常走规则或后端动作引擎，不要求绑定模型；如需用模型驱动动作，请配置为 LLM 并在后端作为动作策略使用。',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+        ],
         DropdownButtonFormField<AiProvider>(
           value: cfg.kind,
           decoration: const InputDecoration(labelText: '平台类型', border: OutlineInputBorder()),

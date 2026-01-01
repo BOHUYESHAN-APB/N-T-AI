@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'screens/firefly_screen.dart';
 import 'screens/notes_screen.dart';
@@ -7,8 +8,12 @@ import 'screens/memory_manager_screen.dart';
 import 'screens/tarot_screen.dart';
 import 'screens/deep_research/deep_research_screen.dart';
 
-// Simple file logger for Release mode debugging
+const bool _enableBuildLog =
+    bool.fromEnvironment('ENABLE_BUILD_LOG', defaultValue: false);
+
+// Simple file logger for Release mode debugging (throttled & opt-in)
 void logToFile(String message) {
+  if (!_enableBuildLog && kReleaseMode) return;
   try {
     final file = File('startup_log.txt');
     final timestamp = DateTime.now().toIso8601String();
@@ -46,15 +51,21 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    logToFile("HomeShell.build");
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 900;
         
-        // Use IndexedStack to preserve state of all pages
-        final content = IndexedStack(
-          index: _selectedIndex,
-          children: _pages,
+        // Use IndexedStack to preserve state of all pages, but pause animations offstage
+        final content = RepaintBoundary(
+          child: IndexedStack(
+            index: _selectedIndex,
+            children: List.generate(_pages.length, (i) {
+              return TickerMode(
+                enabled: _selectedIndex == i,
+                child: _pages[i],
+              );
+            }),
+          ),
         );
 
         // final titles = const ['流萤', '记忆', '笔记', '塔罗', '系统'];

@@ -864,16 +864,6 @@ class _GeneralTabState extends State<GeneralTab> {
         onChanged:
             s.enablePythonBackend ? (v) => controller.setEnableVts(v) : null,
       ),
-      SwitchListTile(
-        secondary: const Icon(Icons.face_retouching_natural),
-        title: Text(l10n.generalExpressionIsland),
-        subtitle: Text(l10n.generalExpressionIslandSubtitle),
-        value: s.showExpressionFace && s.enableExpressionAgent,
-        onChanged: (v) {
-          controller.setShowExpressionFace(v);
-          controller.setEnableExpressionAgent(v);
-        },
-      ),
     ];
 
     final ttsSectionChildren = <Widget>[
@@ -1643,7 +1633,6 @@ class _GeneralTabState extends State<GeneralTab> {
       'compress' => l10n.qaCompress,
       'new_chat' => l10n.qaNewChat,
       'memory' => l10n.qaMemory,
-      'expression_toggle' => l10n.qaExpressionToggle,
       _ => id,
     };
   }
@@ -1654,7 +1643,6 @@ class _GeneralTabState extends State<GeneralTab> {
       'compress' => Icons.cleaning_services_outlined,
       'new_chat' => Icons.add_comment_outlined,
       'memory' => Icons.memory,
-      'expression_toggle' => Icons.emoji_emotions_outlined,
       _ => Icons.extension,
     };
   }
@@ -1670,7 +1658,6 @@ class _GeneralTabState extends State<GeneralTab> {
           'compress',
           'new_chat',
           'memory',
-          'expression_toggle',
         ];
         final selected = List<String>.from(s.quickActions);
         return StatefulBuilder(

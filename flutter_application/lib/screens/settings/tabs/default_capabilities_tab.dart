@@ -39,24 +39,13 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
           onChanged: (v) => controller.setAgentEnabled(v), 
           secondary: const Icon(Icons.chat_bubble_outline),
         ),
-        SwitchListTile(
-          title: const Text('允许 AI 使用表情'),
-          subtitle: const Text('允许回复中包含 emoji/表情符号'),
-          value: settings.showExpressionFace, // This was 'Expression Island' in General, maybe reuse?
-          // Or is there a specific emoji setting?
-          // Looking at previous settings, 'showExpressionFace' was for the UI overlay.
-          // Let's use 'enableExpressionAgent' or add a new setting if needed. 
-          // For now, mapping to 'enableExpressionAgent' as it controls the expression logic.
-          onChanged: (v) => controller.setEnableExpressionAgent(v),
-          secondary: const Icon(Icons.emoji_emotions_outlined),
-        ),
 
         const Divider(height: 32),
         
         // --- Merged Agents Logic ---
         _buildSectionHeader(context, '能力分流 (Capabilities)'),
         const Text(
-          '配置独立 Agent，用于分离任务（表情/视觉/自定义）',
+          '配置独立 Agent，用于分离任务（视觉/工具/自定义）',
           style: TextStyle(fontSize: 14, color: Colors.grey),
         ),
         const SizedBox(height: 12),
@@ -79,21 +68,6 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
             '选择视觉服务商',
             settings.activeVisionProviderId,
             (id) => controller.setActiveVisionProvider(id),
-          ),
-        ),
-        _buildCapabilityTile(
-          context,
-          icon: Icons.face,
-          title: '拟人表情 (Expression)',
-          currentId: settings.activeExpressionProviderId,
-          controller: controller,
-          onTap: () => _showProviderSelector(
-            context,
-            controller,
-            providers,
-            '选择表情推理服务商',
-            settings.activeExpressionProviderId,
-            (id) => controller.setActiveExpressionProvider(id),
           ),
         ),
         _buildCapabilityTile(

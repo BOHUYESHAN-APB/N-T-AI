@@ -223,6 +223,9 @@ class ChatService:
                             target_api_key: str = None, 
                             target_base_url: str = None, 
                             target_model: str = None,
+                            embedding_api_key: str = None,
+                            embedding_base_url: str = None,
+                            embedding_model: str = None,
                             tts_api_key: str = None,
                             tts_base_url: str = None,
                             tts_voice: str = None,
@@ -242,7 +245,8 @@ class ChatService:
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
                             learning_probability: float = 1.0,
-                            tts_mode: str = "sentence"): # "sentence" (default/stable) or "stream" (high speed)
+                            tts_mode: str = "sentence",
+                            disable_memory: bool = False): # "sentence" (default/stable) or "stream" (high speed)
         """
         Streaming version of process_message for fast response.
         Yields text chunks and triggers TTS as soon as a sentence is complete.
@@ -274,7 +278,22 @@ class ChatService:
         except: pass
 
         # Get Context (RAG)
-        react_context = await self.memory_system.retrieve_context(text_content, user_id, target_api_key, target_base_url, target_model, fast_mode=True)
+        react_context = ""
+        if not disable_memory:
+            try:
+                react_context = await self.memory_system.retrieve_context(
+                    text_content,
+                    user_id,
+                    target_api_key,
+                    target_base_url,
+                    target_model,
+                    embedding_api_key,
+                    embedding_base_url,
+                    embedding_model,
+                    fast_mode=True,
+                )
+            except Exception as e:
+                logger.warning(f"Memory context retrieval failed, continuing without it: {e}")
         
         # Build System Prompt (Simplified for the example, but should match process_message)
         system_prompt = effective_system_prompt or (FIREFLY_PERSONA_FULL if persona_mode == "full" else FIREFLY_PERSONA_BASIC)
@@ -465,6 +484,9 @@ class ChatService:
                             target_api_key: str = None, 
                             target_base_url: str = None, 
                             target_model: str = None,
+                            embedding_api_key: str = None,
+                            embedding_base_url: str = None,
+                            embedding_model: str = None,
                             tts_api_key: str = None,
                             tts_base_url: str = None,
                             tts_voice: str = None,
@@ -484,7 +506,10 @@ class ChatService:
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
                             learning_probability: float = 1.0,
-                            tts_mode: str = "sentence") -> str:
+                            tts_mode: str = "sentence",
+                            disable_memory: bool = False,
+                            force_tool: Optional[str] = None,
+                            force_tool_goal: Optional[str] = None) -> str:
         # 0. Update Person Stats
         self.person_service.increment_know_times(user_id)
         
@@ -540,43 +565,53 @@ class ChatService:
         light_context = None
         prefetch_timed_out = False
         latency_fallback_sent = False
-        try:
-            prefetch_task = self.memory_system.start_light_prefetch(
-                user_query=text_content,
-                user_id=user_id,
-                api_key=target_api_key,
-                base_url=target_base_url,
-            )
-            if prefetch_task is not None:
-                try:
-                    light_context = await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.9)
-                except asyncio.TimeoutError:
-                    prefetch_timed_out = True
-                    light_context = ""
-                except Exception:
-                    light_context = None
+        if not disable_memory:
+            try:
+                prefetch_task = self.memory_system.start_light_prefetch(
+                    user_query=text_content,
+                    user_id=user_id,
+                    api_key=target_api_key,
+                    base_url=target_base_url,
+                    embedding_api_key=embedding_api_key,
+                    embedding_base_url=embedding_base_url,
+                    embedding_model=embedding_model,
+                )
+                if prefetch_task is not None:
+                    try:
+                        light_context = await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.9)
+                    except asyncio.TimeoutError:
+                        prefetch_timed_out = True
+                        light_context = ""
+                    except Exception:
+                        light_context = None
 
-            if prefetch_timed_out:
-                react_context = await self.memory_system.retrieve_context(
-                    text_content,
-                    user_id,
-                    target_api_key,
-                    target_base_url,
-                    target_model,
-                    light_context=light_context,
-                    fast_mode=True,
-                )
-            else:
-                react_context = await self.memory_system.retrieve_context(
-                    text_content,
-                    user_id,
-                    target_api_key,
-                    target_base_url,
-                    target_model,
-                    light_context=light_context,
-                )
-        except Exception as e:
-            logger.warning(f"Memory context retrieval failed, continuing without it: {e}")
+                if prefetch_timed_out:
+                    react_context = await self.memory_system.retrieve_context(
+                        text_content,
+                        user_id,
+                        target_api_key,
+                        target_base_url,
+                        target_model,
+                        embedding_api_key,
+                        embedding_base_url,
+                        embedding_model,
+                        light_context=light_context,
+                        fast_mode=True,
+                    )
+                else:
+                    react_context = await self.memory_system.retrieve_context(
+                        text_content,
+                        user_id,
+                        target_api_key,
+                        target_base_url,
+                        target_model,
+                        embedding_api_key,
+                        embedding_base_url,
+                        embedding_model,
+                        light_context=light_context,
+                    )
+            except Exception as e:
+                logger.warning(f"Memory context retrieval failed, continuing without it: {e}")
 
         if prefetch_timed_out and (not enable_search) and (not deep_research):
             try:
@@ -704,7 +739,11 @@ class ChatService:
         max_turns = 5
         current_turn = 0
         final_response_text = ""
-        
+        force_tool_name = (force_tool or "").strip()
+        if not force_tool_name:
+            force_tool_name = None
+        force_tool_goal_text = (force_tool_goal or "").strip() or text_content
+
         # Decide which model to use for the ReAct loop
         loop_api_key = target_api_key
         loop_base_url = target_base_url
@@ -870,6 +909,12 @@ class ChatService:
                 
                 current_turn += 1
             else:
+                if force_tool_name:
+                    safe_goal = force_tool_goal_text.replace("\\", "\\\\").replace('"', '\\"')
+                    args_str = f'goal="{safe_goal}"'
+                    tool_result = await self._execute_tool(force_tool_name, args_str, search_region)
+                    final_response_text = f"{response_text}\n\n{tool_result}".strip()
+                    break
                 # No tool call, this is the final answer
                 # Validate images in the final response before returning
                 if "[IMAGE:" in response_text:

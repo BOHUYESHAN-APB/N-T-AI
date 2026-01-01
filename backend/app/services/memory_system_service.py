@@ -32,6 +32,9 @@ class MemorySystemService:
         api_key: str = None,
         base_url: str = None,
         model: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
         light_context: str | None = None,
         fast_mode: bool = False,
     ) -> str:
@@ -56,6 +59,9 @@ class MemorySystemService:
                 user_id=user_id,
                 api_key=api_key,
                 base_url=base_url,
+                embedding_api_key=embedding_api_key,
+                embedding_base_url=embedding_base_url,
+                embedding_model=embedding_model,
             )
         if light_context:
             context_results.append(light_context)
@@ -157,12 +163,25 @@ class MemorySystemService:
             return "Relevant Chat History (Keyword Match):\n" + "\n".join(hits)
         return ""
 
-    async def retrieve_relevant_memories(self, query: str, user_id: str, api_key: str = None, base_url: str = None, limit: int = 5) -> str:
+    async def retrieve_relevant_memories(
+        self,
+        query: str,
+        user_id: str,
+        api_key: str = None,
+        base_url: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
+        limit: int = 5,
+    ) -> str:
         hits = await self.search_relevant_memories(
             query=query,
             user_id=user_id,
             api_key=api_key,
             base_url=base_url,
+            embedding_api_key=embedding_api_key,
+            embedding_base_url=embedding_base_url,
+            embedding_model=embedding_model,
             limit=limit,
             threshold=0.72,
         )
@@ -176,6 +195,9 @@ class MemorySystemService:
         user_id: str,
         api_key: str = None,
         base_url: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
         limit: int = 5,
         threshold: float = 0.72,
     ):
@@ -184,7 +206,9 @@ class MemorySystemService:
         if not query or not user_id:
             return []
 
-        query_embedding = await self.llm.get_embedding(query, api_key, base_url)
+        emb_key = embedding_api_key or api_key
+        emb_base = embedding_base_url or base_url
+        query_embedding = await self.llm.get_embedding(query, emb_key, emb_base, embedding_model)
         if not query_embedding:
             return []
 
@@ -265,7 +289,17 @@ class MemorySystemService:
         top_k = [item for _, item in scored[: max(1, int(limit))]]
         return top_k
 
-    def start_light_prefetch(self, *, user_query: str, user_id: str, api_key: str = None, base_url: str = None):
+    def start_light_prefetch(
+        self,
+        *,
+        user_query: str,
+        user_id: str,
+        api_key: str = None,
+        base_url: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
+    ):
         user_query = (user_query or "").strip()
         user_id = (user_id or "").strip()
         if not user_query or not user_id:
@@ -286,7 +320,15 @@ class MemorySystemService:
                     return task
 
         task = asyncio.create_task(
-            self._build_light_context(user_query=user_query, user_id=user_id, api_key=api_key, base_url=base_url)
+            self._build_light_context(
+                user_query=user_query,
+                user_id=user_id,
+                api_key=api_key,
+                base_url=base_url,
+                embedding_api_key=embedding_api_key,
+                embedding_base_url=embedding_base_url,
+                embedding_model=embedding_model,
+            )
         )
 
         new_entry = {
@@ -413,9 +455,27 @@ class MemorySystemService:
         for _, uid in items[: max(0, len(items) - _LIGHT_PREFETCH_MAX_USERS)]:
             _light_prefetch_cache.pop(uid, None)
 
-    async def _build_light_context(self, *, user_query: str, user_id: str, api_key: str = None, base_url: str = None) -> str:
+    async def _build_light_context(
+        self,
+        *,
+        user_query: str,
+        user_id: str,
+        api_key: str = None,
+        base_url: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
+    ) -> str:
         out = []
-        vector_context = await self.retrieve_relevant_memories(user_query, user_id, api_key, base_url)
+        vector_context = await self.retrieve_relevant_memories(
+            user_query,
+            user_id,
+            api_key,
+            base_url,
+            embedding_api_key,
+            embedding_base_url,
+            embedding_model,
+        )
         if vector_context:
             out.append(vector_context)
         external_context = await self.retrieve_external_knowledge(user_query=user_query, user_id=user_id)

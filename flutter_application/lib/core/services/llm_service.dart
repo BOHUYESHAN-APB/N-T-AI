@@ -98,7 +98,7 @@ class LLMService {
   Future<bool> isActiveModelVisionCapable() async {
     final provider = await _getActiveProvider();
     if (provider == null) return false;
-    return _modelSupportsVision(provider.model);
+    return _providerSupportsVision(provider);
   }
 
   // No longer used directly, settings are managed by SettingsController
@@ -219,6 +219,23 @@ class LLMService {
     final suppressInnerMonologue = prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
     final systemPrompt = systemPromptOverride ?? (prefs.getString('settings.ai.systemPrompt') ?? '');
     final assistantName = assistantNameOverride ?? (prefs.getString('settings.ai.assistantName') ?? 'Firefly');
+    final embeddingProviderId = prefs.getString('settings.agent.embeddingProviderId');
+    AiProviderConfig? embeddingProvider;
+    if (embeddingProviderId != null && embeddingProviderId.isNotEmpty) {
+      final candidate = await getProviderById(embeddingProviderId);
+      if (candidate != null && candidate.category == AiProviderCategory.embedding) {
+        embeddingProvider = candidate;
+      }
+    }
+    if (embeddingProvider == null) {
+      final providers = await getProviders();
+      for (final p in providers) {
+        if (p.category == AiProviderCategory.embedding) {
+          embeddingProvider = p;
+          break;
+        }
+      }
+    }
     
     // Parse search region from int setting (0: auto, 1: cn, 2: global)
     final searchRegionIdx = prefs.getInt('settings.agent.searchRegion');
@@ -313,6 +330,26 @@ class LLMService {
       }
       if (sessionId != null && sessionId.isNotEmpty) {
         headers['X-Session-Id'] = sessionId;
+      }
+      if (embeddingProvider != null) {
+        if (embeddingProvider.apiKey.isNotEmpty) {
+          headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
+        }
+        if (embeddingProvider.baseUrl.isNotEmpty) {
+          var embeddingBaseUrl = embeddingProvider.baseUrl;
+          if (embeddingBaseUrl.endsWith('/chat/completions')) {
+            embeddingBaseUrl = embeddingBaseUrl.replaceAll('/chat/completions', '');
+          }
+          if (embeddingBaseUrl.endsWith('/')) {
+            embeddingBaseUrl = embeddingBaseUrl.substring(0, embeddingBaseUrl.length - 1);
+          }
+          headers['X-Embedding-Base-Url'] = embeddingBaseUrl;
+        }
+        if (embeddingProvider.model.isNotEmpty) {
+          headers['X-Embedding-Model'] = embeddingProvider.model;
+        }
+      } else {
+        headers['X-Disable-Memory'] = 'true';
       }
 
       // --- Specialized Agent Providers ---
@@ -452,7 +489,7 @@ class LLMService {
     }
 
     final model = provider.model.isNotEmpty ? provider.model : 'gpt-3.5-turbo';
-    final supportsVision = _modelSupportsVision(model);
+    final supportsVision = _providerSupportsVision(provider);
 
     // Parse messages for multimodal content (images)
     final List<Map<String, dynamic>> payloadMessages = [];
@@ -617,6 +654,18 @@ class LLMService {
     }
   }
 
+  String _providerLlmClass(AiProviderConfig provider) {
+    final raw = provider.meta['llm_class'];
+    if (raw is String) return raw.trim().toLowerCase();
+    return '';
+  }
+
+  bool _providerSupportsVision(AiProviderConfig provider) {
+    final llmClass = _providerLlmClass(provider);
+    if (llmClass == 'omni' || llmClass == 'vllm') return true;
+    return _modelSupportsVision(provider.model);
+  }
+
   bool _modelSupportsVision(String model) {
     final m = model.toLowerCase();
     return m.contains('gpt-4o') || m.contains('gpt-4.1') || m.contains('vision') || m.contains('-vl') || m.contains('multimodal');
@@ -645,7 +694,7 @@ class LLMService {
     var baseUrl = provider.baseUrl;
     final model = provider.model.isNotEmpty ? provider.model : 'gpt-4o-mini';
 
-    if (!_modelSupportsVision(model)) {
+    if (!_providerSupportsVision(provider)) {
       throw Exception('当前模型不支持视觉（多模态）');
     }
 

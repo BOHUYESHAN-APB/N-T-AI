@@ -24,7 +24,7 @@ class _AgentsScreenState extends State<AgentsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('配置独立 Agent，用于分离任务（表情/视觉/自定义）', style: TextStyle(fontSize: 14, color: Colors.grey)),
+            const Text('配置独立 Agent，用于分离任务（视觉/工具/自定义）', style: TextStyle(fontSize: 14, color: Colors.grey)),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.builder(

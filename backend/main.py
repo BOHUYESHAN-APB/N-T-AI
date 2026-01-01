@@ -439,6 +439,11 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     target_api_key = raw_request.headers.get("X-Target-Api-Key")
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
     target_model = raw_request.headers.get("X-Target-Model")
+    embedding_api_key = raw_request.headers.get("X-Embedding-Api-Key")
+    embedding_base_url = raw_request.headers.get("X-Embedding-Base-Url")
+    embedding_model = raw_request.headers.get("X-Embedding-Model")
+    disable_memory_header = raw_request.headers.get("X-Disable-Memory", "false")
+    disable_memory = disable_memory_header.lower() in ["true", "1", "yes"]
     
     # Logic to inherit "Main Brain" config
     usage_type = raw_request.headers.get("X-Usage-Type", "main")
@@ -628,6 +633,10 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                         target_api_key=target_api_key,
                         target_base_url=target_base_url,
                         target_model=target_model,
+                        embedding_api_key=embedding_api_key,
+                        embedding_base_url=embedding_base_url,
+                        embedding_model=embedding_model,
+                        disable_memory=disable_memory,
                         tts_api_key=tts_api_key,
                         tts_base_url=tts_base_url,
                         tts_voice=tts_voice,
@@ -667,12 +676,16 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 target_api_key=target_api_key,
                 target_base_url=target_base_url,
                 target_model=target_model,
+                embedding_api_key=embedding_api_key,
+                embedding_base_url=embedding_base_url,
+                embedding_model=embedding_model,
                 tts_api_key=tts_api_key,
                 tts_base_url=tts_base_url,
                 tts_voice=tts_voice,
                 enable_search=enable_search,
                 enable_thinking=enable_thinking,
                 search_region=search_region,
+                disable_memory=disable_memory,
                 persona_mode=persona_mode,
                 vision_config={
                     "api_key": vision_api_key,

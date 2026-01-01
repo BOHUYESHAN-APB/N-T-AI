@@ -19,6 +19,7 @@ abstract class FloatingWindowService {
     required String modelPath,
     required double width,
     required double height,
+    bool showControls = false,
   });
 
   /// 显示浮窗

@@ -321,7 +321,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
 
   void _startStatusTimer() {
     _statusTimer?.cancel();
-    _statusTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+    _statusTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (isEnabled) {
         _fetchStatus();
       }
@@ -351,22 +351,32 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         final nextMsAuthUrl = data['ms_auth_url'];
         final nextBackendControlMode = data['control_mode']?.toString();
         final nextHeadfulReady = data['headful_ready'];
-        final nextHeadfulStateRaw = data['headful_state'];
-        final nextHeadfulPlanRaw = data['headful_plan'];
+        final trackHeadful = controlMode == 'headful';
         Map<String, dynamic>? nextHeadfulState;
-        if (nextHeadfulStateRaw is Map<String, dynamic>) {
-          nextHeadfulState = nextHeadfulStateRaw;
-        } else if (nextHeadfulStateRaw is Map) {
-          nextHeadfulState = Map<String, dynamic>.from(nextHeadfulStateRaw);
-        }
         Map<String, dynamic>? nextHeadfulPlan;
-        if (nextHeadfulPlanRaw is Map<String, dynamic>) {
-          nextHeadfulPlan = nextHeadfulPlanRaw;
-        } else if (nextHeadfulPlanRaw is Map) {
-          nextHeadfulPlan = Map<String, dynamic>.from(nextHeadfulPlanRaw);
+        String? nextHeadfulStateSig;
+        String? nextHeadfulPlanSig;
+        if (trackHeadful) {
+          final nextHeadfulStateRaw = data['headful_state'];
+          final nextHeadfulPlanRaw = data['headful_plan'];
+          if (nextHeadfulStateRaw is Map<String, dynamic>) {
+            nextHeadfulState = nextHeadfulStateRaw;
+          } else if (nextHeadfulStateRaw is Map) {
+            nextHeadfulState = Map<String, dynamic>.from(nextHeadfulStateRaw);
+          }
+          if (nextHeadfulPlanRaw is Map<String, dynamic>) {
+            nextHeadfulPlan = nextHeadfulPlanRaw;
+          } else if (nextHeadfulPlanRaw is Map) {
+            nextHeadfulPlan = Map<String, dynamic>.from(nextHeadfulPlanRaw);
+          }
+          nextHeadfulStateSig = nextHeadfulState == null ? null : jsonEncode(nextHeadfulState);
+          nextHeadfulPlanSig = nextHeadfulPlan == null ? null : jsonEncode(nextHeadfulPlan);
+        } else {
+          nextHeadfulState = _headfulState;
+          nextHeadfulPlan = _headfulPlan;
+          nextHeadfulStateSig = _lastHeadfulStateSig;
+          nextHeadfulPlanSig = _lastHeadfulPlanSig;
         }
-        final nextHeadfulStateSig = nextHeadfulState == null ? null : jsonEncode(nextHeadfulState);
-        final nextHeadfulPlanSig = nextHeadfulPlan == null ? null : jsonEncode(nextHeadfulPlan);
         final tail = trimmedLogs.isNotEmpty ? trimmedLogs.last : null;
         final changed = trimmedLogs.length != _lastLogCount ||
             tail != _lastLogTail ||
@@ -464,25 +474,56 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
     try {
       final provider = _resolveLlmProvider(controller);
+      final embeddingProvider = _resolveEmbeddingProvider(controller);
       final headers = <String, String>{
         'Content-Type': 'application/json',
       };
+      String? bodyTargetApiKey;
+      String? bodyTargetBaseUrl;
+      String? bodyTargetModel;
+      String? bodyEmbeddingApiKey;
+      String? bodyEmbeddingBaseUrl;
+      String? bodyEmbeddingModel;
       if (provider != null) {
         if (provider.baseUrl.isNotEmpty) {
           headers['X-Target-Base-Url'] = provider.baseUrl;
           headers['X-Target-Api-Key'] =
               provider.apiKey.isNotEmpty ? provider.apiKey : 'sk-ntai-frontend';
+          bodyTargetBaseUrl = provider.baseUrl;
+          bodyTargetApiKey =
+              provider.apiKey.isNotEmpty ? provider.apiKey : 'sk-ntai-frontend';
         } else if (provider.apiKey.isNotEmpty) {
           headers['X-Target-Api-Key'] = provider.apiKey;
+          bodyTargetApiKey = provider.apiKey;
         }
         if (provider.model.isNotEmpty) {
           headers['X-Target-Model'] = provider.model;
+          bodyTargetModel = provider.model;
         }
         headers['X-Target-Provider-Id'] = provider.id;
         headers['X-LLM-Require-Frontend'] = 'true';
       } else {
         headers['X-LLM-Require-Frontend'] = 'true';
       }
+      if (embeddingProvider != null) {
+        if (embeddingProvider.baseUrl.isNotEmpty) {
+          headers['X-Embedding-Base-Url'] = embeddingProvider.baseUrl;
+          headers['X-Embedding-Api-Key'] =
+              embeddingProvider.apiKey.isNotEmpty ? embeddingProvider.apiKey : 'sk-ntai-frontend';
+          bodyEmbeddingBaseUrl = embeddingProvider.baseUrl;
+          bodyEmbeddingApiKey =
+              embeddingProvider.apiKey.isNotEmpty ? embeddingProvider.apiKey : 'sk-ntai-frontend';
+        } else if (embeddingProvider.apiKey.isNotEmpty) {
+          headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
+          bodyEmbeddingApiKey = embeddingProvider.apiKey;
+        }
+        if (embeddingProvider.model.isNotEmpty) {
+          headers['X-Embedding-Model'] = embeddingProvider.model;
+          bodyEmbeddingModel = embeddingProvider.model;
+        }
+        headers['X-Embedding-Provider-Id'] = embeddingProvider.id;
+      }
+      final disableMemory = embeddingProvider == null;
       final response = await http.post(
         Uri.parse('$backendUrl/api/live2d/agent/schedule_chat'),
         headers: headers,
@@ -490,7 +531,16 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
           'prompt': message,
           'user_id': userId,
           'enable_thinking': false,
-          'enable_search': false,
+          'enable_search': true,
+          'disable_memory': disableMemory,
+          'force_tool': 'play_minecraft',
+          'force_tool_goal': message,
+          'target_api_key': bodyTargetApiKey,
+          'target_base_url': bodyTargetBaseUrl,
+          'target_model': bodyTargetModel,
+          'embedding_api_key': bodyEmbeddingApiKey,
+          'embedding_base_url': bodyEmbeddingBaseUrl,
+          'embedding_model': bodyEmbeddingModel,
         }),
       );
       if (!context.mounted) return;
@@ -648,6 +698,25 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
     for (final p in providers) {
       if (p.category == AiProviderCategory.llm) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  AiProviderConfig? _resolveEmbeddingProvider(SettingsController controller) {
+    final providers = controller.providers;
+    final embeddingId = controller.settings.activeEmbeddingProviderId;
+    if (embeddingId != null && embeddingId.isNotEmpty) {
+      try {
+        final selected = providers.firstWhere((p) => p.id == embeddingId);
+        if (selected.category == AiProviderCategory.embedding) {
+          return selected;
+        }
+      } catch (_) {}
+    }
+    for (final p in providers) {
+      if (p.category == AiProviderCategory.embedding) {
         return p;
       }
     }
@@ -1334,24 +1403,32 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
               ],
               const SizedBox(height: 24),
               _buildSectionTitle('实时运行日志'),
-              Container(
-                height: 300,
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ListView.builder(
-                  reverse: true,
-                  itemCount: _logs.length,
-                  itemBuilder: (context, index) {
-                    final log = _logs[_logs.length - 1 - index];
-                    return Text(
-                      log,
-                      style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 12),
-                    );
-                  },
+              RepaintBoundary(
+                child: Container(
+                  height: 300,
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ListView.builder(
+                    reverse: true,
+                    itemExtent: 16,
+                    cacheExtent: 800,
+                    itemCount: _logs.length,
+                    itemBuilder: (context, index) {
+                      final log = _logs[_logs.length - 1 - index];
+                      return Text(
+                        log,
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 16),

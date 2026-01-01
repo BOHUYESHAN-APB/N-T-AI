@@ -28,10 +28,20 @@ class FloatingWindowService : Service() {
         private const val TAG = "FloatingWindowService"
         private const val NOTIFICATION_ID = 1001
 
-        fun startService(context: Context, modelPath: String, backendUrl: String) {
+        fun startService(
+            context: Context,
+            modelPath: String,
+            backendUrl: String,
+            showControls: Boolean,
+            width: Double,
+            height: Double
+        ) {
             val intent = Intent(context, FloatingWindowService::class.java)
             intent.putExtra("modelPath", modelPath)
             intent.putExtra("backendUrl", backendUrl)
+            intent.putExtra("showControls", showControls)
+            intent.putExtra("windowWidth", width)
+            intent.putExtra("windowHeight", height)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -66,14 +76,23 @@ class FloatingWindowService : Service() {
 
         val modelPath = intent?.getStringExtra("modelPath") ?: ""
         val backendUrl = intent?.getStringExtra("backendUrl") ?: "http://localhost:23456"
+        val showControls = intent?.getBooleanExtra("showControls", false) ?: false
+        val windowWidth = intent?.getDoubleExtra("windowWidth", 600.0) ?: 600.0
+        val windowHeight = intent?.getDoubleExtra("windowHeight", 800.0) ?: 800.0
 
         // 创建浮窗
-        createFloatingWindow(modelPath, backendUrl)
+        createFloatingWindow(modelPath, backendUrl, showControls, windowWidth, windowHeight)
 
         return START_STICKY
     }
 
-    private fun createFloatingWindow(modelPath: String, backendUrl: String) {
+    private fun createFloatingWindow(
+        modelPath: String,
+        backendUrl: String,
+        showControls: Boolean,
+        windowWidth: Double,
+        windowHeight: Double
+    ) {
         if (isInitialized) return
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -141,8 +160,8 @@ class FloatingWindowService : Service() {
             format = PixelFormat.RGBA_8888
             // Removed FLAG_NOT_TOUCHABLE to allow touch events
             flags = WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            width = 600
-            height = 800
+            width = windowWidth.toInt()
+            height = windowHeight.toInt()
             x = 100
             y = 100
             gravity = Gravity.TOP or Gravity.LEFT
@@ -153,7 +172,7 @@ class FloatingWindowService : Service() {
 
         // 加载 Web 页面
         val base = backendUrl.trimEnd('/')
-        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true&controls=true"
+        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true&controls=$showControls"
         webView?.loadUrl(url)
 
         // 设置触摸事件

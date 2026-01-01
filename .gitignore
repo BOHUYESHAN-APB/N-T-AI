@@ -21,6 +21,14 @@ TEMP-前端后端终端日志截取-不要编辑这个文件.md
 /backend/data/
 flutter_application/server/
 
+# Dev markdown notes (untracked)
+**/notes/
+**/dev_notes/
+**/*_notes.md
+**/*_draft.md
+**/*_dev.md
+**/*_temp.md
+
 # Docker / Linux Env Temporary Files
 **/linux_env/workspace/
 **/linux_env/mnt/

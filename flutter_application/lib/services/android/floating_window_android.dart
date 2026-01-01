@@ -65,6 +65,7 @@ class FloatingWindowAndroid implements FloatingWindowService {
     required String modelPath,
     required double width,
     required double height,
+    bool showControls = false,
   }) async {
     if (!_isInitialized) {
       throw StateError('FloatingWindowAndroid not initialized');
@@ -75,6 +76,7 @@ class FloatingWindowAndroid implements FloatingWindowService {
         'modelPath': modelPath,
         'width': width,
         'height': height,
+        'showControls': showControls,
       });
       _isVisible = true;
     } catch (e) {
