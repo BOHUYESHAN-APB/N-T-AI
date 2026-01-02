@@ -389,6 +389,8 @@ class AppSettings {
   final bool enableVts; // 是否启用 VTS 同步
   final bool enableScreenCapture; // 是否启用定时屏幕截取
   final int screenCaptureInterval; // 截取间隔（秒）
+  final int screenCaptureInjectInterval; // 注入间隔（秒）
+  final int screenCaptureIdleSeconds; // 空闲多久才注入（秒，0为不限制）
   final String screenAnalysisPrompt; // 屏幕分析提示词
   final String screenInjectionPrompt; // 消息注入提示词
 
@@ -490,6 +492,8 @@ class AppSettings {
     this.enableVts = false, // 默认关闭 VTS
     this.enableScreenCapture = false,
     this.screenCaptureInterval = 300, // 默认5分钟
+    this.screenCaptureInjectInterval = 60, // 默认每 60 秒注入一次
+    this.screenCaptureIdleSeconds = 0, // 0 表示不限制空闲
     this.screenAnalysisPrompt =
         '你现在是我的环境观察员。请仔细观察这张当前的屏幕截图，描述当前屏幕上正在发生的重要事情、打开的应用、正在处理的内容或任何值得注意的变化。请用客观、简洁的语言描述。',
     this.screenInjectionPrompt =
@@ -578,6 +582,8 @@ class AppSettings {
     bool? enableVts,
     bool? enableScreenCapture,
     int? screenCaptureInterval,
+    int? screenCaptureInjectInterval,
+    int? screenCaptureIdleSeconds,
     String? screenAnalysisPrompt,
     String? screenInjectionPrompt,
     bool? enableBrowser,
@@ -672,6 +678,10 @@ class AppSettings {
     enableScreenCapture: enableScreenCapture ?? this.enableScreenCapture,
     screenCaptureInterval:
         screenCaptureInterval ?? this.screenCaptureInterval,
+    screenCaptureInjectInterval:
+        screenCaptureInjectInterval ?? this.screenCaptureInjectInterval,
+    screenCaptureIdleSeconds:
+        screenCaptureIdleSeconds ?? this.screenCaptureIdleSeconds,
     screenAnalysisPrompt: screenAnalysisPrompt ?? this.screenAnalysisPrompt,
     screenInjectionPrompt:
         screenInjectionPrompt ?? this.screenInjectionPrompt,

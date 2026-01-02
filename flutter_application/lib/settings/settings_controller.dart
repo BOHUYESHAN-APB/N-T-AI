@@ -46,6 +46,8 @@ class SettingsController extends ChangeNotifier {
   static const _kEnableVts = 'settings.vts.enabled';
   static const _kEnableScreenCapture = 'settings.vision.enableScreenCapture';
   static const _kScreenCaptureInterval = 'settings.vision.screenCaptureInterval';
+  static const _kScreenCaptureInjectInterval = 'settings.vision.screenCaptureInjectInterval';
+  static const _kScreenCaptureIdleSeconds = 'settings.vision.screenCaptureIdleSeconds';
   static const _kScreenAnalysisPrompt = 'settings.vision.screenAnalysisPrompt';
   static const _kScreenInjectionPrompt = 'settings.vision.screenInjectionPrompt';
   static const _kUserNickname = 'settings.user.nickname';
@@ -189,6 +191,10 @@ class SettingsController extends ChangeNotifier {
     final enableVts = _prefs.getBool(_kEnableVts) ?? false;
     final enableScreenCapture = _prefs.getBool(_kEnableScreenCapture) ?? false;
     final screenCaptureInterval = _prefs.getInt(_kScreenCaptureInterval) ?? 300;
+    final screenCaptureInjectInterval =
+        _prefs.getInt(_kScreenCaptureInjectInterval) ?? 60;
+    final screenCaptureIdleSeconds =
+        _prefs.getInt(_kScreenCaptureIdleSeconds) ?? 0;
     final liveMemoryEnabled = _prefs.getBool(_kLiveMemoryEnabled) ?? true;
     final screenAnalysisPrompt = _prefs.getString(_kScreenAnalysisPrompt) ??
         '你现在是我的环境观察员。请仔细观察这张当前的屏幕截图，描述当前屏幕上正在发生的重要事情、打开的应用、正在处理的内容或任何值得注意的变化。请用客观、简洁的语言描述。';
@@ -559,6 +565,8 @@ class SettingsController extends ChangeNotifier {
       enableVts: enableVts,
       enableScreenCapture: enableScreenCapture,
       screenCaptureInterval: screenCaptureInterval,
+      screenCaptureInjectInterval: screenCaptureInjectInterval,
+      screenCaptureIdleSeconds: screenCaptureIdleSeconds,
       screenAnalysisPrompt: screenAnalysisPrompt,
       screenInjectionPrompt: screenInjectionPrompt,
       enableBrowser: enableBrowser,
@@ -790,6 +798,18 @@ class SettingsController extends ChangeNotifier {
   Future<void> setScreenCaptureInterval(int v) async {
     _settings = _settings.copyWith(screenCaptureInterval: v);
     await _prefs.setInt(_kScreenCaptureInterval, v);
+    notifyListeners();
+  }
+
+  Future<void> setScreenCaptureInjectInterval(int v) async {
+    _settings = _settings.copyWith(screenCaptureInjectInterval: v);
+    await _prefs.setInt(_kScreenCaptureInjectInterval, v);
+    notifyListeners();
+  }
+
+  Future<void> setScreenCaptureIdleSeconds(int v) async {
+    _settings = _settings.copyWith(screenCaptureIdleSeconds: v);
+    await _prefs.setInt(_kScreenCaptureIdleSeconds, v);
     notifyListeners();
   }
 

@@ -413,6 +413,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
+  // ignore: unused_element
   Future<void> _sendHeadfulQuickMessage(BuildContext context) async {
     final message = headfulQuickTextController.text.trim();
     if (message.isEmpty) {
@@ -559,6 +560,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
+  // ignore: unused_element
   Future<void> _sendHeadfulActionJson(BuildContext context) async {
     final raw = headfulActionController.text.trim();
     if (raw.isEmpty) {
@@ -611,6 +613,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
+  // ignore: unused_element
   Future<void> _sendHeadfulSkill(
     BuildContext context,
     String skill, {
@@ -738,8 +741,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   }
 
   double _clampPitch(double pitch) {
-    final clamped = pitch.clamp(-90.0, 90.0);
-    return clamped is num ? clamped.toDouble() : pitch;
+    return pitch.clamp(-90.0, 90.0).toDouble();
   }
 
   String _formatHeadfulPlanAction(dynamic action) {
@@ -888,6 +890,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     );
   }
 
+  // ignore: unused_element
   Future<void> _sendHeadfulLookDelta(BuildContext context, double deltaYaw, double deltaPitch) async {
     final baseYaw = _stateNumber('yaw', 0);
     final basePitch = _stateNumber('pitch', 0);
@@ -900,6 +903,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     });
   }
 
+  // ignore: unused_element
   Future<void> _sendHeadfulLookSmoothDelta(
     BuildContext context,
     double deltaYaw,
@@ -985,6 +989,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
           );
         }
 
+        // ignore: unused_element
         Widget buildHeadfulPlanSummary(BuildContext context) {
           final plan = _headfulPlan;
           final goal = plan?['goal']?.toString() ?? '--';

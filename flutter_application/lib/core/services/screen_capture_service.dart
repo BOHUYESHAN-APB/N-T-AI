@@ -15,23 +15,32 @@ class ScreenCaptureService {
   ScreenCaptureService._internal();
 
   final LLMService _llmService = LLMService();
-  static const int _minIntervalSeconds = 10;
-  static const int _maxIntervalSeconds = 50;
+  static const int _randomMinIntervalSeconds = 10;
+  static const int _randomMaxIntervalSeconds = 50;
   static const double _meanIntervalSeconds = 20.0;
   static const double _stdDevIntervalSeconds = 8.0;
+  static const int _minFixedIntervalSeconds = 5;
   final Random _rng = Random();
   Timer? _timer;
   bool _isProcessing = false;
   bool _enabled = false;
 
-  // Callback to inject the awareness message into the current session
+  // Callback to deliver the raw screen description
   Function(String description)? onAwarenessGenerated;
 
   void start(AppSettings settings) {
     stop();
     if (!settings.enableScreenCapture) return;
     _enabled = true;
-    logger.info('ScreenCaptureService started with random interval: ${_minIntervalSeconds}s-${_maxIntervalSeconds}s');
+    if (settings.screenCaptureInterval > 0) {
+      logger.info(
+        'ScreenCaptureService started with fixed interval: ${settings.screenCaptureInterval}s',
+      );
+    } else {
+      logger.info(
+        'ScreenCaptureService started with random interval: ${_randomMinIntervalSeconds}s-${_randomMaxIntervalSeconds}s',
+      );
+    }
     _scheduleNext(settings);
   }
 
@@ -44,7 +53,7 @@ class ScreenCaptureService {
 
   void _scheduleNext(AppSettings settings) {
     if (!_enabled) return;
-    final delaySeconds = _nextIntervalSeconds();
+    final delaySeconds = _nextIntervalSeconds(settings);
     logger.info('Next screen capture in ${delaySeconds.toStringAsFixed(1)}s');
     _timer = Timer(
       Duration(milliseconds: (delaySeconds * 1000).round()),
@@ -52,10 +61,25 @@ class ScreenCaptureService {
     );
   }
 
-  double _nextIntervalSeconds() {
+  double _nextIntervalSeconds(AppSettings settings) {
+    final fixed = settings.screenCaptureInterval;
+    if (fixed > 0) {
+      final clamped = fixed < _minFixedIntervalSeconds
+          ? _minFixedIntervalSeconds
+          : fixed;
+      return clamped.toDouble();
+    }
+    return _nextRandomIntervalSeconds();
+  }
+
+  double _nextRandomIntervalSeconds() {
     final value = _gaussian(_meanIntervalSeconds, _stdDevIntervalSeconds);
-    if (value < _minIntervalSeconds) return _minIntervalSeconds.toDouble();
-    if (value > _maxIntervalSeconds) return _maxIntervalSeconds.toDouble();
+    if (value < _randomMinIntervalSeconds) {
+      return _randomMinIntervalSeconds.toDouble();
+    }
+    if (value > _randomMaxIntervalSeconds) {
+      return _randomMaxIntervalSeconds.toDouble();
+    }
     return value;
   }
 
@@ -83,14 +107,6 @@ class ScreenCaptureService {
     return '$base\n\n[直播解说要求]: 语气可幽默夸张，突出节目效果，保持简洁。\n$modeHint';
   }
 
-  String _buildScreenInjectionPrompt(AppSettings settings) {
-    final base = settings.screenInjectionPrompt;
-    if (settings.primaryMode != PrimaryModeOption.live) {
-      return base;
-    }
-    return '$base（直播）';
-  }
-
   Future<void> _captureAndAnalyze(AppSettings settings) async {
     if (_isProcessing) return;
     _isProcessing = true;
@@ -111,6 +127,15 @@ class ScreenCaptureService {
         
         logger.info('Screenshot captured, size: ${imageBytes.length} bytes. Analyzing...');
 
+        String? providerOverride = settings.activeVisionProviderId;
+        if (settings.useMainVisionIfCapable) {
+          final mainVisionCapable =
+              await _llmService.isActiveModelVisionCapable();
+          if (mainVisionCapable) {
+            providerOverride = null;
+          }
+        }
+
         // Call vision model
         final description = await _llmService.chatWithImage(
           messages: [
@@ -119,13 +144,11 @@ class ScreenCaptureService {
           imageBytes: imageBytes,
           prompt: '请分析这张屏幕截图。',
           usageType: 'vision',
-          providerIdOverride: settings.activeVisionProviderId, // Use vision specific provider if configured
+          providerIdOverride: providerOverride,
         );
 
         if (description.isNotEmpty && onAwarenessGenerated != null) {
-          final injectedMessage =
-              '${_buildScreenInjectionPrompt(settings)}\n$description';
-          onAwarenessGenerated!(injectedMessage);
+          onAwarenessGenerated!(description);
         }
         
         // Clean up

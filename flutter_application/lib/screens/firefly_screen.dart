@@ -60,6 +60,11 @@ class _FireflyScreenState extends State<FireflyScreen> {
   bool _minecraftSummaryInFlight = false;
   static const int _maxMessagesInMemory = 400;
   bool _scrollToBottomScheduled = false;
+  static const int _maxPendingAwareness = 6;
+  final List<String> _pendingAwareness = [];
+  Timer? _awarenessFlushTimer;
+  DateTime? _lastAwarenessInjectedAt;
+  DateTime? _lastUserActivityAt;
 
   // Multi-session state
   List<ChatSession> _sessions = [];
@@ -105,7 +110,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
     _screenCaptureService.onAwarenessGenerated = (description) {
       if (mounted && _currentSessionId != null) {
-        _injectAwarenessMessage(description);
+        _queueAwareness(description);
       }
     };
 
@@ -278,6 +283,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
 
     final settings = SettingsScope.of(context).settings;
     final learningOverride = _resolveLearningProbabilityOverride(settings);
+    _recordUserActivity();
 
     setState(() {
       _isLoading = true;
@@ -510,6 +516,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       _screenCaptureService.start(settings);
     } else {
       _screenCaptureService.stop();
+      _clearAwarenessQueue();
     }
     // logToFile("FireflyScreen.didChangeDependencies completed");
   }
@@ -561,8 +568,131 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
+  void _recordUserActivity() {
+    _lastUserActivityAt = DateTime.now();
+  }
+
+  String _buildScreenInjectionPrefix(AppSettings settings) {
+    final base = settings.screenInjectionPrompt;
+    if (settings.primaryMode != PrimaryModeOption.live) {
+      return base;
+    }
+    return '$base（直播）';
+  }
+
+  String _compactAwarenessSummaries(List<String> items) {
+    final cleaned = items
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (cleaned.isEmpty) return '';
+    final List<String> deduped = [];
+    String? last;
+    for (final entry in cleaned) {
+      if (entry == last) continue;
+      deduped.add(entry);
+      last = entry;
+    }
+    const maxItems = 3;
+    final selected = deduped.length > maxItems
+        ? deduped.sublist(deduped.length - maxItems)
+        : deduped;
+    return selected.join('; ');
+  }
+
+  DateTime _nextAwarenessInjectTime(AppSettings settings, DateTime now) {
+    var next = now;
+    final idleSeconds = settings.screenCaptureIdleSeconds;
+    if (idleSeconds > 0 && _lastUserActivityAt != null) {
+      final readyAt = _lastUserActivityAt!.add(
+        Duration(seconds: idleSeconds),
+      );
+      if (readyAt.isAfter(next)) {
+        next = readyAt;
+      }
+    }
+    final injectInterval = settings.screenCaptureInjectInterval;
+    if (injectInterval > 0 && _lastAwarenessInjectedAt != null) {
+      final readyAt = _lastAwarenessInjectedAt!.add(
+        Duration(seconds: injectInterval),
+      );
+      if (readyAt.isAfter(next)) {
+        next = readyAt;
+      }
+    }
+    return next;
+  }
+
+  void _queueAwareness(String description) {
+    final trimmed = description.trim();
+    if (trimmed.isEmpty) return;
+    _pendingAwareness.add(trimmed);
+    if (_pendingAwareness.length > _maxPendingAwareness) {
+      _pendingAwareness.removeRange(
+        0,
+        _pendingAwareness.length - _maxPendingAwareness,
+      );
+    }
+    _scheduleAwarenessFlush();
+  }
+
+  void _scheduleAwarenessFlush() {
+    if (!mounted || _pendingAwareness.isEmpty) return;
+    _awarenessFlushTimer?.cancel();
+    _awarenessFlushTimer = null;
+    final settings = SettingsScope.of(context).settings;
+    final now = DateTime.now();
+    if (_isLoading) {
+      _awarenessFlushTimer = Timer(const Duration(seconds: 2), () {
+        _awarenessFlushTimer = null;
+        _flushAwarenessIfReady();
+      });
+      return;
+    }
+    final nextAllowed = _nextAwarenessInjectTime(settings, now);
+    final delay =
+        nextAllowed.isAfter(now) ? nextAllowed.difference(now) : Duration.zero;
+    if (delay == Duration.zero) {
+      _flushAwarenessIfReady();
+      return;
+    }
+    _awarenessFlushTimer = Timer(delay, () {
+      _awarenessFlushTimer = null;
+      _flushAwarenessIfReady();
+    });
+  }
+
+  void _flushAwarenessIfReady() {
+    if (!mounted || _pendingAwareness.isEmpty) return;
+    final settings = SettingsScope.of(context).settings;
+    if (_isLoading) {
+      _scheduleAwarenessFlush();
+      return;
+    }
+    final now = DateTime.now();
+    final nextAllowed = _nextAwarenessInjectTime(settings, now);
+    if (nextAllowed.isAfter(now)) {
+      _scheduleAwarenessFlush();
+      return;
+    }
+    final summary = _compactAwarenessSummaries(_pendingAwareness);
+    _pendingAwareness.clear();
+    if (summary.isEmpty) return;
+    _lastAwarenessInjectedAt = now;
+    final injected =
+        '${_buildScreenInjectionPrefix(settings)}\n$summary';
+    _injectAwarenessMessage(injected);
+  }
+
+  void _clearAwarenessQueue() {
+    _awarenessFlushTimer?.cancel();
+    _awarenessFlushTimer = null;
+    _pendingAwareness.clear();
+  }
+
   void _injectAwarenessMessage(String content) {
     if (_currentSessionId == null) return;
+    _lastAwarenessInjectedAt = DateTime.now();
 
     final newMessage = {
       'role': 'system',
@@ -776,6 +906,7 @@ ${capped.map((e) => '- $e').join('\n')}
     _scrollController.dispose();
     _focusNode.dispose();
     _floatingControlsHideTimer?.cancel(); // Added back just in case
+    _awarenessFlushTimer?.cancel();
     _autoMicRecorder.dispose();
     super.dispose();
   }
@@ -1364,6 +1495,7 @@ ${capped.map((e) => '- $e').join('\n')}
     final text = _controller.text.trim();
     if (text.isEmpty && _pendingImageBytes == null) return;
     if (_currentSessionId == null) await _createNewSession();
+    _recordUserActivity();
 
     setState(() {
       // Explicitly cast to Map<String, dynamic> to match _messages definition

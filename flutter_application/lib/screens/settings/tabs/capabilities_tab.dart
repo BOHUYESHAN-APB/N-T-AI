@@ -268,9 +268,11 @@ class CapabilitiesTab extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('截取间隔'),
+                            const Text('截取间隔（秒）'),
                             Text(
-                              '随机 10–50 秒（偏左正态）',
+                              settings.screenCaptureInterval > 0
+                                  ? '当前: ${settings.screenCaptureInterval}s'
+                                  : '随机 10–50 秒（偏左正态）',
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.outline,
                                 fontSize: 12,
@@ -278,7 +280,80 @@ class CapabilitiesTab extends StatelessWidget {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: TextEditingController(
+                            text: settings.screenCaptureInterval.toString(),
+                          ),
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '输入截取间隔（0=随机）',
+                            border: OutlineInputBorder(),
+                          ),
+                          onSubmitted: (v) {
+                            final parsed = int.tryParse(v.trim());
+                            if (parsed == null) return;
+                            controller.setScreenCaptureInterval(parsed);
+                          },
+                        ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('注入间隔（秒）'),
+                            Text(
+                              '当前: ${settings.screenCaptureInjectInterval}s',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.outline,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: TextEditingController(
+                            text: settings.screenCaptureInjectInterval.toString(),
+                          ),
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '输入注入间隔（建议 30/60 秒）',
+                            border: OutlineInputBorder(),
+                          ),
+                          onSubmitted: (v) {
+                            final parsed = int.tryParse(v.trim());
+                            if (parsed == null) return;
+                            controller.setScreenCaptureInjectInterval(parsed);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: TextEditingController(
+                        text: settings.screenCaptureIdleSeconds.toString(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: '空闲注入阈值（秒，0=不限制）',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (v) {
+                        final parsed = int.tryParse(v.trim());
+                        if (parsed == null) return;
+                        controller.setScreenCaptureIdleSeconds(parsed);
+                      },
                     ),
                   ),
                   const SizedBox(height: 12),

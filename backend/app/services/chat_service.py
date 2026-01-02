@@ -1154,6 +1154,17 @@ class ChatService:
                     append_log(f"[main-brain] minecraft_command failed: {res}")
                 return f"Failed to send task to Minecraft AI: {res}"
 
+            async def linux_exec_tool() -> str:
+                command = kwargs.get("command")
+                if not command:
+                    return "Error: Missing 'command' argument."
+                from app.plugins import get_plugin
+                linux = get_plugin("linux_env")
+                if not linux:
+                    return "Error: Linux environment plugin not found."
+                result = await linux.execute_command(command)
+                return json.dumps(result, ensure_ascii=False)
+
             tool_map = {
                 "web_search": web_search_tool,
                 "visit_page": visit_page_tool,
@@ -1162,6 +1173,7 @@ class ChatService:
                 "generate_doc": generate_doc_tool,
                 "generate_sheet": generate_sheet_tool,
                 "play_minecraft": play_minecraft_tool,
+                "linux_exec": linux_exec_tool,
             }
 
             tool = tool_map.get(tool_name)

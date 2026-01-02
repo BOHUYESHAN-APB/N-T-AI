@@ -413,7 +413,7 @@ class BackendService {
         final content = await serverInfoFile.readAsString();
         final info = jsonDecode(content);
         final url = info['url'] as String;
-        final allowDynamicPort = !kDebugMode;
+        const allowDynamicPort = !kDebugMode;
         final portOk = (() {
           try {
             final u = Uri.parse(url);
