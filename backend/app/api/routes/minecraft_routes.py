@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from app.services.live2d_service import manager
+from app.services.system_state import system_state
 from app.core.logger import logger
 
 import httpx
@@ -23,6 +24,17 @@ class HeadfulActionRequest(BaseModel):
 class HeadfulSkillRequest(BaseModel):
     skill: str
     params: Optional[Dict[str, Any]] = None
+
+class MinecraftCommandRequest(BaseModel):
+    goal: str
+    sender: Optional[str] = "frontend"
+    interrupt_current: Optional[bool] = False
+    llm_api_key: Optional[str] = None
+    llm_base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+    embedding_model: Optional[str] = None
 
 @router.post("/config")
 async def update_minecraft_config(request_data: Dict[str, Any]):
@@ -168,10 +180,16 @@ async def send_message_to_agent(req: SendMessageRequest):
         raise HTTPException(status_code=404, detail="Minecraft plugin not found")
     # headful 模式下通过 WS 直连模组
     if getattr(plugin, "control_mode", "headless") == "headful":
+        try:
+            routed = await plugin.handle_frontend_chat(req.message, sender=req.sender or "frontend")
+        except Exception as exc:
+            logger.error(f"Headful frontend chat routing failed: {exc}")
+            routed = False
+        if routed:
+            return {"status": "ok", "routed": "headful_chat"}
         ok = await plugin.send_headful_message(req.message)
         if ok:
-            plan_ok = await plugin.handle_frontend_chat(req.message, sender=req.sender or "frontend")
-            return {"status": "ok", "plan_ok": plan_ok}
+            return {"status": "ok", "routed": "game_chat"}
         raise HTTPException(status_code=502, detail="Failed to send headful message")
     ms_port = plugin.config.get("mindserver_port", 8080)
     url = f"http://localhost:{ms_port}/api/send-message"
@@ -185,6 +203,59 @@ async def send_message_to_agent(req: SendMessageRequest):
     except Exception as e:
         logger.error(f"Failed to send message to MindServer: {e}")
         raise HTTPException(status_code=502, detail=str(e))
+
+@router.post("/command")
+async def send_agent_command(req: MinecraftCommandRequest, request: Request):
+    """
+    直接向 Minecraft Agent 发送指令，绕过主脑调度。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+
+    payload: Dict[str, Any] = {
+        "goal": req.goal,
+        "sender": req.sender or "frontend",
+        "source": "agent-direct",
+    }
+    if req.interrupt_current:
+        payload["interrupt_current"] = True
+    llm_api_key = request.headers.get("X-Target-Api-Key") or req.llm_api_key
+    llm_base_url = request.headers.get("X-Target-Base-Url") or req.llm_base_url
+    llm_model = request.headers.get("X-Target-Model") or req.llm_model
+    embedding_api_key = request.headers.get("X-Embedding-Api-Key") or req.embedding_api_key
+    embedding_base_url = request.headers.get("X-Embedding-Base-Url") or req.embedding_base_url
+    embedding_model = request.headers.get("X-Embedding-Model") or req.embedding_model
+    if embedding_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+        embedding_api_key = None
+    if embedding_api_key or embedding_base_url or embedding_model:
+        existing_embedding = system_state.get_state("embedding_config") or {}
+        updated_embedding = dict(existing_embedding)
+        if embedding_api_key:
+            updated_embedding["api_key"] = embedding_api_key
+        if embedding_base_url:
+            updated_embedding["base_url"] = embedding_base_url
+        if embedding_model:
+            updated_embedding["model"] = embedding_model
+        system_state.update_state("embedding_config", updated_embedding)
+
+    if llm_api_key:
+        payload["llm_api_key"] = llm_api_key
+    if llm_base_url:
+        payload["llm_base_url"] = llm_base_url
+    if llm_model:
+        payload["llm_model"] = llm_model
+    if embedding_api_key:
+        payload["embedding_api_key"] = embedding_api_key
+    if embedding_base_url:
+        payload["embedding_base_url"] = embedding_base_url
+    if embedding_model:
+        payload["embedding_model"] = embedding_model
+
+    res = await plugin.handle_event("minecraft_command", payload)
+    if res and res.get("status") == "received":
+        return {"status": "ok", "queued": res.get("queued")}
+    raise HTTPException(status_code=500, detail=res or {"error": "send_failed"})
 
 @router.post("/headful_action")
 async def send_headful_action(req: HeadfulActionRequest):
@@ -217,6 +288,9 @@ async def run_headful_skill(req: HeadfulSkillRequest, request: Request):
     llm_model = request.headers.get("X-Target-Model")
     llm_provider_id = request.headers.get("X-Target-Provider-Id")
     llm_require_frontend = request.headers.get("X-LLM-Require-Frontend")
+    embedding_api_key = request.headers.get("X-Embedding-Api-Key")
+    embedding_base_url = request.headers.get("X-Embedding-Base-Url")
+    embedding_model = request.headers.get("X-Embedding-Model")
     if llm_api_key:
         params["llm_api_key"] = llm_api_key
     if llm_base_url:
@@ -227,6 +301,12 @@ async def run_headful_skill(req: HeadfulSkillRequest, request: Request):
         params["llm_provider_id"] = llm_provider_id
     if llm_require_frontend:
         params["llm_require_frontend"] = llm_require_frontend
+    if embedding_api_key:
+        params["embedding_api_key"] = embedding_api_key
+    if embedding_base_url:
+        params["embedding_base_url"] = embedding_base_url
+    if embedding_model:
+        params["embedding_model"] = embedding_model
     result = await plugin.run_headful_skill(req.skill, params)
     encoded = jsonable_encoder(result)
     if result.get("ok"):

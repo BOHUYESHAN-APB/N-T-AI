@@ -22,11 +22,15 @@ class MemoryCreate(BaseModel):
     content: str
     category: str = "other"
     weight: float = 1.0
+    scope: str = "long_term"
+    source: Optional[str] = None
 
 class MemoryUpdate(BaseModel):
     content: Optional[str] = None
     category: Optional[str] = None
     weight: Optional[float] = None
+    scope: Optional[str] = None
+    source: Optional[str] = None
 
 class MemoryRebuildRequest(BaseModel):
     user_id: Optional[str] = None
@@ -41,10 +45,19 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 @router.get("/v1/memory/all")
-async def get_all_memories(limit: int = 20):
+async def get_all_memories(
+    limit: int = 20,
+    user_id: Optional[str] = None,
+    scope: Optional[str] = None,
+):
     """Endpoint for dashboard to fetch memories"""
     with Session(engine) as session:
-        statement = select(MemoryPoint, Person.user_id).join(Person).order_by(MemoryPoint.created_at.desc()).limit(limit)
+        statement = select(MemoryPoint, Person.user_id).join(Person)
+        if user_id:
+            statement = statement.where(Person.user_id == user_id)
+        if scope:
+            statement = statement.where(MemoryPoint.scope == scope)
+        statement = statement.order_by(MemoryPoint.created_at.desc()).limit(limit)
         results = session.exec(statement).all()
         
         memories = []
@@ -54,12 +67,20 @@ async def get_all_memories(limit: int = 20):
                 "user_id": user_id,
                 "content": mp.content,
                 "category": mp.category,
+                "scope": mp.scope or "long_term",
+                "source": mp.source,
                 "created_at": mp.created_at.isoformat(),
             })
         return memories
 
 @router.get("/api/memories")
-async def get_memories(user_id: Optional[str] = None, category: Optional[str] = None, q: Optional[str] = None, limit: int = 500):
+async def get_memories(
+    user_id: Optional[str] = None,
+    category: Optional[str] = None,
+    scope: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 500,
+):
     with Session(engine) as session:
         # Join MemoryPoint with Person to get user_id
         statement = select(MemoryPoint, Person.user_id).join(Person)
@@ -67,6 +88,8 @@ async def get_memories(user_id: Optional[str] = None, category: Optional[str] = 
             statement = statement.where(Person.user_id == user_id)
         if category:
             statement = statement.where(MemoryPoint.category == category)
+        if scope:
+            statement = statement.where(MemoryPoint.scope == scope)
         statement = statement.order_by(MemoryPoint.created_at.desc())
         results = session.exec(statement).all()
 
@@ -89,6 +112,8 @@ async def get_memories(user_id: Optional[str] = None, category: Optional[str] = 
                 "user_id": user_id,
                 "content": mp.content,
                 "category": mp.category,
+                "scope": mp.scope or "long_term",
+                "source": mp.source,
                 "created_at": mp.created_at.isoformat(),
                 "weight": mp.weight,
                 "has_embedding": bool(mp.embedding),
@@ -238,6 +263,8 @@ async def create_memory(memory: MemoryCreate):
             category=memory.category,
             weight=memory.weight,
             embedding=embedding_json,
+            scope=memory.scope or "long_term",
+            source=memory.source,
         )
         session.add(mp)
         session.commit()
@@ -258,6 +285,8 @@ async def create_memory(memory: MemoryCreate):
         "user_id": memory.user_id,
         "content": mp.content,
         "category": mp.category,
+        "scope": mp.scope or "long_term",
+        "source": mp.source,
         "weight": mp.weight,
         "created_at": mp.created_at.isoformat(),
     }
@@ -281,6 +310,10 @@ async def update_memory(memory_id: int, memory: MemoryUpdate):
             mp.category = memory.category
         if memory.weight is not None:
             mp.weight = memory.weight
+        if memory.scope is not None:
+            mp.scope = memory.scope
+        if memory.source is not None:
+            mp.source = memory.source
         
         session.add(mp)
         session.commit()
@@ -312,6 +345,8 @@ async def update_memory(memory_id: int, memory: MemoryUpdate):
         "user_id": person.user_id if person else "unknown",
         "content": mp.content,
         "category": mp.category,
+        "scope": mp.scope or "long_term",
+        "source": mp.source,
         "weight": mp.weight,
         "created_at": mp.created_at.isoformat(),
     }
@@ -403,6 +438,7 @@ class PersonUpdate(BaseModel):
     nickname: Optional[str] = None
     assistant_name: Optional[str] = None
     system_prompt: Optional[str] = None
+    role: Optional[str] = None
 
 @router.get("/v1/person/all")
 async def get_all_persons(limit: int = 50):
@@ -427,6 +463,8 @@ async def update_person(user_id: str, person: PersonUpdate):
             db_person.assistant_name = person.assistant_name
         if person.system_prompt is not None:
             db_person.system_prompt = person.system_prompt
+        if person.role is not None:
+            db_person.role = person.role
             
         session.add(db_person)
         session.commit()

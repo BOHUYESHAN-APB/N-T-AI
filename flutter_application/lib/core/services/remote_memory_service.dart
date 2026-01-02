@@ -7,6 +7,8 @@ class RemoteMemory {
   final String userId;
   final String content;
   final String category;
+  final String scope;
+  final String? source;
   final double weight;
   final DateTime createdAt;
 
@@ -15,6 +17,8 @@ class RemoteMemory {
     required this.userId,
     required this.content,
     required this.category,
+    required this.scope,
+    this.source,
     required this.weight,
     required this.createdAt,
   });
@@ -25,6 +29,8 @@ class RemoteMemory {
       userId: json['user_id'] as String? ?? 'unknown',
       content: json['content'] as String? ?? '',
       category: json['category'] as String? ?? 'other',
+      scope: json['scope'] as String? ?? 'long_term',
+      source: json['source'] as String?,
       weight: (json['weight'] as num?)?.toDouble() ?? 1.0,
       createdAt:
           DateTime.tryParse(json['created_at'] as String? ?? '') ??
@@ -65,6 +71,7 @@ class RemotePerson {
   final String? nickname;
   final String? assistantName;
   final String? systemPrompt;
+  final String? role;
   final int knowTimes;
   final DateTime? createdAt;
 
@@ -74,6 +81,7 @@ class RemotePerson {
     this.nickname,
     this.assistantName,
     this.systemPrompt,
+    this.role,
     this.knowTimes = 0,
     this.createdAt,
   });
@@ -85,6 +93,7 @@ class RemotePerson {
       nickname: json['nickname'] as String?,
       assistantName: json['assistant_name'] as String?,
       systemPrompt: json['system_prompt'] as String?,
+      role: json['role'] as String?,
       knowTimes: json['know_times'] as int? ?? 0,
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
@@ -107,9 +116,22 @@ class RemoteMemoryService {
         : baseUrl;
   }
 
-  Future<List<RemoteMemory>> fetchMemories({int limit = 50}) async {
+  Future<List<RemoteMemory>> fetchMemories({
+    int limit = 50,
+    String? scope,
+    String? userId,
+  }) async {
     final base = await _requireBackendUrl();
-    final uri = Uri.parse('$base/v1/memory/all?limit=$limit');
+    final queryParams = <String, String>{
+      'limit': '$limit',
+    };
+    if (scope != null && scope.trim().isNotEmpty) {
+      queryParams['scope'] = scope.trim();
+    }
+    if (userId != null && userId.trim().isNotEmpty) {
+      queryParams['user_id'] = userId.trim();
+    }
+    final uri = Uri.parse('$base/v1/memory/all').replace(queryParameters: queryParams);
     final resp = await http.get(uri);
     if (resp.statusCode != 200) {
       throw Exception('拉取记忆失败: ${resp.body}');
@@ -124,6 +146,8 @@ class RemoteMemoryService {
     required String userId,
     required String content,
     String category = 'other',
+    String scope = 'long_term',
+    String? source,
     double weight = 1.0,
   }) async {
     final base = await _requireBackendUrl();
@@ -135,6 +159,8 @@ class RemoteMemoryService {
         'user_id': userId,
         'content': content,
         'category': category,
+        'scope': scope,
+        if (source != null) 'source': source,
         'weight': weight,
       }),
     );
@@ -150,6 +176,8 @@ class RemoteMemoryService {
     required int id,
     String? content,
     String? category,
+    String? scope,
+    String? source,
     double? weight,
   }) async {
     final base = await _requireBackendUrl();
@@ -160,6 +188,8 @@ class RemoteMemoryService {
       body: jsonEncode({
         if (content != null) 'content': content,
         if (category != null) 'category': category,
+        if (scope != null) 'scope': scope,
+        if (source != null) 'source': source,
         if (weight != null) 'weight': weight,
       }),
     );
@@ -277,6 +307,7 @@ class RemoteMemoryService {
     String? nickname,
     String? assistantName,
     String? systemPrompt,
+    String? role,
   }) async {
     final base = await _requireBackendUrl();
     final uri = Uri.parse('$base/v1/person/$userId');
@@ -287,6 +318,7 @@ class RemoteMemoryService {
         if (nickname != null) 'nickname': nickname,
         if (assistantName != null) 'assistant_name': assistantName,
         if (systemPrompt != null) 'system_prompt': systemPrompt,
+        if (role != null) 'role': role,
       }),
     );
     if (resp.statusCode != 200) {

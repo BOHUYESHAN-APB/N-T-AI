@@ -27,6 +27,7 @@ class Person(SQLModel, table=True):
     nickname: Optional[str] = None
     assistant_name: Optional[str] = None
     system_prompt: Optional[str] = None
+    role: Optional[str] = Field(default="user")  # user/self_agent/system_doc
     know_times: int = Field(default=0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -37,6 +38,8 @@ class MemoryPoint(SQLModel, table=True):
     category: str
     weight: float = Field(default=1.0)
     embedding: Optional[str] = None # JSON string of List[float]
+    scope: Optional[str] = Field(default="long_term")  # long_term/scene/knowledge/mc_headful/mc_headless
+    source: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Jargon(SQLModel, table=True):
@@ -82,6 +85,29 @@ def _migrate_sqlite_person_columns() -> None:
             stmts.append("ALTER TABLE person ADD COLUMN assistant_name VARCHAR")
         if "system_prompt" not in cols:
             stmts.append("ALTER TABLE person ADD COLUMN system_prompt TEXT")
+        if "role" not in cols:
+            stmts.append("ALTER TABLE person ADD COLUMN role VARCHAR")
+        if not stmts:
+            return
+        with engine.begin() as conn:
+            for stmt in stmts:
+                conn.exec_driver_sql(stmt)
+    except Exception:
+        return
+
+def _migrate_sqlite_memorypoint_columns() -> None:
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    try:
+        insp = inspect(engine)
+        if "memorypoint" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("memorypoint")}
+        stmts: list[str] = []
+        if "scope" not in cols:
+            stmts.append("ALTER TABLE memorypoint ADD COLUMN scope VARCHAR")
+        if "source" not in cols:
+            stmts.append("ALTER TABLE memorypoint ADD COLUMN source VARCHAR")
         if not stmts:
             return
         with engine.begin() as conn:
@@ -93,3 +119,4 @@ def _migrate_sqlite_person_columns() -> None:
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
     _migrate_sqlite_person_columns()
+    _migrate_sqlite_memorypoint_columns()

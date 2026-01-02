@@ -1,7 +1,9 @@
 import os
 import json
 import logging
+import asyncio
 import httpx
+import time
 from typing import Any, Dict, Optional
 from ..base import BasePlugin
 from app.services.live2d_service import manager as live2d_manager
@@ -53,6 +55,16 @@ class MinecraftMindcraftPlugin(BasePlugin):
             config_provider=lambda: self.config,
             alert_callback=self._notify_main_brain,
         )
+        self._headful_task_queue: asyncio.Queue = asyncio.Queue()
+        self._headful_task_worker: Optional[asyncio.Task] = None
+        self._headful_task_active = False
+        self._headful_task_current: Optional[Dict[str, Any]] = None
+        self._headful_paused_tasks: list[Dict[str, Any]] = []
+        self._headful_autonomy_task: Optional[asyncio.Task] = None
+        self._headful_manual_override_until = 0.0
+        self._headful_manual_override_reason: Optional[str] = None
+        self._headful_last_command: Optional[Dict[str, Any]] = None
+        self._headful_state_label: Optional[str] = None
 
     @property
     def id(self) -> str:
@@ -69,9 +81,135 @@ class MinecraftMindcraftPlugin(BasePlugin):
     def _append_log(self, line: str) -> None:
         if not line:
             return
-        self.logs.append(line)
+        for part in str(line).splitlines():
+            if not part:
+                continue
+            self.logs.append(part)
         if len(self.logs) > 500:
             self.logs.pop(0)
+
+    def _ensure_headful_task_worker(self) -> None:
+        if self._headful_task_worker is None or self._headful_task_worker.done():
+            self._headful_task_worker = asyncio.create_task(self._run_headful_task_queue())
+
+    async def _run_headful_task_queue(self) -> None:
+        while True:
+            if (
+                self._headful_task_queue.empty()
+                and self._headful_paused_tasks
+                and not self._headful_manual_override_active()
+            ):
+                paused = self._headful_paused_tasks.pop(0)
+                await self._headful_task_queue.put(paused)
+                self._append_log(f"[headful-queue] resume paused: {paused.get('goal')}")
+            task = await self._headful_task_queue.get()
+            if not isinstance(task, dict):
+                self._headful_task_queue.task_done()
+                continue
+            await self._wait_for_manual_override_clear()
+            goal = task.get("goal") or ""
+            params = task.get("params") or {}
+            source = task.get("source") or "main-brain"
+            sender = task.get("sender") or ""
+            self._headful_task_active = True
+            self._headful_task_current = task
+            self._refresh_headful_state_label()
+            self._append_log(f"[headful-queue] start {source} {sender}: {goal}")
+            try:
+                result = await self._headful_inventory.run("plan_execute", params)
+                if not result.get("ok"):
+                    self._append_log(f"[headful-queue] failed: {result.get('error')}")
+                else:
+                    self._append_log(f"[headful-queue] done: {goal}")
+            except Exception as exc:
+                self._append_log(f"[headful-queue] exception: {exc}")
+            finally:
+                self._headful_task_active = False
+                self._headful_task_current = None
+                self._headful_task_queue.task_done()
+                self._refresh_headful_state_label()
+
+    def _ensure_headful_autonomy_worker(self) -> None:
+        if self._headful_autonomy_task is None or self._headful_autonomy_task.done():
+            self._headful_autonomy_task = asyncio.create_task(
+                self._run_headful_autonomy_loop()
+            )
+
+    async def _run_headful_autonomy_loop(self) -> None:
+        while True:
+            cfg = self._headful_chat_config()
+            try:
+                interval = float(cfg.get("autonomy_tick_interval_sec", 1.0))
+            except (TypeError, ValueError):
+                interval = 1.0
+            if interval < 0.5:
+                interval = 0.5
+            await asyncio.sleep(interval)
+            if self.control_mode != "headful" or not self.is_active:
+                continue
+            if not self.headful_ready:
+                continue
+            if not bool(cfg.get("autonomy_enabled", False)):
+                continue
+            if self._headful_manual_override_active():
+                continue
+            if self._headful_task_active or self._headful_task_queue.qsize() > 0:
+                continue
+            try:
+                result = await self._headful_inventory.run("autonomy_tick", {})
+                if isinstance(result, dict) and result.get("error"):
+                    if result.get("error") not in {"screen_open", "autonomy_disabled"}:
+                        self._append_log(f"[autonomy] {result.get('error')}")
+            except Exception as exc:
+                self._append_log(f"[autonomy] exception: {exc}")
+
+    async def _enqueue_headful_task(
+        self,
+        goal: str,
+        params: Dict[str, Any],
+        source: str,
+        sender: str,
+    ) -> Dict[str, Any]:
+        cfg = self._headful_chat_config()
+        interrupt_current = bool(params.get("interrupt_current", False))
+        if not interrupt_current:
+            interrupt_current = bool(cfg.get("interrupt_on_new_command", False))
+        if (
+            interrupt_current
+            and self._headful_task_active
+            and isinstance(self._headful_task_current, dict)
+        ):
+            paused = dict(self._headful_task_current)
+            paused["paused_at"] = time.time()
+            paused["paused_by"] = {"source": source, "sender": sender, "goal": goal}
+            self._headful_paused_tasks.append(paused)
+            await self._headful_inventory.cancel_current()
+            self._append_log(f"[headful-queue] paused current task: {paused.get('goal')}")
+        await self._headful_task_queue.put(
+            {"goal": goal, "params": params, "source": source, "sender": sender}
+        )
+        self._ensure_headful_task_worker()
+        self._refresh_headful_state_label()
+        return {
+            "queued": True,
+            "queue_length": self._headful_task_queue.qsize(),
+        }
+
+    async def cancel_headful_tasks(self) -> Dict[str, Any]:
+        cleared = 0
+        while True:
+            try:
+                self._headful_task_queue.get_nowait()
+                self._headful_task_queue.task_done()
+                cleared += 1
+            except asyncio.QueueEmpty:
+                break
+        self._headful_paused_tasks.clear()
+        self._headful_task_current = None
+        cancel_result = await self._headful_inventory.cancel_current()
+        self._append_log(f"[headful-queue] cancel requested, cleared={cleared}")
+        self._refresh_headful_state_label()
+        return {"ok": True, "cleared": cleared, "cancelled": cancel_result.get("ok")}
 
     def _set_ms_auth_code(self, code: str | None) -> None:
         self.ms_auth_code = code
@@ -85,9 +223,74 @@ class MinecraftMindcraftPlugin(BasePlugin):
     def _set_headful_state(self, state: Dict[str, Any] | None) -> None:
         self._headful_last_state = state
 
+    def _headful_manual_override_active(self) -> bool:
+        return time.time() < self._headful_manual_override_until
+
+    async def _wait_for_manual_override_clear(self) -> None:
+        while self._headful_manual_override_active():
+            await asyncio.sleep(0.25)
+
     def _headful_chat_config(self) -> Dict[str, Any]:
         cfg = self.config.get("headful", {})
         return cfg if isinstance(cfg, dict) else {}
+
+    def _compute_headful_state_label(self) -> str:
+        if self._headful_manual_override_active():
+            return "manual"
+        if self._headful_task_active:
+            return "running"
+        if self._headful_task_queue.qsize() > 0:
+            return "queued"
+        if self._headful_paused_tasks:
+            return "paused"
+        return "idle"
+
+    def _refresh_headful_state_label(self) -> None:
+        label = self._compute_headful_state_label()
+        if label != self._headful_state_label:
+            self._headful_state_label = label
+            self._append_log(f"[headful-state] {label}")
+
+    def _build_headful_status(self) -> Dict[str, Any]:
+        state = self._headful_last_state or {}
+        screen = getattr(self._headful, "last_screen", None) or {}
+        queue_length = self._headful_task_queue.qsize()
+        paused_count = len(self._headful_paused_tasks)
+        manual_active = self._headful_manual_override_active()
+        task_state = "idle"
+        if self._headful_task_active:
+            task_state = "running"
+        elif queue_length > 0:
+            task_state = "queued"
+        elif paused_count > 0:
+            task_state = "paused"
+        current = self._headful_task_current or {}
+        position = None
+        try:
+            position = {
+                "x": float(state.get("x")),
+                "y": float(state.get("y")),
+                "z": float(state.get("z")),
+                "dimension": state.get("dimension"),
+            }
+        except (TypeError, ValueError):
+            position = None
+        return {
+            "control": "manual" if manual_active else "ai",
+            "manual_reason": self._headful_manual_override_reason,
+            "manual_until": self._headful_manual_override_until if manual_active else None,
+            "focused": state.get("focused"),
+            "task_state": task_state,
+            "current_goal": current.get("goal"),
+            "current_source": current.get("source"),
+            "current_sender": current.get("sender"),
+            "queue_length": queue_length,
+            "paused_count": paused_count,
+            "screen_open": screen.get("screenOpen"),
+            "screen_title": screen.get("title"),
+            "position": position,
+            "last_command": self._headful_last_command,
+        }
 
     def _chat_sender_allowed(self, sender: str, cfg: Dict[str, Any]) -> bool:
         whitelist = cfg.get("chat_whitelist", [])
@@ -126,41 +329,125 @@ class MinecraftMindcraftPlugin(BasePlugin):
         source: str,
         is_self: bool = False,
     ) -> bool:
-        cfg = self._headful_chat_config()
-        if not cfg.get("chat_plan_enabled", False):
+        goal = self._prepare_chat_goal(message, sender, source, is_self=is_self)
+        if not goal:
             return False
-        if source == "game" and not cfg.get("chat_plan_game", True):
-            return False
-        if source == "frontend" and not cfg.get("chat_plan_frontend", True):
-            return False
-        if is_self and cfg.get("chat_ignore_self", True):
-            return False
-        if source == "game" and not self._chat_sender_allowed(sender, cfg):
-            return False
-        message = (message or "").strip()
-        if not message:
-            return False
-        prefixed = self._apply_chat_prefix(message, cfg)
-        if prefixed is None or not prefixed.strip():
-            return False
-        goal = prefixed.strip()
         params: Dict[str, Any] = {"goal": goal}
         rag_user_id = self.config.get("rag_user_id") or self.config.get("agent_name")
         if rag_user_id:
             params["rag_user_id"] = rag_user_id
+        cfg = self._headful_chat_config()
         if "chat_use_rag" in cfg:
             params["use_rag"] = bool(cfg.get("chat_use_rag"))
         if "chat_use_mindcraft_docs" in cfg:
             params["use_mindcraft_docs"] = bool(cfg.get("chat_use_mindcraft_docs"))
-        self._append_log(f"Headful chat plan ({source}) {sender}: {goal}")
-        result = await self._headful_inventory.run("plan_execute", params)
-        if not result.get("ok"):
-            self._append_log(f"Headful chat plan failed: {result.get('error')}")
+        if self._chat_plan_mode(cfg) == "direct":
+            params["planner_mode"] = "rules_only"
+        self._append_log(f"Headful chat queued ({source}) {sender}: {goal}")
+        await self._enqueue_headful_task(goal, params, source=source, sender=sender)
+        return True
+
+    def _prepare_chat_goal(
+        self,
+        message: str,
+        sender: str,
+        source: str,
+        is_self: bool = False,
+    ) -> Optional[str]:
+        cfg = self._headful_chat_config()
+        if not cfg.get("chat_plan_enabled", False):
+            return None
+        if source == "game" and not cfg.get("chat_plan_game", True):
+            return None
+        if source == "frontend" and not cfg.get("chat_plan_frontend", True):
+            return None
+        if is_self and cfg.get("chat_ignore_self", True):
+            return None
+        if source == "game" and not self._chat_sender_allowed(sender, cfg):
+            return None
+        message = (message or "").strip()
+        if not message:
+            return None
+        prefixed = self._apply_chat_prefix(message, cfg)
+        if prefixed is None or not prefixed.strip():
+            return None
+        return prefixed.strip()
+
+    def _chat_plan_mode(self, cfg: Dict[str, Any]) -> str:
+        raw = cfg.get("chat_plan_mode", "main_brain")
+        if isinstance(raw, str):
+            mode = raw.strip().lower()
+            if mode in {"main_brain", "brain"}:
+                return "main_brain"
+            if mode in {"direct", "plugin"}:
+                return "direct"
+        return "main_brain"
+
+    async def _forward_chat_to_main_brain(
+        self,
+        message: str,
+        sender: str,
+        source: str,
+        is_self: bool = False,
+    ) -> bool:
+        goal = self._prepare_chat_goal(message, sender, source, is_self=is_self)
+        if not goal:
             return False
+        cfg = self._headful_chat_config()
+        prefix = cfg.get("chat_brain_prefix", "【MC】")
+        source_label = "游戏" if source == "game" else "前端" if source == "frontend" else source
+        header = f"{prefix}{source_label}"
+        if sender:
+            header += f"/{sender}: "
+        else:
+            header += ": "
+        payload = header + goal
+        self._append_log(f"[main-brain] forward {source_label} {sender}: {goal}")
+        user_id = cfg.get("chat_brain_user_id") or "minecraft_chat"
+        from app.services.chat_service import ChatService
+
+        chat_service = ChatService()
+        await chat_service.process_message(
+            message=payload,
+            user_id=user_id,
+            enable_search=False,
+            enable_backend_tts=False,
+            tts_mode="sentence",
+        )
         return True
 
     async def _handle_headful_event(self, payload: Dict[str, Any]) -> None:
         event = payload.get("event")
+        if event == "manual_control":
+            cfg = self._headful_chat_config()
+            if not bool(cfg.get("manual_override_enabled", True)):
+                return
+            active = bool(payload.get("active", False))
+            reason = str(payload.get("reason") or "")
+            if active:
+                timeout = cfg.get("manual_override_timeout_sec", 10.0)
+                try:
+                    timeout = float(timeout)
+                except (TypeError, ValueError):
+                    timeout = 10.0
+                until_ms = payload.get("until_ms")
+                if isinstance(until_ms, (int, float)) and until_ms > 0:
+                    until_sec = float(until_ms) / 1000.0
+                else:
+                    until_sec = time.time() + max(timeout, 1.0)
+                if until_sec > self._headful_manual_override_until:
+                    self._headful_manual_override_until = until_sec
+                self._headful_manual_override_reason = reason or "manual_input"
+                await self._headful_inventory.cancel_current()
+                self._append_log(
+                    f"[manual] active reason={self._headful_manual_override_reason} until={self._headful_manual_override_until:.1f}"
+                )
+            else:
+                self._headful_manual_override_until = 0.0
+                self._headful_manual_override_reason = None
+                self._append_log("[manual] released")
+            self._refresh_headful_state_label()
+            return
         if event != "chat":
             return
         if self.control_mode != "headful":
@@ -168,12 +455,21 @@ class MinecraftMindcraftPlugin(BasePlugin):
         message = payload.get("message") or payload.get("text") or ""
         sender = payload.get("sender") or payload.get("senderName") or ""
         is_self = bool(payload.get("self", False))
-        await self._maybe_plan_from_chat(
-            str(message),
-            str(sender),
-            source="game",
-            is_self=is_self,
-        )
+        cfg = self._headful_chat_config()
+        if self._chat_plan_mode(cfg) == "main_brain":
+            await self._forward_chat_to_main_brain(
+                str(message),
+                str(sender),
+                source="game",
+                is_self=is_self,
+            )
+        else:
+            await self._maybe_plan_from_chat(
+                str(message),
+                str(sender),
+                source="game",
+                is_self=is_self,
+            )
 
     async def setup(self):
         """初始化插件配置，从本地 settings.json 加载"""
@@ -205,12 +501,46 @@ class MinecraftMindcraftPlugin(BasePlugin):
                     "chat_plan_enabled": True,
                     "chat_plan_game": True,
                     "chat_plan_frontend": True,
+                    "chat_plan_mode": "main_brain",
+                    "chat_plan_fallback_direct": True,
                     "chat_ignore_self": True,
                     "chat_whitelist": [],
                     "chat_command_prefixes": [],
                     "chat_strip_prefix": True,
                     "chat_use_rag": True,
-                    "chat_use_mindcraft_docs": True
+                    "chat_use_mindcraft_docs": True,
+                    "chat_brain_prefix": "【MC】",
+                    "chat_brain_user_id": "minecraft_chat",
+                    "manual_override_enabled": True,
+                    "manual_override_timeout_sec": 10.0,
+                    "auto_open_crafting_table": True,
+                    "auto_gather_base_items": True,
+                    "auto_collect_from_containers": True,
+                    "auto_gather_radius": 12,
+                    "container_interact_distance": 2.0,
+                    "workstation_interact_distance": 2.0,
+                    "dig_area_max_blocks": 512,
+                    "dig_attack_ms": 1200,
+                    "dig_distance": 3.2,
+                    "dig_move_timeout": 4.0,
+                    "dig_look_duration_ms": 160,
+                    "dig_step_delay_ms": 80,
+                    "dig_progress_every": 20,
+                    "autonomy_enabled": True,
+                    "autonomy_tick_interval_sec": 1.0,
+                    "autonomy_guard": True,
+                    "autonomy_gather": True,
+                    "autonomy_look_players": True,
+                    "autonomy_idle_look": True,
+                    "autonomy_patrol": True,
+                    "autonomy_harvest_crops": True,
+                    "autonomy_harvest_mature_only": True,
+                    "autonomy_guard_interval_sec": 2.0,
+                    "autonomy_gather_interval_sec": 18.0,
+                    "autonomy_harvest_interval_sec": 10.0,
+                    "autonomy_patrol_interval_sec": 8.0,
+                    "autonomy_patrol_radius": 4.0,
+                    "autonomy_patrol_distance": 2.5
                 }
             }
             try:
@@ -246,12 +576,46 @@ class MinecraftMindcraftPlugin(BasePlugin):
                             "chat_plan_enabled": True,
                             "chat_plan_game": True,
                             "chat_plan_frontend": True,
+                            "chat_plan_mode": "main_brain",
+                            "chat_plan_fallback_direct": True,
                             "chat_ignore_self": True,
                             "chat_whitelist": [],
                             "chat_command_prefixes": [],
                             "chat_strip_prefix": True,
                             "chat_use_rag": True,
-                            "chat_use_mindcraft_docs": True
+                            "chat_use_mindcraft_docs": True,
+                            "chat_brain_prefix": "【MC】",
+                            "chat_brain_user_id": "minecraft_chat",
+                            "manual_override_enabled": True,
+                            "manual_override_timeout_sec": 10.0,
+                            "auto_open_crafting_table": True,
+                            "auto_gather_base_items": True,
+                            "auto_collect_from_containers": True,
+                            "auto_gather_radius": 12,
+                            "container_interact_distance": 2.0,
+                            "workstation_interact_distance": 2.0,
+                            "dig_area_max_blocks": 512,
+                            "dig_attack_ms": 1200,
+                            "dig_distance": 3.2,
+                            "dig_move_timeout": 4.0,
+                            "dig_look_duration_ms": 160,
+                            "dig_step_delay_ms": 80,
+                            "dig_progress_every": 20,
+                            "autonomy_enabled": True,
+                            "autonomy_tick_interval_sec": 1.0,
+                            "autonomy_guard": True,
+                            "autonomy_gather": True,
+                            "autonomy_look_players": True,
+                            "autonomy_idle_look": True,
+                            "autonomy_patrol": True,
+                            "autonomy_harvest_crops": True,
+                            "autonomy_harvest_mature_only": True,
+                            "autonomy_guard_interval_sec": 2.0,
+                            "autonomy_gather_interval_sec": 18.0,
+                            "autonomy_harvest_interval_sec": 10.0,
+                            "autonomy_patrol_interval_sec": 8.0,
+                            "autonomy_patrol_radius": 4.0,
+                            "autonomy_patrol_distance": 2.5
                         }
                     }
                     loaded_headful = loaded_config.get("headful")
@@ -300,6 +664,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
             ok = await self._headful.activate(self.config.get("headful", {}))
             if not ok:
                 self.is_active = False
+            else:
+                self._ensure_headful_autonomy_worker()
             logger.info(f"[{self.name}] 以 headful 模式启动，尝试连接模组 WS。")
             return ok
         
@@ -317,6 +683,13 @@ class MinecraftMindcraftPlugin(BasePlugin):
         """停止插件进程"""
         mode = self.config.get("control_mode", "headless")
         if mode == "headful":
+            if self._headful_autonomy_task is not None:
+                self._headful_autonomy_task.cancel()
+                try:
+                    await self._headful_autonomy_task
+                except Exception:
+                    pass
+                self._headful_autonomy_task = None
             await self._headful.deactivate()
             self.is_active = False
             self.headful_ready = False
@@ -428,7 +801,11 @@ class MinecraftMindcraftPlugin(BasePlugin):
         if self.control_mode != "headful":
             return {"ok": False, "error": "not_headful"}
         try:
-            return await self._headful_inventory.run(skill, params or {})
+            skill_name = (skill or "").strip().lower()
+            if skill_name in {"cancel", "cancel_current", "abort"}:
+                return await self.cancel_headful_tasks()
+            result = await self._headful_inventory.run(skill, params or {})
+            return self._headful_inventory.serialize_result(result)
         except Exception as exc:
             logger.exception("[Minecraft-mindcraft] Headful skill failed: %s", skill)
             self._append_log(f"Headful skill exception: {exc}")
@@ -442,8 +819,29 @@ class MinecraftMindcraftPlugin(BasePlugin):
         if not goal:
             return {"status": "error", "error": "missing_goal"}
         sender = payload.get("sender") or "main-brain"
+        source = payload.get("source") or "main-brain"
         if self.control_mode == "headful":
             params: Dict[str, Any] = {"goal": str(goal)}
+            if payload.get("interrupt_current"):
+                params["interrupt_current"] = True
+            llm_api_key = payload.get("llm_api_key")
+            llm_base_url = payload.get("llm_base_url")
+            llm_model = payload.get("llm_model")
+            embedding_api_key = payload.get("embedding_api_key")
+            embedding_base_url = payload.get("embedding_base_url")
+            embedding_model = payload.get("embedding_model")
+            if llm_api_key:
+                params["llm_api_key"] = llm_api_key
+            if llm_base_url:
+                params["llm_base_url"] = llm_base_url
+            if llm_model:
+                params["llm_model"] = llm_model
+            if embedding_api_key:
+                params["embedding_api_key"] = embedding_api_key
+            if embedding_base_url:
+                params["embedding_base_url"] = embedding_base_url
+            if embedding_model:
+                params["embedding_model"] = embedding_model
             rag_user_id = self.config.get("rag_user_id") or self.config.get("agent_name")
             if rag_user_id:
                 params["rag_user_id"] = rag_user_id
@@ -452,12 +850,36 @@ class MinecraftMindcraftPlugin(BasePlugin):
                 params["use_rag"] = bool(cfg.get("chat_use_rag"))
             if "chat_use_mindcraft_docs" in cfg:
                 params["use_mindcraft_docs"] = bool(cfg.get("chat_use_mindcraft_docs"))
-            self._append_log(f"[main-brain] command: {goal}")
-            result = await self._headful_inventory.run("plan_execute", params)
-            if not result.get("ok"):
-                self._append_log(f"[main-brain] command failed: {result.get('error')}")
-                return {"status": "error", "detail": result}
-            return {"status": "received", "result": result}
+            llm_configured = bool(llm_api_key or llm_base_url or llm_model)
+            embedding_configured = bool(embedding_api_key or embedding_base_url or embedding_model)
+            self._headful_last_command = {
+                "goal": str(goal),
+                "source": source,
+                "sender": sender,
+                "llm_model": llm_model,
+                "embedding_model": embedding_model,
+                "use_rag": params.get("use_rag"),
+                "use_mindcraft_docs": params.get("use_mindcraft_docs"),
+                "interrupt_current": bool(payload.get("interrupt_current")),
+                "llm_configured": llm_configured,
+                "embedding_configured": embedding_configured,
+                "timestamp": time.time(),
+            }
+            self._append_log(f"[{source}] command: {goal}")
+            self._append_log(
+                "[agent-payload] "
+                f"llm_model={llm_model or '-'} embedding_model={embedding_model or '-'} "
+                f"use_rag={params.get('use_rag')} use_docs={params.get('use_mindcraft_docs')} "
+                f"interrupt={bool(payload.get('interrupt_current'))} "
+                f"llm_cfg={llm_configured} emb_cfg={embedding_configured}"
+            )
+            queued = await self._enqueue_headful_task(
+                str(goal),
+                params,
+                source=source,
+                sender=sender,
+            )
+            return {"status": "received", "queued": queued}
 
         ms_port = self.config.get("mindserver_port", 8080)
         url = f"http://localhost:{ms_port}/api/send-message"
@@ -477,6 +899,25 @@ class MinecraftMindcraftPlugin(BasePlugin):
     async def handle_frontend_chat(self, message: str, sender: str = "frontend") -> bool:
         if self.control_mode != "headful":
             return False
+        cfg = self._headful_chat_config()
+        if self._chat_plan_mode(cfg) == "main_brain":
+            try:
+                return await self._forward_chat_to_main_brain(
+                    message,
+                    sender,
+                    source="frontend",
+                    is_self=False,
+                )
+            except Exception as exc:
+                self._append_log(f"[main-brain] forward failed: {exc}")
+                if cfg.get("chat_plan_fallback_direct", True):
+                    return await self._maybe_plan_from_chat(
+                        message,
+                        sender,
+                        source="frontend",
+                        is_self=False,
+                    )
+                return False
         return await self._maybe_plan_from_chat(
             message,
             sender,
@@ -497,6 +938,9 @@ class MinecraftMindcraftPlugin(BasePlugin):
             "headful_state": self._headful_last_state,
             "headful_screen": getattr(self._headful, "last_screen", None),
             "headful_plan": getattr(self._headful_inventory, "last_plan", None),
+            "headful_queue_length": self._headful_task_queue.qsize(),
+            "headful_task_active": self._headful_task_active,
+            "headful_status": self._build_headful_status(),
         }
 
 def get_plugin():

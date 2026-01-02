@@ -212,6 +212,16 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
     target_api_key = raw_request.headers.get("X-Target-Api-Key")
     target_base_url = raw_request.headers.get("X-Target-Base-Url")
     target_model = raw_request.headers.get("X-Target-Model")
+    if target_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+        target_api_key = None
+
+    embedding_config = system_state.get_state("embedding_config") or {}
+    if not target_api_key and embedding_config.get("api_key"):
+        target_api_key = embedding_config.get("api_key")
+    if not target_base_url and embedding_config.get("base_url"):
+        target_base_url = embedding_config.get("base_url")
+    if not target_model and embedding_config.get("model"):
+        target_model = embedding_config.get("model")
     
     # Logic to apply inherited config
     if target_api_key == "sk-ntai-internal" or target_model == "main-brain":
@@ -227,7 +237,7 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
                 # Check if it's a known chat-only model
                 if "chat" in main_model.lower() or "instruct" in main_model.lower() or "deepseek" in main_model.lower():
                     # Use a default embedding model instead
-                    target_model = settings.LLM_EMBEDDING_MODEL
+                    target_model = embedding_config.get("model") or settings.LLM_EMBEDDING_MODEL
                     logger.info(f"Main brain model {main_model} is likely a chat model. Using default embedding model {target_model} instead.")
                 else:
                     target_model = main_model
@@ -242,7 +252,7 @@ async def create_embeddings(request: EmbeddingRequest, raw_request: Request):
             if not target_base_url or "127.0.0.1:23456" in target_base_url:
                 target_base_url = settings.OPENAI_BASE_URL
             if not target_model or target_model == "main-brain":
-                target_model = settings.LLM_EMBEDDING_MODEL
+                target_model = embedding_config.get("model") or settings.LLM_EMBEDDING_MODEL
             logger.warning("No main_brain_config found for embedding, falling back to environment settings")
 
     # Fallback: Authorization: Bearer <key>
@@ -442,8 +452,21 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     embedding_api_key = raw_request.headers.get("X-Embedding-Api-Key")
     embedding_base_url = raw_request.headers.get("X-Embedding-Base-Url")
     embedding_model = raw_request.headers.get("X-Embedding-Model")
+    if embedding_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+        embedding_api_key = None
     disable_memory_header = raw_request.headers.get("X-Disable-Memory", "false")
     disable_memory = disable_memory_header.lower() in ["true", "1", "yes"]
+
+    if embedding_api_key or embedding_base_url or embedding_model:
+        existing_embedding = system_state.get_state("embedding_config") or {}
+        updated_embedding = dict(existing_embedding)
+        if embedding_api_key:
+            updated_embedding["api_key"] = embedding_api_key
+        if embedding_base_url:
+            updated_embedding["base_url"] = embedding_base_url
+        if embedding_model:
+            updated_embedding["model"] = embedding_model
+        system_state.update_state("embedding_config", updated_embedding)
     
     # Logic to inherit "Main Brain" config
     usage_type = raw_request.headers.get("X-Usage-Type", "main")
@@ -528,6 +551,32 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     
     # Extract Session ID
     session_id = raw_request.headers.get("X-Session-Id")
+    scene_context = raw_request.headers.get("X-Scene-Context")
+    if scene_context:
+        try:
+            scene_context = unquote(scene_context)
+        except Exception:
+            pass
+    scene_tasks = None
+    scene_tasks_raw = raw_request.headers.get("X-Scene-Tasks")
+    if scene_tasks_raw:
+        try:
+            decoded = unquote(scene_tasks_raw)
+        except Exception:
+            decoded = scene_tasks_raw
+        try:
+            parsed = json.loads(decoded)
+            if isinstance(parsed, list):
+                scene_tasks = [str(x) for x in parsed if str(x).strip()]
+            elif isinstance(parsed, str):
+                scene_tasks = [s.strip() for s in parsed.splitlines() if s.strip()]
+        except Exception:
+            scene_tasks = [s.strip() for s in decoded.splitlines() if s.strip()]
+    scene_ttl_header = raw_request.headers.get("X-Scene-Ttl")
+    try:
+        scene_ttl_sec = float(scene_ttl_header) if scene_ttl_header else None
+    except Exception:
+        scene_ttl_sec = None
 
     # Extract Vision Agent Config
     vision_api_key = raw_request.headers.get("X-Vision-Api-Key")
@@ -636,6 +685,9 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                         embedding_api_key=embedding_api_key,
                         embedding_base_url=embedding_base_url,
                         embedding_model=embedding_model,
+                        scene_context=scene_context,
+                        scene_tasks=scene_tasks,
+                        scene_ttl_sec=scene_ttl_sec,
                         disable_memory=disable_memory,
                         tts_api_key=tts_api_key,
                         tts_base_url=tts_base_url,
@@ -679,6 +731,9 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 embedding_api_key=embedding_api_key,
                 embedding_base_url=embedding_base_url,
                 embedding_model=embedding_model,
+                scene_context=scene_context,
+                scene_tasks=scene_tasks,
+                scene_ttl_sec=scene_ttl_sec,
                 tts_api_key=tts_api_key,
                 tts_base_url=tts_base_url,
                 tts_voice=tts_voice,

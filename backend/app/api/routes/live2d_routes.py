@@ -650,6 +650,18 @@ async def schedule_chat(request: ScheduleChatRequest, raw_request: Request):
     embedding_api_key = raw_request.headers.get("X-Embedding-Api-Key") or request.embedding_api_key
     embedding_base_url = raw_request.headers.get("X-Embedding-Base-Url") or request.embedding_base_url
     embedding_model = raw_request.headers.get("X-Embedding-Model") or request.embedding_model
+    if embedding_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+        embedding_api_key = None
+    if embedding_api_key or embedding_base_url or embedding_model:
+        existing_embedding = system_state.get_state("embedding_config") or {}
+        updated_embedding = dict(existing_embedding)
+        if embedding_api_key:
+            updated_embedding["api_key"] = embedding_api_key
+        if embedding_base_url:
+            updated_embedding["base_url"] = embedding_base_url
+        if embedding_model:
+            updated_embedding["model"] = embedding_model
+        system_state.update_state("embedding_config", updated_embedding)
     require_frontend = raw_request.headers.get("X-LLM-Require-Frontend")
     if require_frontend:
         require_frontend = require_frontend.strip().lower() in {"1", "true", "yes", "on"}

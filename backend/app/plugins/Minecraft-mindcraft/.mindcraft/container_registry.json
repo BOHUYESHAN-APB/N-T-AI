@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "containers": {
+    "minecraft:overworld:-82:62:-80": {
+      "x": -82,
+      "y": 62,
+      "z": -80,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767357661.4030228,
+      "last_open": 1767357661.4030228,
+      "items": {
+        "deepslate_brick_wall": 2,
+        "cooked_beef": 2,
+        "golden_horse_armor": 1,
+        "leaf_litter": 128,
+        "oak_fence": 6,
+        "lava_bucket": 1,
+        "birch_sapling": 2,
+        "arrow": 2,
+        "bucket": 1,
+        "andesite": 8,
+        "dirt": 227,
+        "redstone_block": 1,
+        "brick": 51,
+        "flow_banner_pattern": 1,
+        "wooden_pickaxe": 1,
+        "stone_bricks": 3,
+        "golden_sword": 1,
+        "deepslate_bricks": 28,
+        "cobbled_deepslate": 24,
+        "birch_log": 12,
+        "spruce_stairs": 2,
+        "crafting_table": 1,
+        "oak_log": 28,
+        "lever": 1,
+        "trial_key": 4,
+        "oak_sapling": 2,
+        "spruce_slab": 5,
+        "cobblestone": 281,
+        "glass": 5,
+        "polished_andesite": 5,
+        "spruce_planks": 1,
+        "copper_bulb": 54,
+        "ladder": 4
+      }
+    },
+    "minecraft:overworld:-81:62:-80": {
+      "x": -81,
+      "y": 62,
+      "z": -80,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767357660.9279482
+    },
+    "minecraft:overworld:-81:63:-80": {
+      "x": -81,
+      "y": 63,
+      "z": -80,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767357660.9279482
+    },
+    "minecraft:overworld:-82:59:-82": {
+      "x": -82,
+      "y": 59,
+      "z": -82,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767357660.9279482
+    },
+    "minecraft:overworld:-82:58:-82": {
+      "x": -82,
+      "y": 58,
+      "z": -82,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:furnace",
+      "last_seen": 1767357660.9279482
+    },
+    "minecraft:overworld:-82:59:-83": {
+      "x": -82,
+      "y": 59,
+      "z": -83,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767357660.9279482
+    }
+  },
+  "updated_at": 1767357661.4040227
+}

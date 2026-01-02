@@ -59,6 +59,12 @@ class _RemoteMemoryManagerScreenState extends State<RemoteMemoryManagerScreen> {
     final categoryController = TextEditingController(
       text: memory?.category ?? 'other',
     );
+    final scopeController = TextEditingController(
+      text: memory?.scope ?? 'long_term',
+    );
+    final sourceController = TextEditingController(
+      text: memory?.source ?? '',
+    );
     final weightController = TextEditingController(
       text: (memory?.weight ?? 1.0).toString(),
     );
@@ -78,6 +84,14 @@ class _RemoteMemoryManagerScreenState extends State<RemoteMemoryManagerScreen> {
               TextField(
                 controller: categoryController,
                 decoration: const InputDecoration(labelText: '类别'),
+              ),
+              TextField(
+                controller: scopeController,
+                decoration: const InputDecoration(labelText: '范围 (scope)'),
+              ),
+              TextField(
+                controller: sourceController,
+                decoration: const InputDecoration(labelText: '来源 (source)'),
               ),
               TextField(
                 controller: weightController,
@@ -111,11 +125,15 @@ class _RemoteMemoryManagerScreenState extends State<RemoteMemoryManagerScreen> {
 
     try {
       final weight = double.tryParse(weightController.text) ?? 1.0;
+      final scopeValue = scopeController.text.trim();
+      final sourceValue = sourceController.text.trim();
       if (memory == null) {
         await _service.createMemory(
           userId: userController.text.trim(),
           content: contentController.text.trim(),
           category: categoryController.text.trim(),
+          scope: scopeValue.isNotEmpty ? scopeValue : 'long_term',
+          source: sourceValue.isNotEmpty ? sourceValue : null,
           weight: weight,
         );
       } else {
@@ -123,6 +141,8 @@ class _RemoteMemoryManagerScreenState extends State<RemoteMemoryManagerScreen> {
           id: memory.id,
           content: contentController.text.trim(),
           category: categoryController.text.trim(),
+          scope: scopeValue.isNotEmpty ? scopeValue : null,
+          source: sourceValue.isNotEmpty ? sourceValue : null,
           weight: weight,
         );
       }
@@ -220,8 +240,10 @@ class _RemoteMemoryManagerScreenState extends State<RemoteMemoryManagerScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '用户: ${memory.userId} | 类别: ${memory.category} | 权重: ${memory.weight.toStringAsFixed(1)}',
+                            '用户: ${memory.userId} | 类别: ${memory.category} | 范围: ${memory.scope} | 权重: ${memory.weight.toStringAsFixed(1)}',
                           ),
+                          if (memory.source != null && memory.source!.isNotEmpty)
+                            Text('来源: ${memory.source}'),
                           Text('创建: ${_dateFormat.format(memory.createdAt)}'),
                         ],
                       ),

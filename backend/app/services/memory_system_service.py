@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 from sqlmodel import Session, select
+from sqlalchemy import or_
 from app.core.config import settings
 from app.models.database import engine, ThinkingBack, MemoryPoint, Person
 from app.services.llm_service import LLMService
@@ -35,6 +36,7 @@ class MemorySystemService:
         embedding_api_key: str = None,
         embedding_base_url: str = None,
         embedding_model: str = None,
+        scopes: list[str] | None = None,
         light_context: str | None = None,
         fast_mode: bool = False,
     ) -> str:
@@ -62,6 +64,7 @@ class MemorySystemService:
                 embedding_api_key=embedding_api_key,
                 embedding_base_url=embedding_base_url,
                 embedding_model=embedding_model,
+                scopes=scopes,
             )
         if light_context:
             context_results.append(light_context)
@@ -172,6 +175,7 @@ class MemorySystemService:
         embedding_api_key: str = None,
         embedding_base_url: str = None,
         embedding_model: str = None,
+        scopes: list[str] | None = None,
         limit: int = 5,
     ) -> str:
         hits = await self.search_relevant_memories(
@@ -182,6 +186,7 @@ class MemorySystemService:
             embedding_api_key=embedding_api_key,
             embedding_base_url=embedding_base_url,
             embedding_model=embedding_model,
+            scopes=scopes,
             limit=limit,
             threshold=0.72,
         )
@@ -198,6 +203,7 @@ class MemorySystemService:
         embedding_api_key: str = None,
         embedding_base_url: str = None,
         embedding_model: str = None,
+        scopes: list[str] | None = None,
         limit: int = 5,
         threshold: float = 0.72,
     ):
@@ -212,7 +218,8 @@ class MemorySystemService:
         if not query_embedding:
             return []
 
-        if self._vector_backend == "http" and self._vector_http_url:
+        normalized_scopes = self._normalize_scopes(scopes)
+        if self._vector_backend == "http" and self._vector_http_url and not normalized_scopes:
             hits = await self._search_relevant_memories_http(
                 query_embedding=query_embedding,
                 user_id=user_id,
@@ -232,6 +239,16 @@ class MemorySystemService:
                 .where(Person.user_id == user_id)
                 .order_by(MemoryPoint.created_at.desc())
             )
+            if normalized_scopes:
+                if "long_term" in normalized_scopes:
+                    statement = statement.where(
+                        or_(
+                            MemoryPoint.scope == None,  # noqa: E711
+                            MemoryPoint.scope.in_(normalized_scopes),
+                        )
+                    )
+                else:
+                    statement = statement.where(MemoryPoint.scope.in_(normalized_scopes))
             results = session.exec(statement).all()
 
         if not results:
@@ -253,6 +270,10 @@ class MemorySystemService:
         for mp, uid in filtered:
             if not mp.embedding:
                 continue
+            if normalized_scopes:
+                scope = mp.scope or "long_term"
+                if scope not in normalized_scopes:
+                    continue
             try:
                 mem_emb = json.loads(mp.embedding)
                 cosine = self._cosine_similarity(query_embedding, mem_emb)
@@ -299,6 +320,7 @@ class MemorySystemService:
         embedding_api_key: str = None,
         embedding_base_url: str = None,
         embedding_model: str = None,
+        scopes: list[str] | None = None,
     ):
         user_query = (user_query or "").strip()
         user_id = (user_id or "").strip()
@@ -328,6 +350,7 @@ class MemorySystemService:
                 embedding_api_key=embedding_api_key,
                 embedding_base_url=embedding_base_url,
                 embedding_model=embedding_model,
+                scopes=scopes,
             )
         )
 
@@ -465,6 +488,7 @@ class MemorySystemService:
         embedding_api_key: str = None,
         embedding_base_url: str = None,
         embedding_model: str = None,
+        scopes: list[str] | None = None,
     ) -> str:
         out = []
         vector_context = await self.retrieve_relevant_memories(
@@ -475,6 +499,7 @@ class MemorySystemService:
             embedding_api_key,
             embedding_base_url,
             embedding_model,
+            scopes=scopes,
         )
         if vector_context:
             out.append(vector_context)
@@ -482,6 +507,16 @@ class MemorySystemService:
         if external_context:
             out.append(external_context)
         return "\n".join([x for x in out if (x or "").strip()]).strip()
+
+    def _normalize_scopes(self, scopes: list[str] | None) -> list[str]:
+        if not scopes:
+            return []
+        normalized = []
+        for scope in scopes:
+            val = (scope or "").strip().lower()
+            if val:
+                normalized.append(val)
+        return list(dict.fromkeys(normalized))
 
     async def retrieve_external_knowledge(self, user_query: str, user_id: str, limit: int = 4) -> str:
         if self._knowledge_backend == "http" and self._knowledge_http_url:

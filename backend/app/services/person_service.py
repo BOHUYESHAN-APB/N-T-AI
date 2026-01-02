@@ -14,14 +14,18 @@ class PersonService:
         self._know_times_buffer: dict[str, int] = {}
 
     def get_or_create_person(self, user_id: str) -> Person:
-        with Session(engine) as session:
+        with Session(engine, expire_on_commit=False) as session:
             statement = select(Person).where(Person.user_id == user_id)
             person = session.exec(statement).first()
             if not person:
-                person = Person(user_id=user_id)
+                person = Person(user_id=user_id, role="user")
                 session.add(person)
                 session.commit()
                 session.refresh(person)
+            elif not getattr(person, "role", None):
+                person.role = "user"
+                session.add(person)
+                session.commit()
             return person
 
     def increment_know_times(self, user_id: str):
@@ -94,7 +98,32 @@ class PersonService:
                 session.add(person)
                 session.commit()
 
-    async def add_memory_point(self, user_id: str, content: str, category: str, weight: float = 1.0):
+    def upsert_role(self, user_id: str, role: str) -> None:
+        role = (role or "").strip()
+        if not role:
+            return
+        with Session(engine) as session:
+            statement = select(Person).where(Person.user_id == user_id)
+            person = session.exec(statement).first()
+            if not person:
+                person = Person(user_id=user_id, role=role)
+                session.add(person)
+                session.commit()
+                return
+            if getattr(person, "role", None) != role:
+                person.role = role
+                session.add(person)
+                session.commit()
+
+    async def add_memory_point(
+        self,
+        user_id: str,
+        content: str,
+        category: str,
+        weight: float = 1.0,
+        scope: str = "long_term",
+        source: str | None = None,
+    ):
         person = self.get_or_create_person(user_id)
         
         # Generate embedding
@@ -115,7 +144,9 @@ class PersonService:
                     content=content,
                     category=category,
                     weight=weight,
-                    embedding=embedding_json
+                    embedding=embedding_json,
+                    scope=scope,
+                    source=source,
                 )
                 session.add(mp)
                 session.commit()

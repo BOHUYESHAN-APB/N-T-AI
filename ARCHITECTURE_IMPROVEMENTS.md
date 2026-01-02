@@ -258,6 +258,87 @@ System-Level AI Functions (Draft, Internal)
 - Tool Orchestration: plan -> tool call -> validate -> refine.
 - Execution Sandbox: deterministic environment + resource isolation.
 - Memory & Retrieval: embeddings + retrieval + ranking.
+
+Minecraft Headful Agent 体系设计（统一版）
+目标与原则
+- Headful 为必备执行路径，Headless 作为可选 fallback；两者记忆与配置必须严格隔离。
+- Mod 只负责“上报状态 + 执行动作”，Agent 负责“组件编排 + 规划”，主脑只负责“指令调度 + 政策治理”。
+- 记忆必须分域：MC 相关记忆不得污染主脑人设记忆；知识型文档不得出现在人物记忆列表。
+- 自我身份必须明确：Firefly / 游戏 ID 为“自身”，不可被当作外部人物。
+
+角色与边界（Headful）
+- Fabric Mod（客户端）
+  - 上报：坐标、朝向、背包、快捷栏、生命、饥饿、维度、视野焦点、附近实体。
+  - 执行：移动、寻路、交互、攻击、背包/合成/容器操作、观察与视角控制。
+  - 不做：规划、记忆、RAG。
+- Minecraft Agent（后端 headful）
+  - 组件库 + 任务编排 + 状态快照管理 + 异常恢复。
+  - 仅依赖 Mod 能力，不绕开主脑下达的目标边界。
+- 主脑（后端 ChatService/ToolRegistry）
+  - 负责接收前端指令、选择工具、分发给 Agent。
+  - 负责全局策略：白名单、权限、节流、优先级。
+
+核心数据契约（草案）
+- MCStateSnapshot
+  - identity: {agent_name, player_id, session_id, dimension}
+  - pose: {x, y, z, yaw, pitch}
+  - vitals: {health, hunger, on_ground, swimming}
+  - inventory: {slots[], hotbar[], cursor}
+  - world: {time, nearby_entities[], block_feet, block_head, block_below}
+  - ui: {screen_open, screen_title, manual_override, focused}
+  - ts
+- MCActionRequest / MCActionResult
+  - action_type + params + trace_id + timeout_ms
+  - result: ok/error + state_delta
+
+组件化能力库（Agent 基础组件）
+- 感知组件：get_snapshot / find_block / find_player / scan_entities
+- 运动组件：move_to / pathfind_to / follow_player / look_at / pillar_up
+- 交互组件：use_block / use_target / attack / place_block / break_block
+- 背包组件：open_inventory / swap_slot / hotbar_select / equip / quick_move
+- 合成组件：craft_in_inventory / craft_with_table / smelt / fetch_from_container
+- 自主组件：patrol / guard / harvest_mature / idle_look
+
+任务编排（多步任务）
+- 任务被拆为“子目标 + 条件 + 组件调用”，由 Agent 组合执行。
+- 中断规则：玩家接管 -> 自动中断 -> 10 秒无输入自动回归 AI 控制。
+- 失败恢复：路径阻塞/材料不足/容器空 -> 转入搜索与采集子流程。
+
+示例流程：寻找玩家 A
+1) 主脑接收指令 -> 选择 MinecraftAgent tool -> 传入目标 A
+2) Agent 调用 find_player -> 若无定位，转 scan_entities + chat 询问
+3) 定位后调用 pathfind_to / follow_player
+4) 接近后触发 look_at + idle_look（可选）
+
+示例流程：合成钻石镐
+1) Agent 读取 snapshot -> 判断缺材料
+2) 缺材料：先查附近容器 -> 无则采集路线（木材/石头/铁/钻石）
+3) 自动放置/使用工作台 -> 逐级合成子部件
+4) 合成完成 -> 回写状态与结果
+
+记忆与身份隔离（重点）
+- 记忆分域（建议）：
+  - brain.user：主脑人设/用户偏好
+  - mc.headful：有头模式执行记忆
+  - mc.headless：无头模式执行记忆
+  - knowledge.docs：系统/插件文档与材料资料
+- RAG 检索必须带 scope 过滤，不允许跨域污染。
+- Mindcraft 文档/FAQ 必须进入 knowledge.docs，前端默认隐藏。
+- Person 列表需标注 role：self_user / self_agent / external_user / system_doc。
+
+身份映射与自我识别
+- player_id（来自 Mod）必须与 agent_name（配置）进行绑定。
+- Firefly 作为“自身玩家”，在人物列表中标为“自己”，避免与 default_user 混淆。
+- 当 chat 事件中 sender == player_id，标记 self=true，不进入外部人物记忆。
+
+前端记忆管理改造（目标态）
+- 增加“记忆域”筛选：个人 / MC-有头 / MC-无头 / 知识库。
+- 人物列表显示 role 标签（自己/用户/系统），默认隐藏系统知识项。
+- 记忆卡片展示 source 与 scope，避免“MC 文档”混入用户记忆页。
+
+嵌入式模型职责（定位）
+- 用于：材料/配方/任务相关检索、记忆向量化、知识库召回。
+- 不用于：主脑对话身份记忆写入（由主脑策略控制）。
 - Perception/Renderer: visual/audio rendering with explicit authority.
 - Governance: policy, permissions, audit logs, and rate limits.
 - Session Isolation: per-session config and state boundaries.

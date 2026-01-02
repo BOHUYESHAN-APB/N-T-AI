@@ -317,6 +317,19 @@ class LLMService {
       headers['X-Chat-Mode'] = chatMode;
       headers['X-Deep-Research'] = enableDeepResearch.toString();
       headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
+      final scenarioContext =
+          (prefs.getString('settings.scenario.context') ?? '').trim();
+      final scenarioTasks = prefs.getStringList('settings.scenario.tasks') ?? [];
+      if (scenarioContext.isNotEmpty) {
+        headers['X-Scene-Context'] = Uri.encodeComponent(scenarioContext);
+      }
+      final cleanedTasks = scenarioTasks
+          .map((t) => t.trim())
+          .where((t) => t.isNotEmpty)
+          .toList();
+      if (cleanedTasks.isNotEmpty) {
+        headers['X-Scene-Tasks'] = Uri.encodeComponent(jsonEncode(cleanedTasks));
+      }
       final learningProbability =
           learningProbabilityOverride ??
           prefs.getDouble('settings.user.learningProbability') ??

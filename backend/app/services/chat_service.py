@@ -12,6 +12,7 @@ from app.services.meme_service import MemeService
 from app.services.live2d_service import manager as live2d_manager
 from app.services.vts_service import vts_service
 from app.services.system_state import system_state
+from app.services.scene_memory_service import scene_memory_service
 from app.core.prompts import (
     FIREFLY_PERSONA_BASIC,
     FIREFLY_PERSONA_ADVANCED,
@@ -60,6 +61,7 @@ class ChatService:
         self.search_service = SearchService()
         self.audio_service = AudioService() # Initialize Audio Service
         self.meme_service = MemeService()
+        self.scene_memory = scene_memory_service
         self._initialized = True
 
     def _sanitize_text_for_tts(self, text: str) -> str:
@@ -226,6 +228,9 @@ class ChatService:
                             embedding_api_key: str = None,
                             embedding_base_url: str = None,
                             embedding_model: str = None,
+                            scene_context: Optional[str] = None,
+                            scene_tasks: Optional[List[str]] = None,
+                            scene_ttl_sec: Optional[float] = None,
                             tts_api_key: str = None,
                             tts_base_url: str = None,
                             tts_voice: str = None,
@@ -255,6 +260,15 @@ class ChatService:
         self.person_service.increment_know_times(user_id)
         if user_nickname or assistant_name or system_prompt_override:
             self.person_service.upsert_persona(user_id=user_id, nickname=user_nickname, assistant_name=assistant_name, system_prompt=system_prompt_override)
+
+        if scene_context or scene_tasks is not None:
+            self.scene_memory.update_scene(
+                session_id=session_id,
+                user_id=user_id,
+                context=scene_context,
+                tasks=scene_tasks,
+                ttl_sec=scene_ttl_sec,
+            )
         
         stored_person = self.person_service.get_or_create_person(user_id)
         effective_nickname = user_nickname or stored_person.nickname
@@ -290,6 +304,7 @@ class ChatService:
                     embedding_api_key,
                     embedding_base_url,
                     embedding_model,
+                    scopes=["long_term"],
                     fast_mode=True,
                 )
             except Exception as e:
@@ -298,6 +313,13 @@ class ChatService:
         # Build System Prompt (Simplified for the example, but should match process_message)
         system_prompt = effective_system_prompt or (FIREFLY_PERSONA_FULL if persona_mode == "full" else FIREFLY_PERSONA_BASIC)
         system_prompt += f"\n\n[Current Mood]: {current_mood}"
+        scene_payload = self.scene_memory.get_scene(session_id=session_id, user_id=user_id)
+        scene_context_text = (scene_payload.get("context") or "").strip() if scene_payload else ""
+        scene_tasks_list = scene_payload.get("tasks") if scene_payload else None
+        if scene_context_text:
+            system_prompt += f"\n\n[Scene Context]: {scene_context_text}"
+        if scene_tasks_list:
+            system_prompt += "\n\n[Scene Tasks]:\n- " + "\n- ".join(scene_tasks_list)
         if react_context: system_prompt += f"\n\n[Context]: {react_context}"
         if effective_nickname: system_prompt += f"\n\n[User]: {effective_nickname}"
         if effective_assistant_name: system_prompt += f"\n\n[Assistant Name]: {effective_assistant_name}"
@@ -487,6 +509,9 @@ class ChatService:
                             embedding_api_key: str = None,
                             embedding_base_url: str = None,
                             embedding_model: str = None,
+                            scene_context: Optional[str] = None,
+                            scene_tasks: Optional[List[str]] = None,
+                            scene_ttl_sec: Optional[float] = None,
                             tts_api_key: str = None,
                             tts_base_url: str = None,
                             tts_voice: str = None,
@@ -520,6 +545,15 @@ class ChatService:
                 nickname=user_nickname,
                 assistant_name=assistant_name,
                 system_prompt=system_prompt_override
+            )
+
+        if scene_context or scene_tasks is not None:
+            self.scene_memory.update_scene(
+                session_id=session_id,
+                user_id=user_id,
+                context=scene_context,
+                tasks=scene_tasks,
+                ttl_sec=scene_ttl_sec,
             )
         
         # 0.2 Retrieve stored persona if not provided in current request
@@ -575,6 +609,7 @@ class ChatService:
                     embedding_api_key=embedding_api_key,
                     embedding_base_url=embedding_base_url,
                     embedding_model=embedding_model,
+                    scopes=["long_term"],
                 )
                 if prefetch_task is not None:
                     try:
@@ -595,6 +630,7 @@ class ChatService:
                         embedding_api_key,
                         embedding_base_url,
                         embedding_model,
+                        scopes=["long_term"],
                         light_context=light_context,
                         fast_mode=True,
                     )
@@ -608,6 +644,7 @@ class ChatService:
                         embedding_api_key,
                         embedding_base_url,
                         embedding_model,
+                        scopes=["long_term"],
                         light_context=light_context,
                     )
             except Exception as e:
@@ -658,6 +695,14 @@ class ChatService:
         system_prompt += f"\n\n[System Time]: 当前时间是 {now_str}。请时刻牢记这个时间点，对于任何关于时间的问题（如“今天是几号”、“现在是哪一年”），必须基于此时间回答，严禁产生幻觉或回答过去的时间。"
 
         system_prompt += f"\n\n[Current Mood]: {current_mood}"
+
+        scene_payload = self.scene_memory.get_scene(session_id=session_id, user_id=user_id)
+        scene_context_text = (scene_payload.get("context") or "").strip() if scene_payload else ""
+        scene_tasks_list = scene_payload.get("tasks") if scene_payload else None
+        if scene_context_text:
+            system_prompt += f"\n\n[Scene Context]: {scene_context_text}"
+        if scene_tasks_list:
+            system_prompt += "\n\n[Scene Tasks]:\n- " + "\n- ".join(scene_tasks_list)
         
         if react_context:
             system_prompt += f"\n\n[Thinking/Memory Context]:\n{react_context}"
@@ -902,7 +947,17 @@ class ChatService:
                 messages.append({"role": "assistant", "content": response_text})
                 
                 # Execute Tool
-                tool_result = await self._execute_tool(tool_name, args_str, search_region)
+                tool_result = await self._execute_tool(
+                    tool_name,
+                    args_str,
+                    search_region,
+                    target_api_key=target_api_key,
+                    target_base_url=target_base_url,
+                    target_model=target_model,
+                    embedding_api_key=embedding_api_key,
+                    embedding_base_url=embedding_base_url,
+                    embedding_model=embedding_model,
+                )
                 
                 # Append Tool Result as User Message (Standard ReAct pattern)
                 messages.append({"role": "user", "content": f"[TOOL_RESULT]\n{tool_result}"})
@@ -912,7 +967,17 @@ class ChatService:
                 if force_tool_name:
                     safe_goal = force_tool_goal_text.replace("\\", "\\\\").replace('"', '\\"')
                     args_str = f'goal="{safe_goal}"'
-                    tool_result = await self._execute_tool(force_tool_name, args_str, search_region)
+                    tool_result = await self._execute_tool(
+                        force_tool_name,
+                        args_str,
+                        search_region,
+                        target_api_key=target_api_key,
+                        target_base_url=target_base_url,
+                        target_model=target_model,
+                        embedding_api_key=embedding_api_key,
+                        embedding_base_url=embedding_base_url,
+                        embedding_model=embedding_model,
+                    )
                     final_response_text = f"{response_text}\n\n{tool_result}".strip()
                     break
                 # No tool call, this is the final answer
@@ -1023,7 +1088,18 @@ class ChatService:
 
         return final_response_text
 
-    async def _execute_tool(self, tool_name: str, args_str: str, region: str = "zh-CN") -> str:
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        args_str: str,
+        region: str = "zh-CN",
+        target_api_key: str = None,
+        target_base_url: str = None,
+        target_model: str = None,
+        embedding_api_key: str = None,
+        embedding_base_url: str = None,
+        embedding_model: str = None,
+    ) -> str:
         try:
             kwargs = self._parse_tool_kwargs(args_str)
 
@@ -1124,7 +1200,14 @@ class ChatService:
                     ensure_ascii=False,
                 )
 
-            async def play_minecraft_tool() -> str:
+            async def play_minecraft_tool(
+                _target_api_key=target_api_key,
+                _target_base_url=target_base_url,
+                _target_model=target_model,
+                _embedding_api_key=embedding_api_key,
+                _embedding_base_url=embedding_base_url,
+                _embedding_model=embedding_model,
+            ) -> str:
                 goal = kwargs.get("goal")
                 if not goal:
                     return "Error: Missing 'goal' argument."
@@ -1146,8 +1229,21 @@ class ChatService:
                 append_log = getattr(minecraft, "_append_log", None)
                 if callable(append_log):
                     append_log(f"[main-brain] play_minecraft: {goal}")
+                payload = {"goal": goal}
+                if _target_api_key:
+                    payload["llm_api_key"] = _target_api_key
+                if _target_base_url:
+                    payload["llm_base_url"] = _target_base_url
+                if _target_model:
+                    payload["llm_model"] = _target_model
+                if _embedding_api_key:
+                    payload["embedding_api_key"] = _embedding_api_key
+                if _embedding_base_url:
+                    payload["embedding_base_url"] = _embedding_base_url
+                if _embedding_model:
+                    payload["embedding_model"] = _embedding_model
                 # We send an event to the plugin
-                res = await minecraft.handle_event("minecraft_command", {"goal": goal})
+                res = await minecraft.handle_event("minecraft_command", payload)
                 if res and res.get("status") == "received":
                     return f"Minecraft AI has received the task: {goal}. It is now working on it in the background."
                 if callable(append_log):
@@ -1231,7 +1327,9 @@ class ChatService:
                 await self.person_service.add_memory_point(
                     user_id=user_id,
                     content=data["memory_content"],
-                    category=data.get("category", "other")
+                    category=data.get("category", "other"),
+                    scope="long_term",
+                    source="chat",
                 )
                 print(f"Learned new memory for {user_id}: {data['memory_content']}")
         except Exception as e:

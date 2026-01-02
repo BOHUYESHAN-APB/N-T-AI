@@ -16,6 +16,7 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
   List<RemoteMemory> _memories = [];
   bool _loadingMemories = false;
   String? _memoriesError;
+  String _memoryScopeFilter = 'all';
 
   // State for Jargon
   List<RemoteJargon> _jargons = [];
@@ -49,7 +50,9 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
       _memoriesError = null;
     });
     try {
-      final memories = await _memoryService.fetchMemories();
+      final scope =
+          _memoryScopeFilter == 'all' ? null : _memoryScopeFilter;
+      final memories = await _memoryService.fetchMemories(scope: scope);
       if (!mounted) return;
       setState(() {
         _memories = memories;
@@ -212,6 +215,8 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
     final contentController = TextEditingController(text: memory?.content);
     final userIdController = TextEditingController(text: memory?.userId ?? 'default_user');
     final categoryController = TextEditingController(text: memory?.category ?? 'other');
+    final scopeController = TextEditingController(text: memory?.scope ?? 'long_term');
+    final sourceController = TextEditingController(text: memory?.source ?? '');
 
     showDialog(
       context: context,
@@ -235,6 +240,14 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
                 controller: categoryController,
                 decoration: const InputDecoration(labelText: '类别'),
               ),
+              TextField(
+                controller: scopeController,
+                decoration: const InputDecoration(labelText: '范围 (scope)'),
+              ),
+              TextField(
+                controller: sourceController,
+                decoration: const InputDecoration(labelText: '来源 (source)'),
+              ),
             ],
           ),
         ),
@@ -249,17 +262,23 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
               if (content.isEmpty) return;
 
               try {
+                final scopeValue = scopeController.text.trim();
+                final sourceValue = sourceController.text.trim();
                 if (isNew) {
                   await _memoryService.createMemory(
                     userId: userIdController.text.trim(),
                     content: content,
                     category: categoryController.text.trim(),
+                    scope: scopeValue.isNotEmpty ? scopeValue : 'long_term',
+                    source: sourceValue.isNotEmpty ? sourceValue : null,
                   );
                 } else {
                   await _memoryService.updateMemory(
                     id: memory.id,
                     content: content,
                     category: categoryController.text.trim(),
+                    scope: scopeValue.isNotEmpty ? scopeValue : null,
+                    source: sourceValue.isNotEmpty ? sourceValue : null,
                   );
                 }
                 if (!context.mounted) return;
@@ -361,6 +380,7 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
     final nicknameController = TextEditingController(text: person?.nickname);
     final assistantNameController = TextEditingController(text: person?.assistantName);
     final systemPromptController = TextEditingController(text: person?.systemPrompt);
+    final roleController = TextEditingController(text: person?.role);
 
     showDialog(
       context: context,
@@ -387,6 +407,11 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
               ),
               const SizedBox(height: 8),
               TextField(
+                controller: roleController,
+                decoration: const InputDecoration(labelText: '角色 (role)'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
                 controller: systemPromptController,
                 decoration: const InputDecoration(labelText: 'System Prompt'),
                 maxLines: 3,
@@ -409,6 +434,9 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
                   userId: userId,
                   nickname: nicknameController.text.trim(),
                   assistantName: assistantNameController.text.trim(),
+                  role: roleController.text.trim().isEmpty
+                      ? null
+                      : roleController.text.trim(),
                   systemPrompt: systemPromptController.text.trim(),
                 );
                 if (!context.mounted) return;
@@ -470,49 +498,100 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
   }
 
   Widget _buildMemoryList() {
+    final filterBar = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Row(
+        children: [
+          const Text('范围: '),
+          const SizedBox(width: 8),
+          DropdownButton<String>(
+            value: _memoryScopeFilter,
+            items: const [
+              DropdownMenuItem(value: 'all', child: Text('全部')),
+              DropdownMenuItem(value: 'long_term', child: Text('长期记忆')),
+              DropdownMenuItem(value: 'knowledge', child: Text('知识库')),
+            ],
+            onChanged: (value) {
+              if (value == null || value == _memoryScopeFilter) return;
+              setState(() {
+                _memoryScopeFilter = value;
+              });
+              _loadMemories();
+            },
+          ),
+          const Spacer(),
+          IconButton(
+            onPressed: _loadMemories,
+            icon: const Icon(Icons.refresh),
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+    );
+
+    Widget body;
     if (_loadingMemories) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_memoriesError != null) {
-      return _buildErrorState(_memoriesError!, _loadMemories);
-    }
-    if (_memories.isEmpty) {
-      return _buildEmptyState('暂无记忆');
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_memoriesError != null) {
+      body = _buildErrorState(_memoriesError!, _loadMemories);
+    } else if (_memories.isEmpty) {
+      body = _buildEmptyState('暂无记忆');
+    } else {
+      body = RefreshIndicator(
+        onRefresh: _loadMemories,
+        child: ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          itemCount: _memories.length,
+          itemBuilder: (context, index) {
+            final memory = _memories[index];
+            return Card(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              child: ListTile(
+                title: Text(memory.content),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '用户: ${memory.userId} | 类别: ${memory.category} | 范围: ${memory.scope}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    if (memory.source != null && memory.source!.isNotEmpty)
+                      Text(
+                        '来源: ${memory.source}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    Text(
+                      '时间: ${memory.createdAt}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+                isThreeLine: true,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => _showMemoryEditDialog(memory: memory),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: () => _deleteMemory(memory),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
     }
 
-    return RefreshIndicator(
-      onRefresh: _loadMemories,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: _memories.length,
-        itemBuilder: (context, index) {
-          final memory = _memories[index];
-          return Card(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            child: ListTile(
-              title: Text(memory.content),
-              subtitle: Text(
-                '用户: ${memory.userId} • 类别: ${memory.category}\n时间: ${memory.createdAt}',
-                style: const TextStyle(fontSize: 12),
-              ),
-              isThreeLine: true,
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined),
-                    onPressed: () => _showMemoryEditDialog(memory: memory),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: () => _deleteMemory(memory),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+    return Column(
+      children: [
+        filterBar,
+        Expanded(child: body),
+      ],
     );
   }
 
@@ -602,6 +681,8 @@ class _MemoryManagerScreenState extends State<MemoryManagerScreen> with SingleTi
                 children: [
                   if (person.assistantName != null)
                     Text('助理: ${person.assistantName}'),
+                  if (person.role != null && person.role!.isNotEmpty)
+                    Text('角色: ${person.role}'),
                   if (person.systemPrompt != null)
                     Text(
                       'Prompt: ${person.systemPrompt}',

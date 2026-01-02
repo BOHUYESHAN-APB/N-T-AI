@@ -24,6 +24,8 @@ class HeadfulAdapter:
         self._ws = None
         self._stop_event = asyncio.Event()
         self._last_log = 0.0
+        self._last_state_pos: Optional[tuple[float, float, float]] = None
+        self._last_state_flags: Dict[str, Any] = {}
         self._send_lock = asyncio.Lock()
         self.ready = False
         self.last_state: Optional[Dict[str, Any]] = None
@@ -213,10 +215,44 @@ class HeadfulAdapter:
             self.last_state = data
             self._on_state(data)
             now = time.time()
-            if now - self._last_log > 1.0:
-                self._log_append(
-                    f"Headful state: x={data.get('x')} y={data.get('y')} z={data.get('z')}"
+            pos = None
+            try:
+                pos = (
+                    float(data.get("x")),
+                    float(data.get("y")),
+                    float(data.get("z")),
                 )
+            except (TypeError, ValueError):
+                pos = None
+            focused = data.get("focused")
+            manual = data.get("manualOverride")
+            last_pos = self._last_state_pos
+            last_focused = self._last_state_flags.get("focused")
+            last_manual = self._last_state_flags.get("manualOverride")
+            pos_changed = False
+            if pos is not None:
+                if last_pos is None:
+                    pos_changed = True
+                else:
+                    dx = pos[0] - last_pos[0]
+                    dy = pos[1] - last_pos[1]
+                    dz = pos[2] - last_pos[2]
+                    pos_changed = (dx * dx + dy * dy + dz * dz) >= 0.01
+            flag_changed = (focused != last_focused) or (manual != last_manual)
+            if (pos_changed and (now - self._last_log) > 0.8) or flag_changed:
+                if pos is not None:
+                    x, y, z = pos
+                    suffix = f" focused={focused} manual={manual}"
+                    self._log_append(
+                        f"Headful state: x={x:.2f} y={y:.2f} z={z:.2f}{suffix}"
+                    )
+                    self._last_state_pos = pos
+                elif flag_changed:
+                    self._log_append(
+                        f"Headful state: focused={focused} manual={manual}"
+                    )
+                self._last_state_flags["focused"] = focused
+                self._last_state_flags["manualOverride"] = manual
                 self._last_log = now
         elif msg_type == "event":
             self._log_append(f"Headful event: {data.get('event')}")

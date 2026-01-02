@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import math
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -413,6 +414,10 @@ class RecipeBook:
                 items.append(name)
         return sorted(set(items))
 
+    def all_items(self) -> List[str]:
+        self._ensure_loaded()
+        return sorted(self._name_to_id.keys())
+
 
 ARMOR_SLOT_SUFFIX = {
     "head": ("helmet", "turtle_helmet"),
@@ -515,6 +520,26 @@ BASIC_UTILITY_BLOCKS = {
     "fletching_table",
 }
 
+CROP_BLOCKS = {
+    "wheat",
+    "potatoes",
+    "carrots",
+    "beetroots",
+    "nether_wart",
+    "sweet_berry_bush",
+}
+
+PILLAR_BLOCK_PREFERRED = [
+    "dirt",
+    "cobblestone",
+    "stone",
+    "granite",
+    "diorite",
+    "andesite",
+    "sand",
+    "gravel",
+]
+
 CONTAINER_EXCLUDE = {
     "trapped_chest",
 }
@@ -574,6 +599,97 @@ BASIC_TOOL_ITEMS = {
     "bow",
     "crossbow",
     "bucket",
+}
+
+TOOL_CANDIDATES = {
+    "pickaxe": [
+        "netherite_pickaxe",
+        "diamond_pickaxe",
+        "iron_pickaxe",
+        "stone_pickaxe",
+        "golden_pickaxe",
+        "wooden_pickaxe",
+    ],
+    "axe": [
+        "netherite_axe",
+        "diamond_axe",
+        "iron_axe",
+        "stone_axe",
+        "golden_axe",
+        "wooden_axe",
+    ],
+    "shovel": [
+        "netherite_shovel",
+        "diamond_shovel",
+        "iron_shovel",
+        "stone_shovel",
+        "golden_shovel",
+        "wooden_shovel",
+    ],
+}
+
+CN_ITEM_ALIASES = {
+    "下界合金剑": "netherite_sword",
+    "钻石剑": "diamond_sword",
+    "黄金剑": "golden_sword",
+    "金剑": "golden_sword",
+    "铁剑": "iron_sword",
+    "石剑": "stone_sword",
+    "木剑": "wooden_sword",
+    "下界合金镐子": "netherite_pickaxe",
+    "下界合金镐": "netherite_pickaxe",
+    "钻石镐子": "diamond_pickaxe",
+    "钻石镐": "diamond_pickaxe",
+    "黄金镐子": "golden_pickaxe",
+    "金镐子": "golden_pickaxe",
+    "黄金镐": "golden_pickaxe",
+    "金镐": "golden_pickaxe",
+    "铁镐子": "iron_pickaxe",
+    "铁镐": "iron_pickaxe",
+    "石镐子": "stone_pickaxe",
+    "石镐": "stone_pickaxe",
+    "木镐子": "wooden_pickaxe",
+    "木镐": "wooden_pickaxe",
+    "下界合金斧": "netherite_axe",
+    "钻石斧": "diamond_axe",
+    "黄金斧": "golden_axe",
+    "金斧": "golden_axe",
+    "铁斧": "iron_axe",
+    "石斧": "stone_axe",
+    "木斧": "wooden_axe",
+    "下界合金铲": "netherite_shovel",
+    "下界合金锹": "netherite_shovel",
+    "钻石铲": "diamond_shovel",
+    "钻石锹": "diamond_shovel",
+    "黄金铲": "golden_shovel",
+    "黄金锹": "golden_shovel",
+    "金铲": "golden_shovel",
+    "金锹": "golden_shovel",
+    "铁铲": "iron_shovel",
+    "铁锹": "iron_shovel",
+    "石铲": "stone_shovel",
+    "石锹": "stone_shovel",
+    "木铲": "wooden_shovel",
+    "木锹": "wooden_shovel",
+    "下界合金锄": "netherite_hoe",
+    "钻石锄": "diamond_hoe",
+    "黄金锄": "golden_hoe",
+    "金锄": "golden_hoe",
+    "铁锄": "iron_hoe",
+    "石锄": "stone_hoe",
+    "木锄": "wooden_hoe",
+    "工作台": "crafting_table",
+    "熔炉": "furnace",
+    "高炉": "blast_furnace",
+    "烟熏炉": "smoker",
+    "木板": "oak_planks",
+    "木头": "oak_log",
+    "木材": "oak_log",
+    "木棍": "stick",
+    "原木": "oak_log",
+    "铁锭": "iron_ingot",
+    "金锭": "gold_ingot",
+    "钻石": "diamond",
 }
 
 REDSTONE_KEYWORDS = (
@@ -791,6 +907,13 @@ class HeadfulInventoryController:
         self._container_registry_cache: Optional[Dict[str, Any]] = None
         self._container_registry_path: Optional[Path] = None
         self._container_registry_loaded_at = 0.0
+        self._cancel_requested = False
+        self._autonomy_last_guard = 0.0
+        self._autonomy_last_gather = 0.0
+        self._autonomy_last_look = 0.0
+        self._autonomy_last_idle = 0.0
+        self._autonomy_last_crop = 0.0
+        self._autonomy_last_patrol = 0.0
 
     def _get_recipe_book(self) -> RecipeBook:
         if self._recipe_book is not None:
@@ -1076,6 +1199,32 @@ class HeadfulInventoryController:
             return {"ok": False, "error": "find_block_timeout"}
         return result
 
+    async def _find_mature_crops(
+        self,
+        blocks: List[str],
+        radius: int = 8,
+        max_results: int = 1,
+        timeout: float = 2.0,
+    ) -> Dict[str, Any]:
+        normalized = [self._normalize_block_name(b) for b in blocks if b]
+        if not normalized:
+            return {"ok": False, "error": "missing_block"}
+        action: Dict[str, Any] = {
+            "type": "findCrop",
+            "radius": int(radius),
+            "maxResults": int(max_results),
+        }
+        if len(normalized) == 1:
+            action["block"] = normalized[0]
+        else:
+            action["blocks"] = normalized
+        result = await self._adapter.request_action(
+            action, self._headful_config(), timeout=timeout
+        )
+        if not isinstance(result, dict):
+            return {"ok": False, "error": "find_crop_timeout"}
+        return result
+
     def _player_pos(self) -> Optional[Tuple[float, float, float]]:
         state = getattr(self._adapter, "last_state", None)
         if not isinstance(state, dict):
@@ -1279,6 +1428,7 @@ class HeadfulInventoryController:
         pos: Dict[str, Any],
         distance: float = 4.0,
         timeout: float = 6.0,
+        horizontal_only: bool = False,
     ) -> bool:
         try:
             x = float(pos.get("x"))
@@ -1293,7 +1443,10 @@ class HeadfulInventoryController:
             dx = current[0] - x
             dy = current[1] - y
             dz = current[2] - z
-            if dx * dx + dy * dy + dz * dz <= target_dist_sq:
+            if horizontal_only:
+                if dx * dx + dz * dz <= target_dist_sq:
+                    return True
+            elif dx * dx + dy * dy + dz * dz <= target_dist_sq:
                 return True
         await self._adapter.send_action(
             {"type": "pathfindTo", "x": x, "y": y, "z": z},
@@ -1307,7 +1460,10 @@ class HeadfulInventoryController:
             dx = current[0] - x
             dy = current[1] - y
             dz = current[2] - z
-            if dx * dx + dy * dy + dz * dz <= target_dist_sq:
+            if horizontal_only:
+                if dx * dx + dz * dz <= target_dist_sq:
+                    return True
+            elif dx * dx + dy * dy + dz * dz <= target_dist_sq:
                 return True
         return False
 
@@ -1979,6 +2135,12 @@ class HeadfulInventoryController:
                 return await self.set_debug(params)
             if name in {"look_at", "lookat"}:
                 return await self.look_at(params)
+            if name in {"look_nearest_player", "look_player"}:
+                return await self.look_at_nearest_player(params)
+            if name in {"idle_look", "look_idle"}:
+                return await self.idle_look(params)
+            if name in {"autonomy_tick", "auto_tick"}:
+                return await self.autonomy_tick(params)
             if name in {"go_to_position", "goto_position", "move_to"}:
                 return await self.go_to_position(params)
             if name in {"go_to_nearest_block", "goto_block", "go_to_block"}:
@@ -1999,8 +2161,14 @@ class HeadfulInventoryController:
                 return await self.pickup_nearby_items(params)
             if name in {"collect_block", "collect"}:
                 return await self.collect_block(params)
+            if name in {"dig_area", "excavate", "dig_box"}:
+                return await self.dig_area(params)
             if name in {"open_container", "open_chest"}:
                 return await self.open_container(params)
+            if name in {"place_block", "place"}:
+                return await self.place_block(params)
+            if name in {"pillar_up", "pillar", "pillarup"}:
+                return await self.pillar_up(params)
             if name in {"open_crafting_table", "open_workbench", "open_table"}:
                 return await self.open_crafting_table(params)
             if name in {"open_brewing_stand", "open_brew_stand", "open_brew"}:
@@ -2035,6 +2203,12 @@ class HeadfulInventoryController:
                 return await self.plan_actions(params, execute=False)
             if name in {"plan_execute", "plan_and_execute", "planrun"}:
                 return await self.plan_actions(params, execute=True)
+            if name in {"plan_execute_rules", "rule_plan_execute", "plan_rules"}:
+                params = dict(params or {})
+                params["planner_mode"] = "rules_only"
+                return await self.plan_actions(params, execute=True)
+            if name in {"cancel", "cancel_current", "abort"}:
+                return await self.cancel_current()
             if name in {"screen_snapshot", "snapshot"}:
                 snap = await self._get_snapshot(refresh=True)
                 return {"ok": bool(snap), "snapshot": snap}
@@ -2148,8 +2322,18 @@ class HeadfulInventoryController:
         if pos is None:
             return {"ok": False, "error": "block_not_found"}
         pos = pos
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("container_interact_distance", 2.0))
+        )
         if move:
-            await self._move_near_position(pos)
+            moved = await self._move_near_position(
+                pos,
+                distance=approach_distance,
+                timeout=timeout,
+                horizontal_only=True,
+            )
+            if not moved:
+                return {"ok": False, "error": "container_too_far", "position": pos}
         if look_at:
             await self._look_at_position(pos, duration_ms=look_duration_ms)
         used = await self._use_block_at(pos, face=str(face))
@@ -2227,19 +2411,31 @@ class HeadfulInventoryController:
         if snapshot:
             return {"ok": True, "position": pos, "snapshot": snapshot, "already_open": True}
         max_reach = float(params.get("max_reach", 4.2))
-        approach_distance = float(params.get("approach_distance", 1.8))
+        approach_distance = float(
+            params.get(
+                "approach_distance",
+                self._headful_config().get("workstation_interact_distance", 2.0),
+            )
+        )
         await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
         for attempt in range(1, retries + 1):
             if move:
-                await self._move_near_position(pos, distance=approach_distance, timeout=timeout)
+                moved = await self._move_near_position(
+                    pos,
+                    distance=approach_distance,
+                    timeout=timeout,
+                    horizontal_only=True,
+                )
+                if not moved:
+                    self._debug_log("open_crafting_table too far", params)
+                    continue
             current = self._player_pos()
             if current:
                 try:
                     dx = float(current[0]) - float(pos.get("x"))
-                    dy = float(current[1]) - float(pos.get("y"))
                     dz = float(current[2]) - float(pos.get("z"))
-                    if dx * dx + dy * dy + dz * dz > max_reach * max_reach:
+                    if dx * dx + dz * dz > max_reach * max_reach:
                         await self._adapter.send_action(
                             {"type": "move", "forward": 1.0, "durationMs": 300},
                             self._headful_config(),
@@ -2278,6 +2474,10 @@ class HeadfulInventoryController:
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
         retries = max(1, int(params.get("retries", 3)))
+        cfg = self._headful_config()
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
         result = await self._find_blocks(["brewing_stand"], radius=radius, timeout=timeout)
         if not result.get("ok"):
             return {"ok": False, "error": "brewing_stand_not_found"}
@@ -2293,7 +2493,15 @@ class HeadfulInventoryController:
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
         for attempt in range(1, retries + 1):
             if move:
-                await self._move_near_position(pos)
+                moved = await self._move_near_position(
+                    pos,
+                    distance=approach_distance,
+                    timeout=timeout,
+                    horizontal_only=True,
+                )
+                if not moved:
+                    self._debug_log("open_brewing_stand too far", params)
+                    continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
             used = await self._use_block_at(pos, str(face))
@@ -2320,6 +2528,10 @@ class HeadfulInventoryController:
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
         retries = max(1, int(params.get("retries", 3)))
+        cfg = self._headful_config()
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
         result = await self._find_blocks(["smithing_table"], radius=radius, timeout=timeout)
         if not result.get("ok"):
             return {"ok": False, "error": "smithing_table_not_found"}
@@ -2335,7 +2547,15 @@ class HeadfulInventoryController:
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
         for attempt in range(1, retries + 1):
             if move:
-                await self._move_near_position(pos)
+                moved = await self._move_near_position(
+                    pos,
+                    distance=approach_distance,
+                    timeout=timeout,
+                    horizontal_only=True,
+                )
+                if not moved:
+                    self._debug_log("open_smithing_table too far", params)
+                    continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
             used = await self._use_block_at(pos, str(face))
@@ -2362,6 +2582,10 @@ class HeadfulInventoryController:
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
         retries = max(1, int(params.get("retries", 3)))
+        cfg = self._headful_config()
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
         result = await self._find_blocks(["enchanting_table"], radius=radius, timeout=timeout)
         if not result.get("ok"):
             return {"ok": False, "error": "enchanting_table_not_found"}
@@ -2377,7 +2601,15 @@ class HeadfulInventoryController:
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
         for attempt in range(1, retries + 1):
             if move:
-                await self._move_near_position(pos)
+                moved = await self._move_near_position(
+                    pos,
+                    distance=approach_distance,
+                    timeout=timeout,
+                    horizontal_only=True,
+                )
+                if not moved:
+                    self._debug_log("open_enchanting_table too far", params)
+                    continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
             used = await self._use_block_at(pos, str(face))
@@ -2442,6 +2674,10 @@ class HeadfulInventoryController:
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
         retries = max(1, int(params.get("retries", 3)))
+        cfg = self._headful_config()
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
         blocks = params.get("blocks")
         block = params.get("block")
         targets: List[str] = []
@@ -2562,7 +2798,15 @@ class HeadfulInventoryController:
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
         for attempt in range(1, retries + 1):
             if move:
-                await self._move_near_position(pos)
+                moved = await self._move_near_position(
+                    pos,
+                    distance=approach_distance,
+                    timeout=timeout,
+                    horizontal_only=True,
+                )
+                if not moved:
+                    self._debug_log("open_furnace too far", params)
+                    continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
             used = await self._use_block_at(pos, str(face))
@@ -2592,6 +2836,9 @@ class HeadfulInventoryController:
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
         cfg = self._headful_config()
+        approach_distance = float(
+            params.get("approach_distance", cfg.get("container_interact_distance", 2.0))
+        )
         deny_raw = params.get("container_denylist", cfg.get("container_denylist"))
         if deny_raw is None:
             deny_raw = ["ender_chest"]
@@ -2647,7 +2894,14 @@ class HeadfulInventoryController:
                 if block_name and block_name.split(":", 1)[-1] in deny_set:
                     return {"ok": False, "error": "container_denied"}
         if move:
-            await self._move_near_position(pos)
+            moved = await self._move_near_position(
+                pos,
+                distance=approach_distance,
+                timeout=timeout,
+                horizontal_only=True,
+            )
+            if not moved:
+                return {"ok": False, "error": "container_too_far", "position": pos}
         if look_at:
             await self._look_at_position(pos, duration_ms=look_duration_ms)
         used = await self._use_block_at(pos, str(face))
@@ -2659,6 +2913,57 @@ class HeadfulInventoryController:
         snapshot = await self._stabilize_container_snapshot(snapshot, settle_ms)
         await self._update_container_registry(pos, snapshot)
         return {"ok": True, "position": pos, "snapshot": snapshot}
+
+    async def place_block(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        block = _normalize_item_name(params.get("block") or params.get("item"))
+        face = params.get("face", "up")
+        if not block:
+            return {"ok": False, "error": "missing_block"}
+        raw = await self._get_snapshot(refresh=True)
+        snapshot = ScreenSnapshot.from_dict(raw)
+        if snapshot is None:
+            return {"ok": False, "error": "no_snapshot"}
+        if not self._inventory_has_item(snapshot, block, 1):
+            return {"ok": False, "error": "missing_item", "item": block}
+        _, snapshot = await self._ensure_hotbar_slot_for_item(snapshot, [block])
+        placed = await self._place_block_from_hotbar(snapshot, face=str(face))
+        return {"ok": bool(placed), "block": block}
+
+    def _candidate_pillar_blocks(self, snapshot: ScreenSnapshot) -> List[str]:
+        candidates = list(PILLAR_BLOCK_PREFERRED)
+        for slot in snapshot.slots:
+            if slot.item is None:
+                continue
+            name = slot.item.name
+            if self._is_planks(name) or self._is_log(name):
+                if name not in candidates:
+                    candidates.append(name)
+        return candidates
+
+    async def pillar_up(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        steps_raw = params.get("steps") or params.get("count") or 1
+        delay_raw = params.get("delay_ms") or params.get("delayMs") or 320
+        try:
+            steps = max(1, min(int(steps_raw), 8))
+        except (TypeError, ValueError):
+            steps = 1
+        try:
+            delay_ms = max(220, int(delay_raw))
+        except (TypeError, ValueError):
+            delay_ms = 320
+        raw = await self._get_snapshot(refresh=True)
+        snapshot = ScreenSnapshot.from_dict(raw)
+        if snapshot is None:
+            return {"ok": False, "error": "no_snapshot"}
+        candidates = self._candidate_pillar_blocks(snapshot)
+        hotbar_index, snapshot = await self._ensure_hotbar_slot_for_item(snapshot, candidates)
+        if hotbar_index is None:
+            return {"ok": False, "error": "missing_block"}
+        ok = await self._adapter.send_action(
+            {"type": "pillarUp", "steps": steps, "delayMs": delay_ms},
+            self._headful_config(),
+        )
+        return {"ok": ok, "steps": steps, "delay_ms": delay_ms}
 
     async def set_debug(self, params: Dict[str, Any]) -> Dict[str, Any]:
         enabled = bool(params.get("enabled", True))
@@ -2691,6 +2996,150 @@ class HeadfulInventoryController:
             return {"ok": False, "error": "missing_position"}
         ok = await self._look_at_position(pos, duration_ms=duration_ms)
         return {"ok": ok, "position": pos}
+
+    async def look_at_nearest_player(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        name = params.get("player_name") or params.get("player") or params.get("name")
+        max_distance = float(params.get("max_distance", params.get("range", 12.0)))
+        duration_ms = int(params.get("duration_ms", 200))
+        entity = self._select_nearest_entity(
+            target_type="minecraft:player", target_name=name, max_distance=max_distance
+        )
+        if entity is None:
+            return {"ok": False, "error": "player_not_found"}
+        ok = await self._look_at_position(entity, duration_ms=duration_ms)
+        return {"ok": ok, "entity": entity}
+
+    async def idle_look(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        yaw_pitch = self._player_yaw_pitch()
+        if not yaw_pitch:
+            return {"ok": False, "error": "no_orientation"}
+        yaw, pitch = yaw_pitch
+        yaw_delta = float(params.get("yaw_delta", 24.0))
+        pitch_delta = float(params.get("pitch_delta", 8.0))
+        duration_ms = int(params.get("duration_ms", 200))
+        target_yaw = (yaw + random.uniform(-yaw_delta, yaw_delta)) % 360.0
+        target_pitch = max(min(pitch + random.uniform(-pitch_delta, pitch_delta), 35.0), -35.0)
+        await self._adapter.send_action(
+            {
+                "type": "lookSmooth",
+                "yaw": target_yaw,
+                "pitch": target_pitch,
+                "durationMs": duration_ms,
+            },
+            self._headful_config(),
+        )
+        return {"ok": True, "yaw": target_yaw, "pitch": target_pitch}
+
+    async def autonomy_tick(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        if not bool(cfg.get("autonomy_enabled", False)):
+            return {"ok": False, "error": "autonomy_disabled"}
+        last_screen = getattr(self._adapter, "last_screen", None)
+        if isinstance(last_screen, dict) and last_screen.get("screenOpen"):
+            return {"ok": False, "error": "screen_open"}
+        now = time.time()
+
+        guard_enabled = bool(cfg.get("autonomy_guard", cfg.get("enable_smart_guard", True)))
+        guard_interval = float(cfg.get("autonomy_guard_interval_sec", 2.0))
+        guard_range = float(cfg.get("autonomy_guard_range", 12.0))
+        if guard_enabled and now - self._autonomy_last_guard >= guard_interval:
+            threat = self._select_nearest_hostile_entity(
+                max_distance_sq=guard_range * guard_range
+            )
+            if threat:
+                self._autonomy_last_guard = now
+                etype = str(threat.get("type", "")).split(":")[-1]
+                result = await self.attack_nearest(
+                    {
+                        "entity_type": etype,
+                        "duration_sec": params.get("guard_duration_sec", 6.0),
+                        "range": guard_range,
+                    }
+                )
+                result["action"] = "guard"
+                return result
+
+        gather_enabled = bool(cfg.get("autonomy_gather", cfg.get("enable_smart_gather", True)))
+        gather_interval = float(cfg.get("autonomy_gather_interval_sec", 18.0))
+        harvest_enabled = bool(cfg.get("autonomy_harvest_crops", True))
+        harvest_interval = float(cfg.get("autonomy_harvest_interval_sec", 10.0))
+        if harvest_enabled and now - self._autonomy_last_crop >= harvest_interval:
+            self._autonomy_last_crop = now
+            result = await self._harvest_nearby_crops(
+                {
+                    "radius": params.get("crop_radius", 6),
+                    "max_results": params.get("crop_max", 2),
+                    "timeout": params.get("crop_timeout", 4.0),
+                    "mature_only": cfg.get("autonomy_harvest_mature_only", True),
+                }
+            )
+            if result.get("ok"):
+                result["action"] = "harvest_crops"
+                return result
+        if gather_enabled and now - self._autonomy_last_gather >= gather_interval:
+            self._autonomy_last_gather = now
+            result = await self.smart_gather(
+                {
+                    "range": params.get("gather_range", 8.0),
+                    "timeout": params.get("gather_timeout", 6.0),
+                }
+            )
+            result["action"] = "gather"
+            return result
+
+        look_enabled = bool(cfg.get("autonomy_look_players", True))
+        look_interval = float(cfg.get("autonomy_look_interval_sec", 3.0))
+        look_range = float(cfg.get("autonomy_look_range", 12.0))
+        if look_enabled and now - self._autonomy_last_look >= look_interval:
+            player_name = params.get("player") or params.get("player_name") or params.get("name")
+            entity = self._select_nearest_entity(
+                target_type="minecraft:player",
+                target_name=player_name,
+                max_distance=look_range,
+            )
+            if entity:
+                self._autonomy_last_look = now
+                ok = await self._look_at_position(
+                    entity, duration_ms=int(params.get("look_duration_ms", 200))
+                )
+                return {"ok": ok, "action": "look_player", "entity": entity}
+
+        patrol_enabled = bool(cfg.get("autonomy_patrol", True))
+        patrol_interval = float(cfg.get("autonomy_patrol_interval_sec", 8.0))
+        if patrol_enabled and now - self._autonomy_last_patrol >= patrol_interval:
+            self._autonomy_last_patrol = now
+            origin = self._player_pos()
+            if origin:
+                radius = float(cfg.get("autonomy_patrol_radius", 4.0))
+                distance = float(cfg.get("autonomy_patrol_distance", 2.5))
+                timeout = float(cfg.get("autonomy_patrol_timeout", 4.0))
+                angle = random.uniform(0.0, math.tau)
+                step = random.uniform(max(1.0, radius * 0.4), radius)
+                target = {
+                    "x": origin[0] + math.cos(angle) * step,
+                    "y": origin[1],
+                    "z": origin[2] + math.sin(angle) * step,
+                }
+                ok = await self._move_near_position(
+                    target, distance=distance, timeout=timeout
+                )
+                return {"ok": ok, "action": "patrol", "target": target}
+
+        idle_enabled = bool(cfg.get("autonomy_idle_look", True))
+        idle_interval = float(cfg.get("autonomy_idle_interval_sec", 6.0))
+        if idle_enabled and now - self._autonomy_last_idle >= idle_interval:
+            self._autonomy_last_idle = now
+            result = await self.idle_look(
+                {
+                    "yaw_delta": params.get("idle_yaw_delta", 20.0),
+                    "pitch_delta": params.get("idle_pitch_delta", 6.0),
+                    "duration_ms": params.get("idle_duration_ms", 200),
+                }
+            )
+            result["action"] = "idle_look"
+            return result
+
+        return {"ok": True, "action": "idle"}
 
     async def go_to_position(self, params: Dict[str, Any]) -> Dict[str, Any]:
         pos = params.get("position") or {
@@ -2855,7 +3304,13 @@ class HeadfulInventoryController:
 
     async def collect_block(self, params: Dict[str, Any]) -> Dict[str, Any]:
         block = params.get("block")
-        if not block:
+        blocks_raw = params.get("blocks")
+        targets: List[str] = []
+        if block:
+            targets.append(str(block))
+        if isinstance(blocks_raw, list):
+            targets.extend([str(b) for b in blocks_raw if b])
+        if not targets:
             return {"ok": False, "error": "missing_block"}
         count = int(params.get("count", 1))
         radius = int(params.get("radius", 16))
@@ -2863,8 +3318,26 @@ class HeadfulInventoryController:
         attack_ms = int(params.get("attack_ms", 1200))
         distance = float(params.get("distance", 3.5))
         look_at = bool(params.get("look_at", True))
+        auto_equip = bool(params.get("auto_equip_tool", params.get("equip_tool", True)))
+        if auto_equip:
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot is not None:
+                tool_type = self._tool_type_for_blocks(targets)
+                if tool_type:
+                    tool_name = self._best_tool_name(snapshot, tool_type)
+                    if tool_name:
+                        await self._ensure_hotbar_slot_for_item(snapshot, [tool_name])
+                        self._log_append(f"[tool] equip {tool_name} for {tool_type}")
+                    else:
+                        self._log_append(f"[tool] missing {tool_type} for {targets}")
         positions = []
-        find_result = await self._find_blocks([str(block)], radius=radius, max_results=max(count, 1), timeout=timeout)
+        find_result = await self._find_blocks(
+            targets,
+            radius=radius,
+            max_results=max(count, 1),
+            timeout=timeout,
+        )
         if find_result.get("ok"):
             positions = [
                 pos for pos in (find_result.get("positions") or []) if isinstance(pos, dict)
@@ -2889,7 +3362,291 @@ class HeadfulInventoryController:
             )
             broken += 1
             await asyncio.sleep(0.3)
-        return {"ok": broken > 0, "broken": broken, "block": block}
+        return {"ok": broken > 0, "broken": broken, "blocks": targets}
+
+    async def _move_near_block_target(
+        self,
+        pos: Dict[str, Any],
+        distance: float,
+        timeout: float,
+    ) -> bool:
+        try:
+            x = float(pos.get("x"))
+            y = float(pos.get("y"))
+            z = float(pos.get("z"))
+        except (TypeError, ValueError, AttributeError):
+            return False
+        candidates = [
+            {"x": x, "y": y + 1, "z": z},
+            {"x": x + 1, "y": y, "z": z},
+            {"x": x - 1, "y": y, "z": z},
+            {"x": x, "y": y, "z": z + 1},
+            {"x": x, "y": y, "z": z - 1},
+        ]
+        for candidate in candidates:
+            moved = await self._move_near_position(
+                candidate,
+                distance=distance,
+                timeout=timeout,
+                horizontal_only=True,
+            )
+            if moved:
+                return True
+        return False
+
+    async def _dig_block_at(
+        self,
+        pos: Dict[str, Any],
+        attack_ms: int,
+        distance: float,
+        timeout: float,
+        look_duration_ms: int,
+    ) -> bool:
+        moved = await self._move_near_block_target(pos, distance=distance, timeout=timeout)
+        if not moved:
+            return False
+        if look_duration_ms > 0:
+            await self._look_at_position(pos, duration_ms=look_duration_ms)
+        await self._adapter.send_action(
+            {"type": "setKey", "key": "attack", "pressed": True},
+            self._headful_config(),
+        )
+        await asyncio.sleep(max(0.2, attack_ms / 1000.0))
+        await self._adapter.send_action(
+            {"type": "setKey", "key": "attack", "pressed": False},
+            self._headful_config(),
+        )
+        await asyncio.sleep(0.1)
+        return True
+
+    async def dig_area(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        goal = params.get("goal") or ""
+        coords = None
+        if all(k in params for k in ("x1", "y1", "z1", "x2", "y2", "z2")):
+            coords = (
+                (params.get("x1"), params.get("y1"), params.get("z1")),
+                (params.get("x2"), params.get("y2"), params.get("z2")),
+            )
+        elif isinstance(params.get("start"), (list, tuple)) and isinstance(
+            params.get("end"), (list, tuple)
+        ):
+            start = params.get("start")
+            end = params.get("end")
+            if len(start) >= 3 and len(end) >= 3:
+                coords = ((start[0], start[1], start[2]), (end[0], end[1], end[2]))
+        elif isinstance(params.get("start"), dict) and isinstance(params.get("end"), dict):
+            start = params.get("start")
+            end = params.get("end")
+            coords = (
+                (start.get("x"), start.get("y"), start.get("z")),
+                (end.get("x"), end.get("y"), end.get("z")),
+            )
+        if coords is None:
+            coords = self._extract_two_coords_from_goal(str(goal))
+        if coords is None:
+            return {"ok": False, "error": "missing_coords"}
+
+        def _as_int(value: Any) -> int:
+            try:
+                return int(round(float(value)))
+            except (TypeError, ValueError):
+                return 0
+
+        (x1, y1, z1), (x2, y2, z2) = coords
+        x1 = _as_int(x1)
+        y1 = _as_int(y1)
+        z1 = _as_int(z1)
+        x2 = _as_int(x2)
+        y2 = _as_int(y2)
+        z2 = _as_int(z2)
+        min_x, max_x = sorted((x1, x2))
+        min_y, max_y = sorted((y1, y2))
+        min_z, max_z = sorted((z1, z2))
+
+        cfg = self._headful_config()
+        max_blocks = int(params.get("max_blocks", cfg.get("dig_area_max_blocks", 512)))
+        total = (max_x - min_x + 1) * (max_y - min_y + 1) * (max_z - min_z + 1)
+        if total <= 0:
+            return {"ok": False, "error": "invalid_bounds"}
+        if max_blocks > 0 and total > max_blocks:
+            return {
+                "ok": False,
+                "error": "area_too_large",
+                "total": total,
+                "max_blocks": max_blocks,
+            }
+
+        fill_walls = params.get("fill_walls")
+        if fill_walls is None:
+            fill_walls = self._extract_fill_walls_flag(str(goal))
+        fill_walls = bool(fill_walls) if fill_walls is not None else False
+        keep_walls = bool(params.get("keep_walls", fill_walls))
+
+        attack_ms = int(params.get("attack_ms", cfg.get("dig_attack_ms", 1200)))
+        distance = float(params.get("distance", cfg.get("dig_distance", 3.2)))
+        move_timeout = float(params.get("move_timeout", cfg.get("dig_move_timeout", 4.0)))
+        look_duration_ms = int(
+            params.get("look_duration_ms", cfg.get("dig_look_duration_ms", 160))
+        )
+        step_delay_ms = int(
+            params.get("step_delay_ms", cfg.get("dig_step_delay_ms", 80))
+        )
+        progress_every = int(
+            params.get("progress_every", cfg.get("dig_progress_every", 20))
+        )
+        y_order = str(params.get("y_order", "top_down")).lower()
+        if y_order in {"bottom", "bottom_up", "up"}:
+            y_layers = list(range(min_y, max_y + 1))
+        else:
+            y_layers = list(range(max_y, min_y - 1, -1))
+
+        tool = params.get("tool") or params.get("tool_type")
+        if tool:
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot is not None:
+                tool_name = None
+                tool_type = str(tool).lower()
+                if tool_type in {"pickaxe", "shovel", "axe", "hoe"}:
+                    tool_name = self._best_tool_name(snapshot, tool_type)
+                else:
+                    tool_name = _normalize_item_name(tool)
+                if tool_name:
+                    await self._ensure_hotbar_slot_for_item(snapshot, [tool_name])
+                    self._log_append(f"[dig-area] equip {tool_name}")
+
+        if fill_walls and keep_walls:
+            self._log_append("[dig-area] fill_walls enabled; keeping boundary blocks only.")
+
+        self._log_append(
+            f"[dig-area] start ({min_x},{min_y},{min_z}) -> ({max_x},{max_y},{max_z}) "
+            f"total={total} keep_walls={keep_walls}"
+        )
+
+        dug = 0
+        skipped = 0
+        failed = 0
+        for layer_idx, y in enumerate(y_layers):
+            z_forward = list(range(min_z, max_z + 1))
+            z_backward = list(range(max_z, min_z - 1, -1))
+            z_iter = z_forward if layer_idx % 2 == 0 else z_backward
+            for row_idx, z in enumerate(z_iter):
+                if self._cancel_requested:
+                    break
+                x_forward = range(min_x, max_x + 1)
+                x_backward = range(max_x, min_x - 1, -1)
+                x_iter = x_forward if row_idx % 2 == 0 else x_backward
+                for x in x_iter:
+                    if self._cancel_requested:
+                        break
+                    if keep_walls and (
+                        x == min_x or x == max_x or z == min_z or z == max_z
+                    ):
+                        skipped += 1
+                        continue
+                    ok = await self._dig_block_at(
+                        {"x": x, "y": y, "z": z},
+                        attack_ms=attack_ms,
+                        distance=distance,
+                        timeout=move_timeout,
+                        look_duration_ms=look_duration_ms,
+                    )
+                    if ok:
+                        dug += 1
+                    else:
+                        failed += 1
+                    if step_delay_ms > 0:
+                        await asyncio.sleep(step_delay_ms / 1000.0)
+                    if progress_every > 0 and (dug + failed) % progress_every == 0:
+                        self._log_append(
+                            f"[dig-area] progress {dug} done, {failed} failed, {skipped} skipped"
+                        )
+            if self._cancel_requested:
+                break
+
+        if self._cancel_requested:
+            self._cancel_requested = False
+            return {
+                "ok": False,
+                "error": "cancelled",
+                "dug": dug,
+                "failed": failed,
+                "skipped": skipped,
+                "total": total,
+            }
+        return {
+            "ok": True,
+            "dug": dug,
+            "failed": failed,
+            "skipped": skipped,
+            "total": total,
+            "bounds": {
+                "min": [min_x, min_y, min_z],
+                "max": [max_x, max_y, max_z],
+            },
+            "keep_walls": keep_walls,
+        }
+
+    async def _harvest_nearby_crops(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        blocks = params.get("blocks")
+        if blocks is None:
+            blocks = list(CROP_BLOCKS)
+        if not isinstance(blocks, list) or not blocks:
+            return {"ok": False, "error": "missing_blocks"}
+        radius = int(params.get("radius", 6))
+        timeout = float(params.get("timeout", 4.0))
+        attack_ms = int(params.get("attack_ms", 700))
+        distance = float(params.get("distance", 2.5))
+        look_at = bool(params.get("look_at", True))
+        max_results = int(params.get("max_results", 2))
+        cfg = self._headful_config()
+        mature_only = bool(
+            params.get(
+                "mature_only",
+                cfg.get("autonomy_harvest_mature_only", True),
+            )
+        )
+        block_targets = [str(block) for block in blocks if block]
+        if mature_only:
+            find_result = await self._find_mature_crops(
+                block_targets,
+                radius=radius,
+                max_results=max_results,
+                timeout=timeout,
+            )
+        else:
+            find_result = await self._find_blocks(
+                block_targets,
+                radius=radius,
+                max_results=max_results,
+                timeout=timeout,
+            )
+        if not find_result.get("ok"):
+            return {"ok": False, "error": "crop_not_found"}
+        positions = [
+            pos for pos in (find_result.get("positions") or []) if isinstance(pos, dict)
+        ]
+        if not positions:
+            return {"ok": False, "error": "crop_not_found"}
+        broken = 0
+        for pos in positions:
+            if broken >= max_results:
+                break
+            await self._move_near_position(pos, distance=distance, timeout=timeout)
+            if look_at:
+                await self._look_at_position(pos, duration_ms=200)
+            await self._adapter.send_action(
+                {"type": "setKey", "key": "attack", "pressed": True},
+                self._headful_config(),
+            )
+            await asyncio.sleep(max(0.2, attack_ms / 1000.0))
+            await self._adapter.send_action(
+                {"type": "setKey", "key": "attack", "pressed": False},
+                self._headful_config(),
+            )
+            broken += 1
+            await asyncio.sleep(0.25)
+        return {"ok": broken > 0, "broken": broken, "blocks": blocks}
 
     async def view_container(self, params: Dict[str, Any]) -> Dict[str, Any]:
         open_result = await self.open_container(params)
@@ -3806,6 +4563,10 @@ class HeadfulInventoryController:
             return
         if user_id in self._mindcraft_docs_indexed:
             return
+        try:
+            self._person_service.upsert_role(user_id, "system_doc")
+        except Exception:
+            pass
         with Session(engine) as session:
             statement = (
                 select(MemoryPoint)
@@ -3833,6 +4594,8 @@ class HeadfulInventoryController:
                     content=payload,
                     category="mindcraft_doc",
                     weight=0.4,
+                    scope="knowledge",
+                    source="mindcraft_doc",
                 )
                 total_chunks += 1
             if total_chunks >= max_chunks:
@@ -3893,6 +4656,51 @@ class HeadfulInventoryController:
             "slots": slots,
             "crafting_grid": crafting_grid,
         }
+
+    def _snapshot_to_raw(self, snapshot: ScreenSnapshot) -> Dict[str, Any]:
+        slots = []
+        for slot in snapshot.slots:
+            stack = None
+            if slot.item:
+                stack = {
+                    "itemId": slot.item.item_id,
+                    "count": slot.item.count,
+                    "maxCount": slot.item.max_count,
+                }
+            slots.append(
+                {
+                    "slot": slot.slot,
+                    "group": slot.group,
+                    "invIndex": slot.inv_index,
+                    "x": slot.x,
+                    "y": slot.y,
+                    "stack": stack,
+                    "equip": slot.equip,
+                }
+            )
+        cursor = None
+        if snapshot.cursor:
+            cursor = {
+                "itemId": snapshot.cursor.item_id,
+                "count": snapshot.cursor.count,
+                "maxCount": snapshot.cursor.max_count,
+            }
+        return {
+            "handler": snapshot.handler,
+            "screenOpen": snapshot.screen_open,
+            "title": snapshot.title,
+            "cursor": cursor,
+            "slots": slots,
+        }
+
+    def serialize_result(self, data: Any) -> Any:
+        if isinstance(data, ScreenSnapshot):
+            return self._snapshot_to_raw(data)
+        if isinstance(data, dict):
+            return {key: self.serialize_result(value) for key, value in data.items()}
+        if isinstance(data, list):
+            return [self.serialize_result(value) for value in data]
+        return data
 
     def _extract_json_object(self, text: str) -> Optional[Dict[str, Any]]:
         if not text:
@@ -4050,6 +4858,8 @@ class HeadfulInventoryController:
     ) -> int:
         executed = 0
         for action in actions:
+            if self._cancel_requested:
+                break
             action_type = action.get("type")
             if action_type == "wait":
                 await asyncio.sleep(max(0, int(action.get("ms", 50))) / 1000)
@@ -4106,11 +4916,141 @@ class HeadfulInventoryController:
             elif action_type in {"openInventory", "closeScreen", "tapKey", "setKey", "releaseAllKeys", "hotbar", "chat", "command"}:
                 await self._adapter.send_action(action, self._headful_config())
                 executed += 1
+            elif action_type == "move_to":
+                await self.go_to_position(
+                    {
+                        "x": action.get("x"),
+                        "y": action.get("y"),
+                        "z": action.get("z"),
+                        "distance": action.get("distance", 1.5),
+                        "timeout": action.get("timeout", 8.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "go_to_nearest_block":
+                await self.go_to_nearest_block(
+                    {
+                        "block": action.get("block"),
+                        "blocks": action.get("blocks"),
+                        "radius": action.get("radius", 16),
+                        "distance": action.get("distance", 3.5),
+                        "timeout": action.get("timeout", 6.0),
+                        "look_at": action.get("look_at", True),
+                        "look_duration_ms": action.get("look_duration_ms", 200),
+                    }
+                )
+                executed += 1
+            elif action_type == "go_to_player":
+                await self.go_to_player(
+                    {
+                        "player_name": action.get("player")
+                        or action.get("player_name")
+                        or action.get("name")
+                        or action.get("target"),
+                        "distance": action.get("distance", 3.0),
+                        "timeout": action.get("timeout", 6.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "follow_player":
+                await self.follow_player(
+                    {
+                        "player_name": action.get("player")
+                        or action.get("player_name")
+                        or action.get("name")
+                        or action.get("target"),
+                        "duration_sec": action.get("duration_sec", 12.0),
+                        "distance": action.get("distance", 3.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "attack_nearest":
+                await self.attack_nearest(
+                    {
+                        "entity_type": action.get("entity_type"),
+                        "range": action.get("range", 18.0),
+                        "duration_sec": action.get("duration_sec", 6.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "defend_self":
+                await self.defend_self(
+                    {
+                        "range": action.get("range", 12.0),
+                        "duration_sec": action.get("duration_sec", 10.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "smart_guard":
+                await self.smart_guard(
+                    {
+                        "range": action.get("range", 12.0),
+                        "duration_sec": action.get("duration_sec", 10.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "smart_gather":
+                await self.smart_gather(
+                    {
+                        "range": action.get("range", 10.0),
+                    }
+                )
+                executed += 1
+            elif action_type == "place_block":
+                await self.place_block(
+                    {
+                        "block": action.get("block"),
+                        "face": action.get("face", "up"),
+                    }
+                )
+                executed += 1
+            elif action_type == "pillar_up":
+                await self.pillar_up(
+                    {
+                        "steps": action.get("steps", action.get("count", 1)),
+                        "delay_ms": action.get("delay_ms", action.get("delayMs", 320)),
+                    }
+                )
+                executed += 1
+            elif action_type == "dig_area":
+                await self.dig_area(
+                    {
+                        "x1": action.get("x1"),
+                        "y1": action.get("y1"),
+                        "z1": action.get("z1"),
+                        "x2": action.get("x2"),
+                        "y2": action.get("y2"),
+                        "z2": action.get("z2"),
+                        "fill_walls": action.get("fill_walls"),
+                        "keep_walls": action.get("keep_walls"),
+                        "max_blocks": action.get("max_blocks"),
+                        "attack_ms": action.get("attack_ms"),
+                        "distance": action.get("distance"),
+                        "move_timeout": action.get("move_timeout"),
+                        "look_duration_ms": action.get("look_duration_ms"),
+                        "step_delay_ms": action.get("step_delay_ms"),
+                        "progress_every": action.get("progress_every"),
+                        "y_order": action.get("y_order"),
+                    }
+                )
+                executed += 1
+            elif action_type == "useTarget":
+                await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+                executed += 1
             if step_delay_ms > 0:
                 await asyncio.sleep(step_delay_ms / 1000)
             if refresh_snapshot:
                 await self._get_snapshot(refresh=True)
         return executed
+
+    async def cancel_current(self) -> Dict[str, Any]:
+        self._cancel_requested = True
+        await self._adapter.send_action({"type": "releaseAllKeys"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
+        await self._adapter.send_action({"type": "stopLook"}, self._headful_config())
+        await self._adapter.send_action({"type": "closeScreen"}, self._headful_config())
+        return {"ok": True}
 
     def _resolve_llm_config(self, params: Dict[str, Any]) -> Dict[str, Any]:
         cfg = self._config()
@@ -4166,6 +5106,9 @@ class HeadfulInventoryController:
             "store_inventory",
             "set_respawn",
             "move_to",
+            "go_to_player",
+            "go_to_nearest_block",
+            "pillar_up",
             "pickup_nearby",
             "open_container",
             "open_crafting_table",
@@ -4207,7 +5150,12 @@ class HeadfulInventoryController:
                 normalized["item"] = item
                 normalized["count"] = max(1, count)
             elif action_type in {"follow_player", "guard_player"}:
-                target = action.get("player") or action.get("name") or action.get("target")
+                target = (
+                    action.get("player")
+                    or action.get("player_name")
+                    or action.get("name")
+                    or action.get("target")
+                )
                 if target:
                     normalized["player"] = str(target)
                 normalized["duration_sec"] = float(action.get("duration_sec", 20.0))
@@ -4223,6 +5171,73 @@ class HeadfulInventoryController:
                 except Exception:
                     warnings.append(f"step {idx}: move_to invalid coords")
                     continue
+            elif action_type == "pillar_up":
+                steps_raw = action.get("steps", action.get("count", 1))
+                try:
+                    steps = int(steps_raw)
+                except (TypeError, ValueError):
+                    steps = 1
+                normalized["steps"] = max(1, min(steps, 8))
+            elif action_type == "go_to_player":
+                target = (
+                    action.get("player")
+                    or action.get("player_name")
+                    or action.get("name")
+                    or action.get("target")
+                )
+                if target:
+                    normalized["player"] = str(target)
+                if action.get("distance") is not None:
+                    try:
+                        normalized["distance"] = float(action.get("distance"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_player invalid distance")
+                        continue
+                if action.get("timeout") is not None:
+                    try:
+                        normalized["timeout"] = float(action.get("timeout"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_player invalid timeout")
+                        continue
+            elif action_type == "go_to_nearest_block":
+                block = action.get("block")
+                blocks = action.get("blocks")
+                if blocks is not None:
+                    if not isinstance(blocks, list):
+                        warnings.append(f"step {idx}: go_to_nearest_block blocks not list")
+                        continue
+                    normalized["blocks"] = [str(b) for b in blocks if b]
+                if block:
+                    normalized["block"] = str(block)
+                if not normalized.get("block") and not normalized.get("blocks"):
+                    warnings.append(f"step {idx}: go_to_nearest_block missing blocks")
+                    continue
+                if action.get("radius") is not None:
+                    try:
+                        normalized["radius"] = int(action.get("radius"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_nearest_block invalid radius")
+                        continue
+                if action.get("distance") is not None:
+                    try:
+                        normalized["distance"] = float(action.get("distance"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_nearest_block invalid distance")
+                        continue
+                if action.get("timeout") is not None:
+                    try:
+                        normalized["timeout"] = float(action.get("timeout"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_nearest_block invalid timeout")
+                        continue
+                if action.get("look_at") is not None:
+                    normalized["look_at"] = bool(action.get("look_at"))
+                if action.get("look_duration_ms") is not None:
+                    try:
+                        normalized["look_duration_ms"] = int(action.get("look_duration_ms"))
+                    except Exception:
+                        warnings.append(f"step {idx}: go_to_nearest_block invalid look_duration_ms")
+                        continue
             elif action_type in {
                 "open_container",
                 "open_crafting_table",
@@ -4283,6 +5298,9 @@ class HeadfulInventoryController:
             "store_inventory": {},
             "set_respawn": {},
             "move_to": {"x": 0, "y": 0, "z": 0},
+            "go_to_player": {"player": "player_name"},
+            "go_to_nearest_block": {"blocks": ["chest", "crafting_table"]},
+            "pillar_up": {"steps": 2},
             "pickup_nearby": {},
             "open_container": {},
             "open_crafting_table": {},
@@ -4509,6 +5527,10 @@ class HeadfulInventoryController:
                         "timeout": action.get("timeout", 8.0),
                     }
                 )
+            elif action_type == "pillar_up":
+                result = await self.pillar_up(
+                    {"steps": action.get("steps", action.get("count", 1))}
+                )
             elif action_type == "pickup_nearby":
                 result = await self.pickup_nearby_items(
                     {
@@ -4727,6 +5749,9 @@ class HeadfulInventoryController:
         api_key = llm_cfg.get("api_key")
         base_url = llm_cfg.get("base_url")
         model = llm_cfg.get("model")
+        embedding_api_key = params.get("embedding_api_key")
+        embedding_base_url = params.get("embedding_base_url")
+        embedding_model = params.get("embedding_model")
         user_id = (
             params.get("rag_user_id")
             or cfg.get("rag_user_id")
@@ -4735,6 +5760,9 @@ class HeadfulInventoryController:
         )
         use_rag = bool(params.get("use_rag", True))
         use_mindcraft_docs = bool(params.get("use_mindcraft_docs", False))
+        scopes = ["long_term"]
+        if use_mindcraft_docs:
+            scopes.append("knowledge")
         if use_rag and use_mindcraft_docs:
             try:
                 await self._ensure_mindcraft_docs_indexed(str(user_id))
@@ -4749,6 +5777,10 @@ class HeadfulInventoryController:
                     api_key=api_key,
                     base_url=base_url,
                     model=None,
+                    embedding_api_key=embedding_api_key,
+                    embedding_base_url=embedding_base_url,
+                    embedding_model=embedding_model,
+                    scopes=scopes,
                     fast_mode=True,
                 )
             except Exception:
@@ -4844,6 +5876,7 @@ class HeadfulInventoryController:
         snapshot = ScreenSnapshot.from_dict(raw)
         if snapshot is None:
             return {"ok": False, "error": "no_snapshot"}
+        self._cancel_requested = False
         available = self._build_counts(snapshot.slots, ("player_main", "player_hotbar"))
         plan_trace: List[Dict[str, Any]] = []
         selected: Optional[Dict[str, Any]] = None
@@ -4871,6 +5904,21 @@ class HeadfulInventoryController:
                 selected = rule_plan
             else:
                 fallback_plan = rule_plan
+
+        planner_mode = (params.get("planner_mode") or params.get("planner") or "").strip().lower()
+        if planner_mode in {"rules_only", "rules", "no_llm"} and selected is None:
+            text_plan = self._plan_text_only(goal, available)
+            if text_plan:
+                return {
+                    "ok": True,
+                    "actions": [],
+                    "reason": text_plan.get("reason"),
+                    "warnings": [],
+                    "planner": text_plan.get("planner"),
+                    "plan_text": text_plan.get("plan_text"),
+                    "trace": plan_trace,
+                }
+            return {"ok": False, "error": "rules_plan_not_found", "trace": plan_trace}
 
         llm_plan = None
         if selected is None:
@@ -4941,6 +5989,58 @@ class HeadfulInventoryController:
             self._log_append(f"Plan step {idx + 1}: {action}")
         if len(actions_list) > 20:
             self._log_append(f"Plan steps truncated: {len(actions_list)} total.")
+        auto_substeps = None
+        auto_error = None
+        if execute and not actions_list and plan_text:
+            auto_craft_result = None
+            if self._goal_is_craft(goal) and not self._goal_is_crafting_table(goal):
+                item_name = self._extract_item_from_goal(goal)
+                if item_name:
+                    auto_craft_result = await self.craft_item(
+                        {
+                            "item": item_name,
+                            "count": int(params.get("count", 1) or 1),
+                            "recursive": True,
+                            "auto_gather_base_items": True,
+                            "auto_open_crafting_table": True,
+                        },
+                        execute=True,
+                    )
+                    if auto_craft_result.get("ok"):
+                        self._log_append(f"[auto-craft] ok: {item_name}")
+                    else:
+                        self._log_append(
+                            f"[auto-craft] failed: {item_name} err={auto_craft_result.get('error')}"
+                        )
+                    auto_substeps = [{"step": "auto_craft", "result": auto_craft_result}]
+                    if auto_craft_result.get("ok"):
+                        plan_payload["auto_substeps"] = auto_substeps
+                        self.last_plan = plan_payload
+                        return {
+                            "ok": True,
+                            "actions": actions_list,
+                            "executed": 0,
+                            "reason": reason,
+                            "warnings": warnings_list,
+                            "planner": planner,
+                            "plan_text": plan_text,
+                            "trace": plan_trace,
+                            "auto_substeps": auto_substeps,
+                        }
+                    auto_error = auto_craft_result.get("error")
+
+            if auto_substeps is not None:
+                plan_payload["auto_substeps"] = auto_substeps
+            if auto_error:
+                plan_payload["auto_error"] = auto_error
+            self.last_plan = plan_payload
+
+            lines = [line.strip() for line in plan_text.splitlines() if line.strip()]
+            preview = "\n".join(lines[:6]) if lines else plan_text
+            await self._emit_alert(
+                f"无法执行：{goal}\n{preview}",
+                {"goal": goal, "planner": planner, "reason": reason},
+            )
 
         if not execute:
             self._log_append(f"Headful planner ready: {len(actions_list)} steps.")
@@ -4962,9 +6062,20 @@ class HeadfulInventoryController:
                 actions_list, step_delay_ms, refresh_snapshot
             )
             self._log_append(f"Headful planner executed: {executed}/{len(actions_list)} steps.")
+            if self._cancel_requested:
+                self._cancel_requested = False
+                return {
+                    "ok": False,
+                    "error": "cancelled",
+                    "actions": actions_list,
+                    "executed": executed,
+                    "reason": reason,
+                    "warnings": warnings_list,
+                    "planner": planner,
+                    "plan_text": plan_text,
+                    "trace": plan_trace,
+                }
 
-        auto_substeps = None
-        auto_error = None
         if not actions_list and self._goal_is_crafting_table(goal):
             auto_result = await self._auto_craft_table(params)
             auto_substeps = auto_result.get("substeps") if isinstance(auto_result, dict) else None
@@ -5506,6 +6617,9 @@ class HeadfulInventoryController:
                 continue
             if recipe_book.has_item(token):
                 return token
+        for cn, item in sorted(CN_ITEM_ALIASES.items(), key=lambda entry: len(entry[0]), reverse=True):
+            if cn in goal and recipe_book.has_item(item):
+                return item
         return None
 
     def _is_base_item(self, item_name: str) -> bool:
@@ -5754,12 +6868,450 @@ class HeadfulInventoryController:
             "item": item_name,
         }
 
+    def _extract_coords_from_goal(self, goal: str) -> Optional[Tuple[float, float, float]]:
+        raw = (goal or "").lower()
+        x_match = re.search(r"x\s*[:=]?\s*(-?\d+(?:\.\d+)?)", raw)
+        y_match = re.search(r"y\s*[:=]?\s*(-?\d+(?:\.\d+)?)", raw)
+        z_match = re.search(r"z\s*[:=]?\s*(-?\d+(?:\.\d+)?)", raw)
+        if x_match and y_match and z_match:
+            return (
+                float(x_match.group(1)),
+                float(y_match.group(1)),
+                float(z_match.group(1)),
+            )
+        triple = re.search(r"(-?\d+(?:\.\d+)?)\s*[ ,/]\s*(-?\d+(?:\.\d+)?)\s*[ ,/]\s*(-?\d+(?:\.\d+)?)", raw)
+        if triple:
+            return (
+                float(triple.group(1)),
+                float(triple.group(2)),
+                float(triple.group(3)),
+            )
+        return None
+
+    def _extract_two_coords_from_goal(
+        self, goal: str
+    ) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
+        raw = goal or ""
+        parts = re.split(r"\s*(?:到|至|to|->|~|—)\s*", raw, maxsplit=1, flags=re.I)
+        if len(parts) == 2:
+            first = self._extract_coords_from_goal(parts[0])
+            second = self._extract_coords_from_goal(parts[1])
+            if first and second:
+                return first, second
+        triples = re.findall(
+            r"(-?\d+(?:\.\d+)?)\s*[ ,/]\s*(-?\d+(?:\.\d+)?)\s*[ ,/]\s*(-?\d+(?:\.\d+)?)",
+            raw,
+        )
+        if len(triples) >= 2:
+            first = triples[0]
+            second = triples[1]
+            return (
+                (float(first[0]), float(first[1]), float(first[2])),
+                (float(second[0]), float(second[1]), float(second[2])),
+            )
+        return None
+
+    def _extract_fill_walls_flag(self, goal: str) -> Optional[bool]:
+        raw = (goal or "").lower()
+        match = re.search(
+            r"(?:fill_wall|fillwalls|fillwall|补墙|填墙|封墙|补边|填边|封边)\s*[:=]?\s*(true|false|1|0|on|off|是|否|开|关)",
+            raw,
+        )
+        if match:
+            token = match.group(1)
+            if token in {"true", "1", "on", "是", "开"}:
+                return True
+            if token in {"false", "0", "off", "否", "关"}:
+                return False
+        if any(
+            phrase in raw
+            for phrase in (
+                "不补墙",
+                "不要补墙",
+                "不填墙",
+                "不要填墙",
+                "no wall",
+                "no_wall",
+            )
+        ):
+            return False
+        if any(
+            phrase in raw
+            for phrase in (
+                "补墙",
+                "填墙",
+                "封墙",
+                "补边",
+                "填边",
+                "封边",
+                "fillwall",
+                "fill_wall",
+                "fill walls",
+            )
+        ):
+            return True
+        return None
+
+    def _extract_step_count(self, goal: str, default: int = 2) -> int:
+        raw = goal or ""
+        match = re.search(r"(\d+)", raw)
+        if match:
+            try:
+                value = int(match.group(1))
+                return max(1, min(value, 8))
+            except ValueError:
+                pass
+        cn_map = {
+            "一": 1,
+            "二": 2,
+            "两": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+        }
+        for cn, value in cn_map.items():
+            if cn in raw:
+                return value
+        return default
+
+    def _extract_player_from_goal(self, goal: str) -> Optional[str]:
+        raw = goal or ""
+        match = re.search(r"(?:跟随|跟着|跟我|follow)\s*([A-Za-z0-9_]+)", raw, re.I)
+        if match:
+            return match.group(1)
+        match = re.search(r"(?:玩家|player)\s*([A-Za-z0-9_]+)", raw, re.I)
+        if match:
+            return match.group(1)
+        match = re.search(r"(?:找|寻找|去找|找到|靠近)\s*([A-Za-z0-9_]+)", raw, re.I)
+        if match:
+            return match.group(1)
+        return None
+
+    def _extract_entity_from_goal(self, goal: str) -> Optional[str]:
+        raw = (goal or "").lower()
+        cn_map = {
+            "僵尸": "zombie",
+            "骷髅": "skeleton",
+            "苦力怕": "creeper",
+            "蜘蛛": "spider",
+            "洞穴蜘蛛": "cave_spider",
+            "末影人": "enderman",
+            "女巫": "witch",
+            "史莱姆": "slime",
+            "岩浆怪": "magma_cube",
+            "掠夺者": "pillager",
+            "卫道士": "vindicator",
+            "唤魔者": "evoker",
+            "劫掠兽": "ravager",
+            "幻翼": "phantom",
+            "守卫者": "guardian",
+            "远古守卫者": "elder_guardian",
+            "猪灵": "piglin",
+            "僵尸猪灵": "zombified_piglin",
+            "猪灵蛮兵": "piglin_brute",
+            "溺尸": "drowned",
+            "僵尸村民": "zombie_villager",
+            "女巫": "witch",
+            "凋灵骷髅": "wither_skeleton",
+        }
+        for cn, en in cn_map.items():
+            if cn in goal:
+                return en
+        for etype in HOSTILE_ENTITY_TYPES:
+            if etype in raw:
+                return etype
+        return None
+
+    def _unique_targets(self, items: List[str]) -> List[str]:
+        seen: set[str] = set()
+        result: List[str] = []
+        for item in items:
+            key = _normalize_item_name(item)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(key)
+        return result
+
+    def _filter_block_targets(self, blocks: List[str], cfg: Dict[str, Any]) -> List[str]:
+        deny_raw = cfg.get("container_denylist")
+        if deny_raw is None:
+            deny_raw = ["ender_chest"]
+        if isinstance(deny_raw, str):
+            deny_list = [deny_raw]
+        elif isinstance(deny_raw, list):
+            deny_list = [str(item) for item in deny_raw if item]
+        else:
+            deny_list = []
+        deny_set = {self._normalize_block_name(item).split(":", 1)[1] for item in deny_list}
+        if not deny_set:
+            return blocks
+        filtered = []
+        for block in blocks:
+            name = self._normalize_block_name(block).split(":", 1)[1]
+            if name in deny_set:
+                continue
+            filtered.append(block)
+        return filtered
+
+    def _extract_block_targets_from_goal(self, goal: str) -> List[str]:
+        targets: List[str] = []
+        raw = goal or ""
+        lowered = raw.lower()
+
+        if any(keyword in raw for keyword in ("工作方块", "工作站")):
+            targets.extend(sorted(BASIC_UTILITY_BLOCKS))
+
+        if any(keyword in raw for keyword in ("箱子", "储物箱", "箱", "容器")):
+            targets.extend(["chest", "barrel", "shulker_box", "trapped_chest"])
+        if "木桶" in raw:
+            targets.append("barrel")
+        if "潜影盒" in raw:
+            targets.append("shulker_box")
+        if "末影箱" in raw or "ender chest" in lowered:
+            targets.append("ender_chest")
+
+        if "工作台" in raw or "工作桌" in raw or "crafting table" in lowered:
+            targets.append("crafting_table")
+        if "熔炉" in raw or "炉子" in raw:
+            targets.append("furnace")
+        if "高炉" in raw or "blast furnace" in lowered:
+            targets.append("blast_furnace")
+        if "烟熏炉" in raw or "smoker" in lowered:
+            targets.append("smoker")
+        if "酿造台" in raw or "brewing" in lowered:
+            targets.append("brewing_stand")
+        if "附魔台" in raw or "enchant" in lowered:
+            targets.append("enchanting_table")
+        if "锻造台" in raw or "smithing" in lowered:
+            targets.append("smithing_table")
+        if "铁砧" in raw or "anvil" in lowered:
+            targets.append("anvil")
+        if "砂轮" in raw or "磨石" in raw or "grindstone" in lowered:
+            targets.append("grindstone")
+        if "切石机" in raw or "stonecutter" in lowered:
+            targets.append("stonecutter")
+        if "织布机" in raw or "loom" in lowered:
+            targets.append("loom")
+        if "制图台" in raw or "cartography" in lowered:
+            targets.append("cartography_table")
+        if "讲台" in raw or "lectern" in lowered:
+            targets.append("lectern")
+        if "堆肥桶" in raw or "composter" in lowered:
+            targets.append("composter")
+        if "发射器" in raw or "dispenser" in lowered:
+            targets.append("dispenser")
+        if "投掷器" in raw or "dropper" in lowered:
+            targets.append("dropper")
+        if "漏斗" in raw or "hopper" in lowered:
+            targets.append("hopper")
+
+        return self._unique_targets(targets)
+
+    def _goal_has_move_intent(self, goal: str) -> bool:
+        lowered = (goal or "").lower()
+        keywords = (
+            "移动",
+            "前往",
+            "走到",
+            "去",
+            "到",
+            "靠近",
+            "附近",
+            "寻找",
+            "找",
+            "move",
+            "goto",
+            "go to",
+            "near",
+            "closest",
+            "find",
+        )
+        return any(keyword in lowered or keyword in goal for keyword in keywords)
+
+    def _plan_dig_area_from_goal(self, goal: str) -> Optional[Dict[str, Any]]:
+        lowered = (goal or "").lower()
+        if not any(
+            keyword in lowered or keyword in goal
+            for keyword in ("挖", "挖掘", "挖空", "清空", "dig", "excavate")
+        ):
+            return None
+        coords = self._extract_two_coords_from_goal(goal)
+        if not coords:
+            return None
+        fill_walls = self._extract_fill_walls_flag(goal)
+        (x1, y1, z1), (x2, y2, z2) = coords
+        return {
+            "ok": True,
+            "actions": [
+                {
+                    "type": "dig_area",
+                    "x1": x1,
+                    "y1": y1,
+                    "z1": z1,
+                    "x2": x2,
+                    "y2": y2,
+                    "z2": z2,
+                    "fill_walls": fill_walls,
+                }
+            ],
+            "reason": "dig_area",
+            "planner": "rules:dig_area",
+        }
+
+    def _plan_move_from_goal(self, goal: str) -> Optional[Dict[str, Any]]:
+        lowered = (goal or "").lower()
+        if any(
+            keyword in goal
+            for keyword in (
+                "垫脚",
+                "垫高",
+                "垒方块",
+                "搭方块",
+                "堆方块",
+                "搭高",
+                "爬高",
+                "爬上",
+                "向上",
+            )
+        ):
+            steps = self._extract_step_count(goal, default=2)
+            return {
+                "ok": True,
+                "actions": [{"type": "pillar_up", "steps": steps}],
+                "reason": "pillar_up",
+                "planner": "rules:move",
+                "plan_text": None,
+                "warnings": [],
+            }
+        if any(keyword in lowered for keyword in ("move", "goto", "go to", "前往", "移动", "走到", "去")):
+            coords = self._extract_coords_from_goal(goal)
+            if coords:
+                return {
+                    "ok": True,
+                    "actions": [
+                        {"type": "move_to", "x": coords[0], "y": coords[1], "z": coords[2]}
+                    ],
+                    "reason": "move_to_coords",
+                    "planner": "rules:move",
+                    "plan_text": None,
+                    "warnings": [],
+                }
+        if any(keyword in goal for keyword in ("跟随", "跟着", "follow")):
+            player = self._extract_player_from_goal(goal)
+            return {
+                "ok": True,
+                "actions": [{"type": "follow_player", "player": player}],
+                "reason": "follow_player",
+                "planner": "rules:follow",
+                "plan_text": None,
+                "warnings": [],
+            }
+        player = self._extract_player_from_goal(goal)
+        if (player or "玩家" in goal or "player" in lowered) and self._goal_has_move_intent(goal):
+            return {
+                "ok": True,
+                "actions": [{"type": "go_to_player", "player": player}],
+                "reason": "go_to_player",
+                "planner": "rules:move",
+                "plan_text": None,
+                "warnings": [],
+            }
+        targets = self._extract_block_targets_from_goal(goal)
+        if targets and self._goal_has_move_intent(goal):
+            cfg = self._headful_config()
+            targets = self._filter_block_targets(targets, cfg)
+            if targets:
+                return {
+                    "ok": True,
+                    "actions": [
+                        {
+                            "type": "go_to_nearest_block",
+                            "blocks": targets,
+                            "radius": int(cfg.get("scan_radius", 16)),
+                        }
+                    ],
+                    "reason": "go_to_block",
+                    "planner": "rules:move",
+                    "plan_text": None,
+                    "warnings": [],
+                }
+        return None
+
+    def _plan_combat_from_goal(self, goal: str) -> Optional[Dict[str, Any]]:
+        if any(keyword in goal for keyword in ("护卫", "守护", "保护")):
+            return {
+                "ok": True,
+                "actions": [{"type": "smart_guard"}],
+                "reason": "smart_guard",
+                "planner": "rules:combat",
+                "plan_text": None,
+                "warnings": [],
+            }
+        if any(keyword in goal for keyword in ("攻击", "战斗", "打怪", "消灭")):
+            entity = self._extract_entity_from_goal(goal)
+            if entity:
+                return {
+                    "ok": True,
+                    "actions": [{"type": "attack_nearest", "entity_type": entity}],
+                    "reason": "attack_nearest",
+                    "planner": "rules:combat",
+                    "plan_text": None,
+                    "warnings": [],
+                }
+            return {
+                "ok": True,
+                "actions": [{"type": "defend_self"}],
+                "reason": "defend_self",
+                "planner": "rules:combat",
+                "plan_text": None,
+                "warnings": [],
+            }
+        return None
+
+    def _plan_place_from_goal(self, goal: str) -> Optional[Dict[str, Any]]:
+        if not any(keyword in goal for keyword in ("放置", "放下", "摆放", "放个", "放一个", "place")):
+            return None
+        item = self._extract_item_from_goal(goal)
+        if item:
+            return {
+                "ok": True,
+                "actions": [{"type": "place_block", "block": item}],
+                "reason": "place_block",
+                "planner": "rules:place",
+                "plan_text": None,
+                "warnings": [],
+            }
+        return {
+            "ok": True,
+            "actions": [{"type": "useTarget"}],
+            "reason": "use_target",
+            "planner": "rules:place",
+            "plan_text": None,
+            "warnings": [],
+        }
+
     async def _plan_from_rules(
         self,
         goal: str,
         snapshot: ScreenSnapshot,
         available: Dict[str, int],
     ) -> Optional[Dict[str, Any]]:
+        dig_plan = self._plan_dig_area_from_goal(goal)
+        if dig_plan:
+            return dig_plan
+        move_plan = self._plan_move_from_goal(goal)
+        if move_plan:
+            return move_plan
+        combat_plan = self._plan_combat_from_goal(goal)
+        if combat_plan:
+            return combat_plan
+        place_plan = self._plan_place_from_goal(goal)
+        if place_plan:
+            return place_plan
         if self._goal_is_eat(goal):
             return self._plan_eat_actions(snapshot, goal)
         if self._goal_is_crafting_table(goal):
@@ -5810,6 +7362,182 @@ class HeadfulInventoryController:
             if base.endswith(suffix):
                 return base[: -len(suffix)] + "_planks"
         return None
+
+    def _log_block_variants(self) -> List[str]:
+        recipe_book = self._get_recipe_book()
+        try:
+            items = recipe_book.all_items()
+        except Exception:
+            items = []
+        logs = [item for item in items if self._is_log(item)]
+        if not logs:
+            logs = [
+                "oak_log",
+                "spruce_log",
+                "birch_log",
+                "jungle_log",
+                "acacia_log",
+                "dark_oak_log",
+                "mangrove_log",
+                "cherry_log",
+                "crimson_stem",
+                "warped_stem",
+            ]
+        return sorted(set(logs))
+
+    def _tool_type_for_block(self, block_name: str) -> Optional[str]:
+        if not block_name:
+            return None
+        name = self._normalize_block_name(block_name).split(":", 1)[-1]
+        if self._is_log(name) or name.endswith("_planks"):
+            return "axe"
+        if (
+            "ore" in name
+            or name
+            in {
+                "stone",
+                "cobblestone",
+                "deepslate",
+                "cobbled_deepslate",
+                "andesite",
+                "diorite",
+                "granite",
+                "tuff",
+                "calcite",
+                "netherrack",
+                "basalt",
+                "blackstone",
+                "end_stone",
+                "obsidian",
+            }
+        ):
+            return "pickaxe"
+        if name in {
+            "dirt",
+            "grass_block",
+            "coarse_dirt",
+            "podzol",
+            "rooted_dirt",
+            "sand",
+            "red_sand",
+            "gravel",
+            "clay",
+            "snow",
+            "snow_block",
+            "soul_sand",
+            "soul_soil",
+            "farmland",
+            "mud",
+        }:
+            return "shovel"
+        return None
+
+    def _tool_type_for_blocks(self, block_names: Iterable[str]) -> Optional[str]:
+        tool = None
+        for block_name in block_names:
+            candidate = self._tool_type_for_block(block_name)
+            if candidate == "pickaxe":
+                return "pickaxe"
+            if candidate == "axe" and tool != "pickaxe":
+                tool = "axe"
+            if candidate == "shovel" and tool is None:
+                tool = "shovel"
+        return tool
+
+    def _best_tool_name(self, snapshot: ScreenSnapshot, tool_type: str) -> Optional[str]:
+        candidates = TOOL_CANDIDATES.get(tool_type, [])
+        for name in candidates:
+            if self._inventory_has_item(snapshot, name, 1):
+                return name
+        return None
+
+    async def _auto_gather_missing_base_items(
+        self, missing: Dict[str, int], params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        if "auto_gather_base_items" in params:
+            enabled = bool(params.get("auto_gather_base_items"))
+        else:
+            enabled = bool(cfg.get("auto_gather_base_items", False))
+        if not enabled:
+            return {"ok": False, "error": "auto_gather_disabled"}
+        try:
+            radius = int(params.get("auto_gather_radius", cfg.get("auto_gather_radius", 12)))
+        except (TypeError, ValueError):
+            radius = 12
+        radius = max(3, radius)
+        results: List[Dict[str, Any]] = []
+        gathered_any = False
+        use_containers = bool(
+            params.get(
+                "auto_collect_from_containers",
+                cfg.get("auto_collect_from_containers", True),
+            )
+        )
+        for item, count in missing.items():
+            if not item or count <= 0:
+                continue
+            blocks: List[str] = []
+            gather_count = max(1, int(count))
+            remaining = gather_count
+            if use_containers:
+                container_result = await self.craft_from_container(
+                    {
+                        "item": item,
+                        "count": gather_count,
+                        "skip_craft": True,
+                        "smart_pickup": True,
+                        "move": True,
+                        "container_radius": params.get(
+                            "container_radius",
+                            cfg.get("container_radius_default", 5),
+                        ),
+                        "container_timeout": params.get(
+                            "container_timeout", params.get("timeout", 4.0)
+                        ),
+                        "container_search_radii": params.get(
+                            "container_search_radii", cfg.get("container_search_radii")
+                        ),
+                    }
+                )
+                results.append({"item": item, "need": gather_count, "container": container_result})
+                if container_result.get("ok"):
+                    remaining_map = container_result.get("remaining")
+                    if isinstance(remaining_map, dict):
+                        remaining = int(remaining_map.get(item, 0) or 0)
+                    if remaining < gather_count:
+                        gathered_any = True
+                    if remaining <= 0:
+                        gathered_any = True
+                        continue
+            if self._is_log(item):
+                blocks = [item]
+            elif item == "cobblestone":
+                blocks = ["cobblestone", "stone"]
+            elif item == "stone":
+                blocks = ["stone"]
+            elif item == "cobbled_deepslate":
+                blocks = ["cobbled_deepslate", "deepslate"]
+            elif item.endswith("_planks"):
+                blocks = self._log_block_variants()
+                gather_count = max(1, int(math.ceil(remaining / 4)))
+            else:
+                results.append({"item": item, "ok": False, "error": "unsupported_base"})
+                continue
+            result = await self.collect_block(
+                {
+                    "blocks": blocks,
+                    "count": gather_count,
+                    "radius": radius,
+                    "auto_equip_tool": True,
+                }
+            )
+            results.append({"item": item, "need": count, "gather": result})
+            if result.get("ok"):
+                gathered_any = True
+        if gathered_any:
+            self._log_append(f"[auto-gather] gathered base items: {list(missing.keys())}")
+        return {"ok": gathered_any, "results": results}
 
     def _is_smelt_output(self, item_name: str) -> bool:
         return item_name in SMELTING_OUTPUTS or item_name in SMELT_LOG_OUTPUTS
@@ -6419,24 +8147,27 @@ class HeadfulInventoryController:
                 )
             )
             if result.get("error") == "requires_crafting_table" and auto_open_table:
-                if not working_params.get("open_table_attempted"):
-                    open_result = await self.open_crafting_table(
-                        {
-                            "radius": working_params.get(
-                                "search_radius", working_params.get("radius", 8)
-                            ),
-                            "move": True,
-                        }
-                    )
-                    if not open_result.get("ok"):
-                        return {
-                            "ok": False,
-                            "error": "open_crafting_table_failed",
-                            "detail": open_result,
-                            "substeps": substeps,
-                        }
+                already_open = await self._wait_for_crafting_table(timeout=0.1)
+                if already_open:
                     working_params["open_table_attempted"] = True
                     continue
+                open_result = await self.open_crafting_table(
+                    {
+                        "radius": working_params.get(
+                            "search_radius", working_params.get("radius", 8)
+                        ),
+                        "move": True,
+                    }
+                )
+                if not open_result.get("ok"):
+                    return {
+                        "ok": False,
+                        "error": "open_crafting_table_failed",
+                        "detail": open_result,
+                        "substeps": substeps,
+                    }
+                working_params["open_table_attempted"] = True
+                continue
 
             if result.get("error") != "missing_items":
                 if substeps:
@@ -6469,17 +8200,41 @@ class HeadfulInventoryController:
                 working_params,
             )
 
+            base_missing = {
+                k: v for k, v in filtered_missing.items() if self._is_base_item(k)
+            }
+            if base_missing:
+                auto_gather = bool(
+                    working_params.get(
+                        "auto_gather_base_items",
+                        self._headful_config().get("auto_gather_base_items", False),
+                    )
+                )
+                if auto_gather and not working_params.get("auto_gather_attempted"):
+                    working_params["auto_gather_attempted"] = True
+                    gather_result = await self._auto_gather_missing_base_items(
+                        base_missing, working_params
+                    )
+                    substeps.append(
+                        {
+                            "step": "auto_gather_base_items",
+                            "missing": base_missing,
+                            "result": gather_result,
+                        }
+                    )
+                    if gather_result.get("ok"):
+                        continue
+                return {
+                    "ok": False,
+                    "error": "missing_base_items",
+                    "item": item_name,
+                    "missing": filtered_missing,
+                    "substeps": substeps,
+                }
+
             next_chain = list(chain)
             next_chain.append(item_name)
             for missing_item, missing_count in filtered_missing.items():
-                if self._is_base_item(missing_item):
-                    return {
-                        "ok": False,
-                        "error": "missing_base_items",
-                        "item": item_name,
-                        "missing": filtered_missing,
-                        "substeps": substeps,
-                    }
                 sub_params = {
                     "item": missing_item,
                     "count": int(missing_count),

@@ -29,7 +29,14 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     headfulCraftCountController = TextEditingController(text: '1');
     headfulPlanGoalController = TextEditingController();
     headfulCommandController = TextEditingController();
+    headfulCommandFocusNode = FocusNode();
+    headfulCommandController.addListener(_onHeadfulCommandEditingChanged);
+    headfulCommandFocusNode.addListener(_onHeadfulCommandFocusChanged);
     headfulRagUserIdController = TextEditingController();
+    headfulChatWhitelistController = TextEditingController();
+    headfulChatCommandPrefixesController = TextEditingController();
+    headfulChatBrainPrefixController = TextEditingController();
+    headfulChatBrainUserIdController = TextEditingController();
   }
 
   late TextEditingController hostController;
@@ -50,7 +57,12 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   late TextEditingController headfulCraftCountController;
   late TextEditingController headfulPlanGoalController;
   late TextEditingController headfulCommandController;
+  late FocusNode headfulCommandFocusNode;
   late TextEditingController headfulRagUserIdController;
+  late TextEditingController headfulChatWhitelistController;
+  late TextEditingController headfulChatCommandPrefixesController;
+  late TextEditingController headfulChatBrainPrefixController;
+  late TextEditingController headfulChatBrainUserIdController;
 
   String controlMode = 'headless'; // headless: 现有无头；headful: Fabric 模组
   String authMethod = 'offline';
@@ -64,6 +76,18 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   bool headfulPlanUseMindcraftDocs = true;
   bool headfulSmartGuard = true;
   bool headfulSmartGather = true;
+  bool headfulAutonomyEnabled = true;
+  bool headfulAutonomyLookPlayers = true;
+  bool headfulAutonomyIdleLook = true;
+  bool headfulAutonomyPatrol = true;
+  bool headfulAutonomyHarvestCrops = true;
+  bool headfulAutonomyHarvestMatureOnly = true;
+  bool headfulChatPlanEnabled = true;
+  bool headfulChatPlanGame = true;
+  bool headfulChatPlanFrontend = true;
+  bool headfulChatIgnoreSelf = true;
+  bool headfulChatStripPrefix = true;
+  String headfulChatPlanMode = 'main_brain';
 
   List<String> _logs = [];
   String? _msAuthCode;
@@ -79,10 +103,17 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   bool? _headfulReady;
   Map<String, dynamic>? _headfulState;
   String? _lastHeadfulStateSig;
+  Map<String, dynamic>? _headfulStatus;
+  String? _lastHeadfulStatusSig;
   bool? _lastHeadfulReady;
   String? _lastBackendControlMode;
   Map<String, dynamic>? _headfulPlan;
   String? _lastHeadfulPlanSig;
+  int? _headfulQueueLength;
+  int? _lastHeadfulQueueLength;
+  bool? _headfulTaskActive;
+  bool? _lastHeadfulTaskActive;
+  bool _pendingStatusNotify = false;
 
   // 添加对 notifyListeners 的包装以兼容 BasePlugin
   void _notify() {
@@ -93,6 +124,36 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
   void _updateState(VoidCallback fn) {
     fn();
     notifyListeners();
+  }
+
+  bool _isCommandImeActive() {
+    if (!headfulCommandFocusNode.hasFocus) {
+      return false;
+    }
+    final composing = headfulCommandController.value.composing;
+    return composing.isValid && !composing.isCollapsed;
+  }
+
+  void _onHeadfulCommandEditingChanged() {
+    if (_pendingStatusNotify && !_isCommandImeActive()) {
+      _pendingStatusNotify = false;
+      _notify();
+    }
+  }
+
+  void _onHeadfulCommandFocusChanged() {
+    if (_pendingStatusNotify && !_isCommandImeActive()) {
+      _pendingStatusNotify = false;
+      _notify();
+    }
+  }
+
+  List<String> _splitListInput(String raw) {
+    return raw
+        .split(RegExp(r'[,\n;]+'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
   }
 
   @override
@@ -149,7 +210,30 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     modVisionStream = prefs.getBool('${headfulPrefix}visionStream') ?? false;
     headfulSmartGuard = prefs.getBool('${headfulPrefix}smartGuard') ?? true;
     headfulSmartGather = prefs.getBool('${headfulPrefix}smartGather') ?? true;
+    headfulAutonomyEnabled = prefs.getBool('${headfulPrefix}autonomyEnabled') ?? true;
+    headfulAutonomyLookPlayers = prefs.getBool('${headfulPrefix}autonomyLookPlayers') ?? true;
+    headfulAutonomyIdleLook = prefs.getBool('${headfulPrefix}autonomyIdleLook') ?? true;
+    headfulAutonomyPatrol = prefs.getBool('${headfulPrefix}autonomyPatrol') ?? true;
+    headfulAutonomyHarvestCrops = prefs.getBool('${headfulPrefix}autonomyHarvestCrops') ?? true;
+    headfulAutonomyHarvestMatureOnly =
+        prefs.getBool('${headfulPrefix}autonomyHarvestMatureOnly') ?? true;
     headfulRagUserIdController.text = prefs.getString('${headfulPrefix}ragUserId') ?? '';
+    headfulChatPlanEnabled = prefs.getBool('${headfulPrefix}chatPlanEnabled') ?? true;
+    headfulChatPlanGame = prefs.getBool('${headfulPrefix}chatPlanGame') ?? true;
+    headfulChatPlanFrontend = prefs.getBool('${headfulPrefix}chatPlanFrontend') ?? true;
+    headfulChatIgnoreSelf = prefs.getBool('${headfulPrefix}chatIgnoreSelf') ?? true;
+    headfulChatStripPrefix = prefs.getBool('${headfulPrefix}chatStripPrefix') ?? true;
+    headfulChatPlanMode = prefs.getString('${headfulPrefix}chatPlanMode') ?? 'main_brain';
+    if (headfulChatPlanMode != 'main_brain' && headfulChatPlanMode != 'direct') {
+      headfulChatPlanMode = 'main_brain';
+    }
+    headfulChatWhitelistController.text = prefs.getString('${headfulPrefix}chatWhitelist') ?? '';
+    headfulChatCommandPrefixesController.text =
+        prefs.getString('${headfulPrefix}chatCommandPrefixes') ?? '';
+    headfulChatBrainPrefixController.text =
+        prefs.getString('${headfulPrefix}chatBrainPrefix') ?? '【MC】';
+    headfulChatBrainUserIdController.text =
+        prefs.getString('${headfulPrefix}chatBrainUserId') ?? 'minecraft_chat';
 
     if (isEnabled) {
       _startStatusTimer();
@@ -197,7 +281,25 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     await prefs.setBool('${headfulPrefix}visionStream', modVisionStream);
     await prefs.setBool('${headfulPrefix}smartGuard', headfulSmartGuard);
     await prefs.setBool('${headfulPrefix}smartGather', headfulSmartGather);
+    await prefs.setBool('${headfulPrefix}autonomyEnabled', headfulAutonomyEnabled);
+    await prefs.setBool('${headfulPrefix}autonomyLookPlayers', headfulAutonomyLookPlayers);
+    await prefs.setBool('${headfulPrefix}autonomyIdleLook', headfulAutonomyIdleLook);
+    await prefs.setBool('${headfulPrefix}autonomyPatrol', headfulAutonomyPatrol);
+    await prefs.setBool('${headfulPrefix}autonomyHarvestCrops', headfulAutonomyHarvestCrops);
+    await prefs.setBool(
+        '${headfulPrefix}autonomyHarvestMatureOnly', headfulAutonomyHarvestMatureOnly);
     await prefs.setString('${headfulPrefix}ragUserId', headfulRagUserIdController.text);
+    await prefs.setBool('${headfulPrefix}chatPlanEnabled', headfulChatPlanEnabled);
+    await prefs.setBool('${headfulPrefix}chatPlanGame', headfulChatPlanGame);
+    await prefs.setBool('${headfulPrefix}chatPlanFrontend', headfulChatPlanFrontend);
+    await prefs.setBool('${headfulPrefix}chatIgnoreSelf', headfulChatIgnoreSelf);
+    await prefs.setBool('${headfulPrefix}chatStripPrefix', headfulChatStripPrefix);
+    await prefs.setString('${headfulPrefix}chatPlanMode', headfulChatPlanMode);
+    await prefs.setString('${headfulPrefix}chatWhitelist', headfulChatWhitelistController.text);
+    await prefs.setString(
+        '${headfulPrefix}chatCommandPrefixes', headfulChatCommandPrefixesController.text);
+    await prefs.setString('${headfulPrefix}chatBrainPrefix', headfulChatBrainPrefixController.text);
+    await prefs.setString('${headfulPrefix}chatBrainUserId', headfulChatBrainUserIdController.text);
     await prefs.setBool('${prefix}autoStart', autoStart);
     if (agentProviderId != null) {
       await prefs.setString('${prefix}agentProviderId', agentProviderId!);
@@ -259,6 +361,15 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       }
     }
 
+    final whitelist = _splitListInput(headfulChatWhitelistController.text);
+    final commandPrefixes = _splitListInput(headfulChatCommandPrefixesController.text);
+    final brainPrefix = headfulChatBrainPrefixController.text.trim().isEmpty
+        ? '【MC】'
+        : headfulChatBrainPrefixController.text.trim();
+    final brainUserId = headfulChatBrainUserIdController.text.trim().isEmpty
+        ? 'minecraft_chat'
+        : headfulChatBrainUserIdController.text.trim();
+
     final headfulConfig = {
       "host": modHostController.text.trim().isEmpty ? "127.0.0.1" : modHostController.text.trim(),
       "port": int.tryParse(modPortController.text) ?? 8765,
@@ -268,6 +379,24 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       "vision_stream": modVisionStream,
       "enable_smart_guard": headfulSmartGuard,
       "enable_smart_gather": headfulSmartGather,
+      "autonomy_enabled": headfulAutonomyEnabled,
+      "autonomy_guard": headfulSmartGuard,
+      "autonomy_gather": headfulSmartGather,
+      "autonomy_look_players": headfulAutonomyLookPlayers,
+      "autonomy_idle_look": headfulAutonomyIdleLook,
+      "autonomy_patrol": headfulAutonomyPatrol,
+      "autonomy_harvest_crops": headfulAutonomyHarvestCrops,
+      "autonomy_harvest_mature_only": headfulAutonomyHarvestMatureOnly,
+      "chat_plan_enabled": headfulChatPlanEnabled,
+      "chat_plan_game": headfulChatPlanGame,
+      "chat_plan_frontend": headfulChatPlanFrontend,
+      "chat_plan_mode": headfulChatPlanMode,
+      "chat_ignore_self": headfulChatIgnoreSelf,
+      "chat_whitelist": whitelist,
+      "chat_command_prefixes": commandPrefixes,
+      "chat_strip_prefix": headfulChatStripPrefix,
+      "chat_brain_prefix": brainPrefix,
+      "chat_brain_user_id": brainUserId,
     };
 
     final config = {
@@ -351,14 +480,24 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         final nextMsAuthUrl = data['ms_auth_url'];
         final nextBackendControlMode = data['control_mode']?.toString();
         final nextHeadfulReady = data['headful_ready'];
+        final nextQueueLengthRaw = data['headful_queue_length'];
+        final nextTaskActiveRaw = data['headful_task_active'];
+        final nextQueueLength = nextQueueLengthRaw is int
+            ? nextQueueLengthRaw
+            : int.tryParse(nextQueueLengthRaw?.toString() ?? '');
+        final nextTaskActive =
+            nextTaskActiveRaw is bool ? nextTaskActiveRaw : null;
         final trackHeadful = controlMode == 'headful';
         Map<String, dynamic>? nextHeadfulState;
         Map<String, dynamic>? nextHeadfulPlan;
+        Map<String, dynamic>? nextHeadfulStatus;
         String? nextHeadfulStateSig;
         String? nextHeadfulPlanSig;
+        String? nextHeadfulStatusSig;
         if (trackHeadful) {
           final nextHeadfulStateRaw = data['headful_state'];
           final nextHeadfulPlanRaw = data['headful_plan'];
+          final nextHeadfulStatusRaw = data['headful_status'];
           if (nextHeadfulStateRaw is Map<String, dynamic>) {
             nextHeadfulState = nextHeadfulStateRaw;
           } else if (nextHeadfulStateRaw is Map) {
@@ -369,13 +508,21 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
           } else if (nextHeadfulPlanRaw is Map) {
             nextHeadfulPlan = Map<String, dynamic>.from(nextHeadfulPlanRaw);
           }
+          if (nextHeadfulStatusRaw is Map<String, dynamic>) {
+            nextHeadfulStatus = nextHeadfulStatusRaw;
+          } else if (nextHeadfulStatusRaw is Map) {
+            nextHeadfulStatus = Map<String, dynamic>.from(nextHeadfulStatusRaw);
+          }
           nextHeadfulStateSig = nextHeadfulState == null ? null : jsonEncode(nextHeadfulState);
           nextHeadfulPlanSig = nextHeadfulPlan == null ? null : jsonEncode(nextHeadfulPlan);
+          nextHeadfulStatusSig = nextHeadfulStatus == null ? null : jsonEncode(nextHeadfulStatus);
         } else {
           nextHeadfulState = _headfulState;
           nextHeadfulPlan = _headfulPlan;
+          nextHeadfulStatus = _headfulStatus;
           nextHeadfulStateSig = _lastHeadfulStateSig;
           nextHeadfulPlanSig = _lastHeadfulPlanSig;
+          nextHeadfulStatusSig = _lastHeadfulStatusSig;
         }
         final tail = trimmedLogs.isNotEmpty ? trimmedLogs.last : null;
         final changed = trimmedLogs.length != _lastLogCount ||
@@ -385,7 +532,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
             nextBackendControlMode != _lastBackendControlMode ||
             nextHeadfulReady != _lastHeadfulReady ||
             nextHeadfulStateSig != _lastHeadfulStateSig ||
-            nextHeadfulPlanSig != _lastHeadfulPlanSig;
+            nextHeadfulPlanSig != _lastHeadfulPlanSig ||
+            nextHeadfulStatusSig != _lastHeadfulStatusSig ||
+            nextQueueLength != _lastHeadfulQueueLength ||
+            nextTaskActive != _lastHeadfulTaskActive;
 
         if (!changed) return;
 
@@ -396,6 +546,9 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         _headfulReady = nextHeadfulReady is bool ? nextHeadfulReady : null;
         _headfulState = nextHeadfulState;
         _headfulPlan = nextHeadfulPlan;
+        _headfulStatus = nextHeadfulStatus;
+        _headfulQueueLength = nextQueueLength;
+        _headfulTaskActive = nextTaskActive;
         _lastLogCount = trimmedLogs.length;
         _lastLogTail = tail;
         _lastMsAuthCode = nextMsAuthCode;
@@ -404,6 +557,13 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         _lastHeadfulReady = _headfulReady;
         _lastHeadfulStateSig = nextHeadfulStateSig;
         _lastHeadfulPlanSig = nextHeadfulPlanSig;
+        _lastHeadfulStatusSig = nextHeadfulStatusSig;
+        _lastHeadfulQueueLength = nextQueueLength;
+        _lastHeadfulTaskActive = nextTaskActive;
+        if (_isCommandImeActive()) {
+          _pendingStatusNotify = true;
+          return;
+        }
         _notify();
       }
     } catch (e) {
@@ -613,7 +773,6 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     }
   }
 
-  // ignore: unused_element
   Future<void> _sendHeadfulSkill(
     BuildContext context,
     String skill, {
@@ -682,6 +841,78 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
         SnackBar(content: Text('技能发送失败: $e')),
       );
     }
+  }
+
+  Future<void> _sendAgentCommand(BuildContext context) async {
+    final message = headfulCommandController.text.trim();
+    if (message.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入要发送的指令')),
+      );
+      return;
+    }
+    final controller = SettingsScope.of(context);
+    final backendUrl = controller.settings.pythonBackendUrl.replaceAll(RegExp(r'/$'), '');
+    try {
+      final provider = _resolveLlmProvider(controller);
+      final embeddingProvider = _resolveEmbeddingProvider(controller);
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+      };
+      if (provider != null) {
+        if (provider.baseUrl.isNotEmpty) {
+          headers['X-Target-Base-Url'] = provider.baseUrl;
+          headers['X-Target-Api-Key'] =
+              provider.apiKey.isNotEmpty ? provider.apiKey : 'sk-ntai-frontend';
+        } else if (provider.apiKey.isNotEmpty) {
+          headers['X-Target-Api-Key'] = provider.apiKey;
+        }
+        if (provider.model.isNotEmpty) {
+          headers['X-Target-Model'] = provider.model;
+        }
+        headers['X-Target-Provider-Id'] = provider.id;
+      }
+      if (embeddingProvider != null) {
+        if (embeddingProvider.baseUrl.isNotEmpty) {
+          headers['X-Embedding-Base-Url'] = embeddingProvider.baseUrl;
+          headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey.isNotEmpty
+              ? embeddingProvider.apiKey
+              : 'sk-ntai-frontend';
+        } else if (embeddingProvider.apiKey.isNotEmpty) {
+          headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
+        }
+        if (embeddingProvider.model.isNotEmpty) {
+          headers['X-Embedding-Model'] = embeddingProvider.model;
+        }
+        headers['X-Embedding-Provider-Id'] = embeddingProvider.id;
+      }
+      final response = await http.post(
+        Uri.parse('$backendUrl/api/v1/plugins/$id/command'),
+        headers: headers,
+        body: jsonEncode({
+          'goal': message,
+          'sender': 'frontend',
+          'interrupt_current': true,
+        }),
+      );
+      if (!context.mounted) return;
+      final ok = response.statusCode == 200;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? '已发送给 Agent' : '发送失败: ${response.statusCode}')),
+      );
+      if (ok) {
+        headfulCommandController.clear();
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    }
+  }
+
+  Future<void> _cancelHeadfulTasks(BuildContext context) async {
+    await _sendHeadfulSkill(context, 'cancel');
   }
 
   AiProviderConfig? _resolveLlmProvider(SettingsController controller) {
@@ -769,6 +1000,92 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
       default:
         return jsonEncode(action);
     }
+  }
+
+  Widget _buildHeadfulStatusPanel() {
+    final status = _headfulStatus;
+    if (status == null) {
+      return const Text('暂无状态数据');
+    }
+    final controlRaw = status['control']?.toString();
+    final controlLabel = controlRaw == 'manual' ? '玩家控制中' : 'AI控制中';
+    final focused = status['focused'] == true ? '窗口焦点' : '窗口失焦';
+    final taskStateRaw = status['task_state']?.toString();
+    String taskLabel;
+    switch (taskStateRaw) {
+      case 'running':
+        taskLabel = '执行中';
+        break;
+      case 'queued':
+        taskLabel = '排队中';
+        break;
+      case 'paused':
+        taskLabel = '已暂停';
+        break;
+      default:
+        taskLabel = '空闲';
+    }
+    final queueLength = status['queue_length']?.toString() ?? '0';
+    final pausedCount = status['paused_count']?.toString() ?? '0';
+    final currentGoal = status['current_goal']?.toString();
+    final currentSource = status['current_source']?.toString();
+    final screenOpen = status['screen_open'];
+    final screenTitle = status['screen_title']?.toString();
+    final position = status['position'];
+    String? positionText;
+    if (position is Map) {
+      final x = position['x'];
+      final y = position['y'];
+      final z = position['z'];
+      final dimension = position['dimension'];
+      if (x is num && y is num && z is num) {
+        positionText =
+            '位置: x=${x.toStringAsFixed(2)} y=${y.toStringAsFixed(2)} z=${z.toStringAsFixed(2)}'
+            '${dimension != null ? ' (${dimension.toString()})' : ''}';
+      }
+    }
+    String? manualText;
+    final manualUntil = status['manual_until'];
+    if (controlRaw == 'manual' && manualUntil is num) {
+      final nowSec = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      final remain = (manualUntil.toDouble() - nowSec).clamp(0, 9999);
+      manualText = '手动剩余: ${remain.toStringAsFixed(1)}s';
+    }
+    final lastCommand = status['last_command'];
+    String? lastCommandText;
+    if (lastCommand is Map) {
+      final goal = lastCommand['goal']?.toString();
+      final source = lastCommand['source']?.toString();
+      final llmModel = lastCommand['llm_model']?.toString();
+      final embModel = lastCommand['embedding_model']?.toString();
+      if (goal != null && goal.isNotEmpty) {
+        lastCommandText =
+            '最近指令: ${goal}${source != null ? ' (${source})' : ''}'
+            '${llmModel != null || embModel != null ? ' / LLM=${llmModel ?? "-"} EMB=${embModel ?? "-"}' : ''}';
+      }
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blueGrey.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('控制: $controlLabel · $focused${manualText != null ? ' · $manualText' : ''}'),
+          Text('任务: $taskLabel · 队列 $queueLength · 暂停 $pausedCount'),
+          if (currentGoal != null && currentGoal.isNotEmpty)
+            Text('当前任务: $currentGoal${currentSource != null ? ' · $currentSource' : ''}'),
+          if (screenOpen is bool)
+            Text('界面: ${screenOpen ? '打开' : '关闭'}${screenTitle != null ? ' · $screenTitle' : ''}'),
+          if (positionText != null) Text(positionText),
+          if (lastCommandText != null) Text(lastCommandText),
+        ],
+      ),
+    );
   }
 
   void _showHeadfulPlanDialog(BuildContext context) {
@@ -947,6 +1264,8 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
           final modeMismatch = _backendControlMode != null && _backendControlMode != controlMode;
           final ready = _headfulReady == true;
           final state = _headfulState;
+          final queueLength = _headfulQueueLength ?? 0;
+          final taskActive = _headfulTaskActive == true;
           final posText = state == null
               ? '--'
               : '${fmtNum(state['x'])}, ${fmtNum(state['y'])}, ${fmtNum(state['z'])}';
@@ -984,6 +1303,15 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 Text('位置：$posText  视角：$yawText/$pitchText'),
                 Text('血量：$hpText  饥饿：$foodText'),
                 Text('维度：$dimText  窗口焦点：$focusedText'),
+                Text('队列：$queueLength  任务：${taskActive ? "执行中" : "空闲"}'),
+                if (taskActive || queueLength > 0) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _cancelHeadfulTasks(context),
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('取消任务'),
+                  ),
+                ],
               ],
             ),
           );
@@ -1068,7 +1396,7 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
               if (controlMode == 'headful') ...[
                 _buildSectionTitle('Headful 设置'),
                 const Text(
-                  '仅保留主脑指令入口，主脑 LLM 负责规划并调用工具。',
+                  '提供主脑调度与后端直达两种入口，视成本与复杂度选择。',
                   style: TextStyle(color: Colors.grey),
                 ),
                 const SizedBox(height: 8),
@@ -1121,6 +1449,84 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                     hintText: '留空则使用 AI 代理名称',
                   ),
                 ),
+                const SizedBox(height: 12),
+                _buildSectionTitle('指令路由'),
+                const Text(
+                  '控制游戏/前端消息是否交给主脑调度或由插件直跑。',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: headfulChatPlanMode,
+                  decoration: const InputDecoration(labelText: '调度模式'),
+                  items: const [
+                    DropdownMenuItem(value: 'main_brain', child: Text('主脑统一调度')),
+                    DropdownMenuItem(value: 'direct', child: Text('插件直跑（不推荐）')),
+                  ],
+                  onChanged: (v) => _updateState(() => headfulChatPlanMode = v ?? 'main_brain'),
+                ),
+                SwitchListTile(
+                  title: const Text('启用聊天指令入口'),
+                  subtitle: const Text('关闭后不接收游戏/前端的聊天指令'),
+                  value: headfulChatPlanEnabled,
+                  onChanged: (v) => _updateState(() => headfulChatPlanEnabled = v),
+                ),
+                SwitchListTile(
+                  title: const Text('接收游戏内白名单指令'),
+                  subtitle: const Text('仅允许白名单用户的聊天触发指令'),
+                  value: headfulChatPlanGame,
+                  onChanged: (v) => _updateState(() => headfulChatPlanGame = v),
+                ),
+                SwitchListTile(
+                  title: const Text('接收前端指令转发'),
+                  subtitle: const Text('允许前端消息进入调度流程'),
+                  value: headfulChatPlanFrontend,
+                  onChanged: (v) => _updateState(() => headfulChatPlanFrontend = v),
+                ),
+                SwitchListTile(
+                  title: const Text('忽略自身消息'),
+                  subtitle: const Text('避免 AI 自己的游戏消息触发指令'),
+                  value: headfulChatIgnoreSelf,
+                  onChanged: (v) => _updateState(() => headfulChatIgnoreSelf = v),
+                ),
+                TextField(
+                  controller: headfulChatWhitelistController,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '游戏内白名单',
+                    hintText: '例如: Alice,Bob 或 *',
+                    helperText: '逗号/换行分隔，* 表示允许所有人',
+                  ),
+                ),
+                TextField(
+                  controller: headfulChatCommandPrefixesController,
+                  decoration: const InputDecoration(
+                    labelText: '指令前缀 (可选)',
+                    hintText: '例如: ! /mc',
+                    helperText: '仅匹配前缀的消息会触发',
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('移除指令前缀'),
+                  subtitle: const Text('发送给主脑/插件前去掉前缀'),
+                  value: headfulChatStripPrefix,
+                  onChanged: (v) => _updateState(() => headfulChatStripPrefix = v),
+                ),
+                TextField(
+                  controller: headfulChatBrainPrefixController,
+                  decoration: const InputDecoration(
+                    labelText: '主脑转发前缀',
+                    hintText: '例如: 【MC】',
+                  ),
+                ),
+                TextField(
+                  controller: headfulChatBrainUserIdController,
+                  decoration: const InputDecoration(
+                    labelText: '主脑 user_id',
+                    hintText: 'minecraft_chat',
+                  ),
+                ),
                 SwitchListTile(
                   title: const Text('智能护卫'),
                   subtitle: const Text('自动防御附近敌对生物，遵循后端配置和范围限制'),
@@ -1133,12 +1539,59 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   value: headfulSmartGather,
                   onChanged: (v) => _updateState(() => headfulSmartGather = v),
                 ),
+                SwitchListTile(
+                  title: const Text('空闲自主行为'),
+                  subtitle: const Text('主脑空闲时执行轻量自主动作'),
+                  value: headfulAutonomyEnabled,
+                  onChanged: (v) => _updateState(() => headfulAutonomyEnabled = v),
+                ),
+                SwitchListTile(
+                  title: const Text('注视附近玩家'),
+                  subtitle: const Text('附近有玩家时自动转头观察'),
+                  value: headfulAutonomyLookPlayers,
+                  onChanged: headfulAutonomyEnabled
+                      ? (v) => _updateState(() => headfulAutonomyLookPlayers = v)
+                      : null,
+                ),
+                SwitchListTile(
+                  title: const Text('空闲视角微动'),
+                  subtitle: const Text('像人一样轻微移动视角'),
+                  value: headfulAutonomyIdleLook,
+                  onChanged: headfulAutonomyEnabled
+                      ? (v) => _updateState(() => headfulAutonomyIdleLook = v)
+                      : null,
+                ),
+                SwitchListTile(
+                  title: const Text('轻度巡逻移动'),
+                  subtitle: const Text('空闲时在附近轻微移动'),
+                  value: headfulAutonomyPatrol,
+                  onChanged: headfulAutonomyEnabled
+                      ? (v) => _updateState(() => headfulAutonomyPatrol = v)
+                      : null,
+                ),
+                SwitchListTile(
+                  title: const Text('优先收割农作物'),
+                  subtitle: const Text('附近有农作物时优先处理'),
+                  value: headfulAutonomyHarvestCrops,
+                  onChanged: headfulAutonomyEnabled
+                      ? (v) => _updateState(() => headfulAutonomyHarvestCrops = v)
+                      : null,
+                ),
+                SwitchListTile(
+                  title: const Text('仅收成熟作物'),
+                  subtitle: const Text('避免误砍未成熟农作物'),
+                  value: headfulAutonomyHarvestMatureOnly,
+                  onChanged: headfulAutonomyEnabled && headfulAutonomyHarvestCrops
+                      ? (v) => _updateState(() => headfulAutonomyHarvestMatureOnly = v)
+                      : null,
+                ),
                 const SizedBox(height: 12),
-                _buildSectionTitle('主脑指令'),
-                const Text('输入一句话，交给主脑决定是否调用 Minecraft 工具。', style: TextStyle(color: Colors.grey)),
+                _buildSectionTitle('Agent 指令（后端直达）'),
+                const Text('输入一句话，直接由后端转发给 MC Agent，不经过主脑。', style: TextStyle(color: Colors.grey)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: headfulCommandController,
+                  focusNode: headfulCommandFocusNode,
                   decoration: const InputDecoration(
                     labelText: '指令输入',
                     hintText: '例如：合成一把铁剑并跟随我',
@@ -1150,8 +1603,13 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   runSpacing: 8,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: () => _sendMainBrainCommand(context),
+                      onPressed: () => _sendAgentCommand(context),
                       icon: const Icon(Icons.send),
+                      label: const Text('发送给 Agent'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _sendMainBrainCommand(context),
+                      icon: const Icon(Icons.psychology_outlined),
                       label: const Text('发送给主脑'),
                     ),
                     OutlinedButton.icon(
@@ -1162,6 +1620,11 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   ],
                 ),
                 const SizedBox(height: 12),
+                if (controlMode == 'headful') ...[
+                  _buildSectionTitle('状态机'),
+                  _buildHeadfulStatusPanel(),
+                  const SizedBox(height: 12),
+                ],
               ],
               if (controlMode == 'headless') ...[
                 _buildSectionTitle('服务器连接'),

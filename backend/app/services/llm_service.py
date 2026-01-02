@@ -2,6 +2,7 @@ import openai
 import time
 from app.core.config import settings
 from app.core.logger import logger
+from app.services.system_state import system_state
 
 class LLMService:
     _last_emb_err_time = 0
@@ -108,16 +109,51 @@ class LLMService:
 
     async def get_embedding(self, text: str, api_key: str = None, base_url: str = None, model: str = None) -> list[float]:
         try:
+            embedding_api_key = api_key
+            embedding_base_url = base_url
+            embedding_model = model
+
+            if not (embedding_api_key and embedding_base_url and embedding_model):
+                embedding_config = system_state.get_state("embedding_config") or {}
+                if not embedding_api_key:
+                    embedding_api_key = embedding_config.get("api_key")
+                if not embedding_base_url:
+                    embedding_base_url = embedding_config.get("base_url")
+                if not embedding_model:
+                    embedding_model = embedding_config.get("model")
+
+            if embedding_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+                embedding_api_key = None
+
             client = self.default_client
-            if api_key and base_url:
-                client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+            if embedding_api_key or embedding_base_url:
+                client = openai.AsyncOpenAI(
+                    api_key=embedding_api_key or settings.OPENAI_API_KEY,
+                    base_url=embedding_base_url or settings.OPENAI_BASE_URL
+                )
 
             # Use configured embedding model or fallback
-            target_model = model or settings.LLM_EMBEDDING_MODEL
+            target_model = embedding_model or settings.LLM_EMBEDDING_MODEL
+            if (
+                not embedding_model
+                and embedding_base_url
+                and "siliconflow" in embedding_base_url.lower()
+            ):
+                target_model = "BAAI/bge-m3"
+            if (
+                embedding_base_url
+                and "siliconflow" in embedding_base_url.lower()
+                and target_model == "text-embedding-ada-002"
+            ):
+                target_model = "BAAI/bge-m3"
             
             # Provider-specific optimization: skip known chat-only models
-            is_deepseek = base_url and 'deepseek' in base_url.lower()
-            is_chat_only = is_deepseek and (not model or 'chat' in model.lower() or 'reasoner' in model.lower())
+            is_deepseek = embedding_base_url and 'deepseek' in embedding_base_url.lower()
+            is_chat_only = is_deepseek and (
+                not target_model
+                or 'chat' in target_model.lower()
+                or 'reasoner' in target_model.lower()
+            )
             
             if is_chat_only:
                 # DeepSeek doesn't have an embedding model at its main endpoint.
