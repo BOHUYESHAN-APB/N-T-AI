@@ -11,6 +11,8 @@ import '../../settings/settings_scope.dart';
 import '../base_plugin.dart';
 
 class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
+  static const bool _headfulModeDisabled = true;
+
   MinecraftMindcraftPlugin() {
     hostController = TextEditingController();
     portController = TextEditingController();
@@ -176,6 +178,10 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
     final headlessPrefix = '${prefix}headless.';
     final headfulPrefix = '${prefix}headful.';
     controlMode = prefs.getString('${prefix}mode') ?? 'headless';
+    if (_headfulModeDisabled) {
+      controlMode = 'headless';
+      await prefs.setString('${prefix}mode', controlMode);
+    }
 
     // headless（兼容旧字段）
     hostController.text =
@@ -1378,7 +1384,15 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
               ToggleButtons(
                 isSelected: [controlMode == 'headless', controlMode == 'headful'],
                 onPressed: (index) => _updateState(
-                  () => controlMode = index == 0 ? 'headless' : 'headful',
+                  () {
+                    if (index == 1 && _headfulModeDisabled) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Headful 模式暂未完成，当前不可用')),
+                      );
+                      return;
+                    }
+                    controlMode = index == 0 ? 'headless' : 'headful';
+                  },
                 ),
                 children: const [
                   Padding(
@@ -1387,10 +1401,25 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                   ),
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Headful (有头)'),
+                    child: Text('Headful (有头/暂不可用)'),
                   ),
                 ],
               ),
+              if (_headfulModeDisabled) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+                  ),
+                  child: const Text(
+                    'Headful 模式仍在开发中，当前版本已临时关闭。请使用无头模式。',
+                    style: TextStyle(color: Colors.orange),
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               const Text('两个页面完全分离，切换后仅显示对应设置。', style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 12),

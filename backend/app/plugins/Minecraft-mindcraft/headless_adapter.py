@@ -58,7 +58,15 @@ class HeadlessAdapter:
             node_modules_path = os.path.join(self._src_dir, "node_modules")
             if not os.path.exists(node_modules_path):
                 self._logger.warning("[Headless] node_modules not found")
-                self._log_append("WARNING: node_modules not found. Please run 'npm install' in the plugin/src directory.")
+                if combined_config.get("auto_npm_install", True):
+                    if not self._install_node_modules():
+                        return False
+                else:
+                    self._log_append(
+                        "ERROR: node_modules not found and auto install disabled. "
+                        "Please run 'npm install' in the plugin/src directory."
+                    )
+                    return False
 
             if combined_config.get("agent_name") and combined_config.get("auth") == "offline":
                 combined_config["username"] = combined_config["agent_name"]
@@ -171,6 +179,42 @@ class HeadlessAdapter:
         except Exception as e:
             self._logger.error(f"[Headless] activation failed: {e}")
             self._log_append(f"CRITICAL ERROR: {e}")
+            return False
+
+    def _install_node_modules(self) -> bool:
+        package_json = os.path.join(self._src_dir, "package.json")
+        if not os.path.exists(package_json):
+            self._logger.error("[Headless] package.json missing, cannot install dependencies")
+            self._log_append("ERROR: package.json not found; cannot install dependencies.")
+            return False
+
+        try:
+            npm_version = subprocess.run(["npm", "-v"], capture_output=True, text=True, check=True)
+            self._logger.info(f"[Headless] npm version: {npm_version.stdout.strip()}")
+        except Exception as e:
+            self._logger.error(f"[Headless] npm not found: {e}")
+            self._log_append("ERROR: npm is not installed or not in PATH.")
+            return False
+
+        self._log_append("node_modules missing. Running npm install...")
+        self._logger.info("[Headless] running npm install")
+        try:
+            subprocess.run(
+                ["npm", "install"],
+                cwd=self._src_dir,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self._log_append("npm install completed.")
+            return True
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or "").strip()
+            self._logger.error(f"[Headless] npm install failed: {stderr}")
+            if stderr:
+                self._log_append(f"ERROR: npm install failed: {stderr}")
+            else:
+                self._log_append("ERROR: npm install failed.")
             return False
 
     async def deactivate(self) -> bool:

@@ -159,3 +159,7 @@ Write-Host "ZIP Archive created successfully."
 
 Write-Host "=========================================="
 Pop-Location
+
+# 8. Create EXE Installer (Inno Setup)
+Write-Host "`n[8/8] Creating EXE Installer..."
+& "$scriptDir\package_windows_exe.ps1" -ReleaseDir $releaseOutputDir
