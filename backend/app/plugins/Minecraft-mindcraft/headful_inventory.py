@@ -7394,52 +7394,72 @@ class HeadfulInventoryController:
             return name
 
         def craft_item_plan(item: str, needed: int) -> None:
-            available_inv = inventory.get(item, 0)
-            available_left = leftovers.get(item, 0)
-            total_available = available_inv + available_left
-            if total_available >= needed:
-                use_from_left = min(available_left, needed)
-                leftovers[item] = available_left - use_from_left
-                remaining_needed = needed - use_from_left
-                if remaining_needed > 0:
-                    inventory[item] = available_inv - remaining_needed
-                return
+            def _walk(item: str, needed: int, chain: Optional[set[str]], depth: int) -> None:
+                max_depth = 8
+                if chain is None:
+                    chain = set()
+                if item in chain or depth > max_depth:
+                    crafted["required"][item] = crafted["required"].get(item, 0) + needed
+                    return
+                chain = set(chain)
+                chain.add(item)
 
-            still_needed = needed - total_available
-            if available_left > 0:
-                leftovers[item] = 0
-            if available_inv > 0:
-                inventory[item] = 0
+                available_inv = inventory.get(item, 0)
+                available_left = leftovers.get(item, 0)
+                total_available = available_inv + available_left
+                if total_available >= needed:
+                    use_from_left = min(available_left, needed)
+                    leftovers[item] = available_left - use_from_left
+                    remaining_needed = needed - use_from_left
+                    if remaining_needed > 0:
+                        inventory[item] = available_inv - remaining_needed
+                    return
 
-            if self._is_base_item(item):
-                crafted["required"][item] = crafted["required"].get(item, 0) + still_needed
-                return
+                still_needed = needed - total_available
+                if available_left > 0:
+                    leftovers[item] = 0
+                if available_inv > 0:
+                    inventory[item] = 0
 
-            recipes = recipe_book.get_recipes(item)
-            if not recipes:
-                crafted["required"][item] = crafted["required"].get(item, 0) + still_needed
-                return
-            recipe = recipes[0]
-            requirements = self._recipe_requirements(recipe)
-            crafted_per = max(recipe.result_count, 1)
-            batch_count = int(math.ceil(still_needed / crafted_per))
-            total_produced = batch_count * crafted_per
+                if self._is_base_item(item):
+                    crafted["required"][item] = (
+                        crafted["required"].get(item, 0) + still_needed
+                    )
+                    return
 
-            if total_produced > still_needed:
-                leftovers[item] = leftovers.get(item, 0) + (total_produced - still_needed)
+                recipes = recipe_book.get_recipes(item)
+                if not recipes:
+                    crafted["required"][item] = (
+                        crafted["required"].get(item, 0) + still_needed
+                    )
+                    return
+                recipe = recipes[0]
+                requirements = self._recipe_requirements(recipe)
+                crafted_per = max(recipe.result_count, 1)
+                batch_count = int(math.ceil(still_needed / crafted_per))
+                total_produced = batch_count * crafted_per
 
-            for ingredient_name, ingredient_count in requirements.items():
-                craft_item_plan(ingredient_name, ingredient_count * batch_count)
+                if total_produced > still_needed:
+                    leftovers[item] = leftovers.get(item, 0) + (
+                        total_produced - still_needed
+                    )
 
-            planks_generic = all(self._is_planks(name) for name in requirements)
-            output_generic = self._is_planks(item)
-            step_ingredients = " + ".join(
-                f"{amount * batch_count} {display_name(name, planks_generic)}"
-                for name, amount in requirements.items()
-            )
-            crafted["steps"].append(
-                f"Craft {step_ingredients} -> {total_produced} {display_name(item, output_generic)}"
-            )
+                for ingredient_name, ingredient_count in requirements.items():
+                    _walk(ingredient_name, ingredient_count * batch_count, chain, depth + 1)
+
+                planks_generic = all(self._is_planks(name) for name in requirements)
+                output_generic = self._is_planks(item)
+                step_ingredients = " + ".join(
+                    f"{amount * batch_count} {display_name(name, planks_generic)}"
+                    for name, amount in requirements.items()
+                )
+                crafted["steps"].append(
+                    f"Craft {step_ingredients} -> {total_produced} {display_name(item, output_generic)}"
+                )
+
+            _walk(item, needed, None, 0)
+
+            return
 
         craft_item_plan(target_item, count)
 
