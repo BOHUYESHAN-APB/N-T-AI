@@ -84,7 +84,111 @@
       "dimension": "minecraft:overworld",
       "block": "minecraft:chest",
       "last_seen": 1767357660.9279482
+    },
+    "minecraft:overworld:-146:64:-1203": {
+      "x": -146,
+      "y": 64,
+      "z": -1203,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:furnace",
+      "last_seen": 1767418612.1441772,
+      "last_open": 1767418612.1441772,
+      "items": {}
+    },
+    "minecraft:overworld:-146:64:-1205": {
+      "x": -146,
+      "y": 64,
+      "z": -1205,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767416108.8547475,
+      "last_open": 1767410151.7509,
+      "items": {
+        "quartz": 185,
+        "emerald": 64,
+        "honeycomb": 4,
+        "glowstone_dust": 45,
+        "saddle": 3,
+        "sugar_cane": 7,
+        "tipped_arrow": 1,
+        "sand": 132,
+        "campfire": 3,
+        "smoker": 1,
+        "cobblestone_stairs": 2,
+        "enchanting_table": 1,
+        "bookshelf": 2,
+        "cobblestone_slab": 5
+      }
+    },
+    "minecraft:overworld:-146:64:-1201": {
+      "x": -146,
+      "y": 64,
+      "z": -1201,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767418596.3740206,
+      "last_open": 1767418596.3740206,
+      "items": {
+        "paper": 62
+      }
+    },
+    "minecraft:overworld:-146:65:-1205": {
+      "x": -146,
+      "y": 65,
+      "z": -1205,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767416127.921162,
+      "last_open": 1767416127.921162,
+      "items": {}
+    },
+    "minecraft:overworld:-146:66:-1205": {
+      "x": -146,
+      "y": 66,
+      "z": -1205,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767416108.8547475,
+      "last_open": 1767410161.57782,
+      "items": {}
+    },
+    "minecraft:overworld:-146:64:-1206": {
+      "x": -146,
+      "y": 64,
+      "z": -1206,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767413704.088954,
+      "last_open": 1767410162.8449657,
+      "items": {
+        "quartz": 185,
+        "emerald": 64,
+        "honeycomb": 4,
+        "glowstone_dust": 45,
+        "saddle": 3,
+        "sugar_cane": 7,
+        "tipped_arrow": 1,
+        "sand": 132,
+        "campfire": 3,
+        "smoker": 1,
+        "cobblestone_stairs": 2,
+        "enchanting_table": 1,
+        "bookshelf": 2,
+        "cobblestone_slab": 5
+      }
+    },
+    "minecraft:overworld:-146:64:-1200": {
+      "x": -146,
+      "y": 64,
+      "z": -1200,
+      "dimension": "minecraft:overworld",
+      "block": "minecraft:chest",
+      "last_seen": 1767418594.8079956,
+      "last_open": 1767418594.8079956,
+      "items": {
+        "paper": 62
+      }
     }
   },
-  "updated_at": 1767357661.4040227
+  "updated_at": 1767418612.144957
 }

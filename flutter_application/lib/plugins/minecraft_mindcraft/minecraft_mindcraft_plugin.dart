@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1900,6 +1901,21 @@ class MinecraftMindcraftPlugin extends BasePlugin with ChangeNotifier {
                 ),
               ),
               const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _logs.isEmpty
+                    ? null
+                    : () async {
+                        await Clipboard.setData(
+                          ClipboardData(text: _logs.join('\n')),
+                        );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('日志已复制到剪贴板')),
+                        );
+                      },
+                icon: const Icon(Icons.copy),
+                label: const Text('复制当前日志'),
+              ),
+              const SizedBox(height: 12),
               if (controlMode == 'headless')
                 ElevatedButton.icon(
                   onPressed: () => _openWebUI(),

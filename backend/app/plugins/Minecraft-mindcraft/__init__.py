@@ -65,6 +65,7 @@ class MinecraftMindcraftPlugin(BasePlugin):
         self._headful_manual_override_reason: Optional[str] = None
         self._headful_last_command: Optional[Dict[str, Any]] = None
         self._headful_state_label: Optional[str] = None
+        self._headful_last_guard_interrupt = 0.0
 
     @property
     def id(self) -> str:
@@ -154,6 +155,22 @@ class MinecraftMindcraftPlugin(BasePlugin):
             if self._headful_manual_override_active():
                 continue
             if self._headful_task_active or self._headful_task_queue.qsize() > 0:
+                if bool(cfg.get("autonomy_guard_interrupt", True)):
+                    last_screen = getattr(self._headful, "last_screen", None)
+                    if isinstance(last_screen, dict) and last_screen.get("screenOpen"):
+                        continue
+                    guard_range = float(cfg.get("autonomy_guard_range", 12.0))
+                    cooldown = float(
+                        cfg.get("autonomy_guard_interrupt_cooldown_sec", 6.0)
+                    )
+                    threat = self._headful_inventory.peek_nearest_hostile(
+                        max_distance=guard_range
+                    )
+                    now = time.time()
+                    if threat and now - self._headful_last_guard_interrupt > cooldown:
+                        self._headful_last_guard_interrupt = now
+                        await self._headful_inventory.cancel_current()
+                        self._append_log("[autonomy] interrupt for guard")
                 continue
             try:
                 result = await self._headful_inventory.run("autonomy_tick", {})
@@ -418,6 +435,27 @@ class MinecraftMindcraftPlugin(BasePlugin):
 
     async def _handle_headful_event(self, payload: Dict[str, Any]) -> None:
         event = payload.get("event")
+        if event == "player_death":
+            result = self._headful_inventory.record_death_event(payload)
+            if result.get("ok"):
+                pos = result.get("position", {})
+                self._append_log(
+                    f"[death] recorded at {pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                )
+            else:
+                self._append_log(f"[death] record failed: {result.get('error')}")
+            return
+        if event == "player_respawn":
+            result = await self._headful_inventory.handle_respawn_event(payload)
+            if result.get("ok"):
+                self._append_log(
+                    f"[death] recover ok distance={result.get('distance')}"
+                )
+            else:
+                self._append_log(
+                    f"[death] recover skipped: {result.get('error')}"
+                )
+            return
         if event == "manual_control":
             cfg = self._headful_chat_config()
             if not bool(cfg.get("manual_override_enabled", True)):
@@ -494,7 +532,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
                     "port": 8765,
                     "token": "",
                     "event_interval_ms": 200,
-                    "scan_radius": 16,
+                    "scan_radius": 48,
+                    "scan_vertical_range": 32,
                     "vision_stream": False,
                     "debug": False,
                     "debug_chat": False,
@@ -517,8 +556,33 @@ class MinecraftMindcraftPlugin(BasePlugin):
                     "auto_gather_base_items": True,
                     "auto_collect_from_containers": True,
                     "auto_gather_radius": 12,
-                    "container_interact_distance": 2.0,
-                    "workstation_interact_distance": 2.0,
+                    "auto_gather_search_radii": [12, 24, 48],
+                    "container_scan_max_results": 6,
+                    "workstation_scan_max_results": 3,
+                    "container_interact_distance": 1.6,
+                    "workstation_interact_distance": 1.6,
+                    "container_interaction_ranges": [1.6, 2.2, 2.8],
+                    "workstation_interaction_ranges": [1.6, 2.2, 2.8],
+                    "container_interaction_delay_ms": 120,
+                    "container_move_timeout_per_block": 0.35,
+                    "container_move_timeout_max": 12.0,
+                    "open_doors_on_fail": True,
+                    "door_open_radius": 3,
+                    "door_open_max": 2,
+                    "door_open_timeout": 1.5,
+                    "auto_equip_on_attack": True,
+                    "auto_equip_weapon": True,
+                    "auto_equip_weapon_on_attack": True,
+                    "combat_attack_interval_sec": 0.9,
+                    "combat_pickup_after_attack": True,
+                    "combat_pickup_range": 6.0,
+                    "combat_pickup_timeout": 4.0,
+                    "auto_recover_death_items": True,
+                    "death_recover_distance": 64,
+                    "death_recover_timeout": 12.0,
+                    "death_recover_pickup_range": 6.0,
+                    "death_recover_pickup_timeout": 4.0,
+                    "blocked_position_cooldown_sec": 20.0,
                     "dig_area_max_blocks": 512,
                     "dig_attack_ms": 1200,
                     "dig_distance": 3.2,
@@ -529,6 +593,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
                     "autonomy_enabled": True,
                     "autonomy_tick_interval_sec": 1.0,
                     "autonomy_guard": True,
+                    "autonomy_guard_interrupt": True,
+                    "autonomy_guard_interrupt_cooldown_sec": 6.0,
                     "autonomy_gather": True,
                     "autonomy_look_players": True,
                     "autonomy_idle_look": True,
@@ -569,7 +635,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
                             "port": 8765,
                             "token": "",
                             "event_interval_ms": 200,
-                            "scan_radius": 16,
+                            "scan_radius": 48,
+                            "scan_vertical_range": 32,
                             "vision_stream": False,
                             "debug": False,
                             "debug_chat": False,
@@ -592,8 +659,33 @@ class MinecraftMindcraftPlugin(BasePlugin):
                             "auto_gather_base_items": True,
                             "auto_collect_from_containers": True,
                             "auto_gather_radius": 12,
-                            "container_interact_distance": 2.0,
-                            "workstation_interact_distance": 2.0,
+                            "auto_gather_search_radii": [12, 24, 48],
+                            "container_scan_max_results": 6,
+                            "workstation_scan_max_results": 3,
+                            "container_interact_distance": 1.6,
+                            "workstation_interact_distance": 1.6,
+                            "container_interaction_ranges": [1.6, 2.2, 2.8],
+                            "workstation_interaction_ranges": [1.6, 2.2, 2.8],
+                            "container_interaction_delay_ms": 120,
+                            "container_move_timeout_per_block": 0.35,
+                            "container_move_timeout_max": 12.0,
+                            "open_doors_on_fail": True,
+                            "door_open_radius": 3,
+                            "door_open_max": 2,
+                            "door_open_timeout": 1.5,
+                            "auto_equip_on_attack": True,
+                            "auto_equip_weapon": True,
+                            "auto_equip_weapon_on_attack": True,
+                            "combat_attack_interval_sec": 0.9,
+                            "combat_pickup_after_attack": True,
+                            "combat_pickup_range": 6.0,
+                            "combat_pickup_timeout": 4.0,
+                            "auto_recover_death_items": True,
+                            "death_recover_distance": 64,
+                            "death_recover_timeout": 12.0,
+                            "death_recover_pickup_range": 6.0,
+                            "death_recover_pickup_timeout": 4.0,
+                            "blocked_position_cooldown_sec": 20.0,
                             "dig_area_max_blocks": 512,
                             "dig_attack_ms": 1200,
                             "dig_distance": 3.2,
@@ -604,6 +696,8 @@ class MinecraftMindcraftPlugin(BasePlugin):
                             "autonomy_enabled": True,
                             "autonomy_tick_interval_sec": 1.0,
                             "autonomy_guard": True,
+                            "autonomy_guard_interrupt": True,
+                            "autonomy_guard_interrupt_cooldown_sec": 6.0,
                             "autonomy_gather": True,
                             "autonomy_look_players": True,
                             "autonomy_idle_look": True,

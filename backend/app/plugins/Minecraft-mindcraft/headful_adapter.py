@@ -255,13 +255,59 @@ class HeadfulAdapter:
                 self._last_state_flags["manualOverride"] = manual
                 self._last_log = now
         elif msg_type == "event":
-            self._log_append(f"Headful event: {data.get('event')}")
+            event_name = data.get("event")
+            self._log_append(f"Headful event: {event_name}")
+            if event_name in {"path_blocked", "path_started", "path_complete"}:
+                details = []
+                for key in ("reason", "nodes", "x", "y", "z"):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
+            elif event_name == "manual_control":
+                details = []
+                for key in ("active", "reason", "timeout_ms", "until_ms"):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
+            elif event_name in {"player_death", "player_respawn"}:
+                details = []
+                for key in (
+                    "x",
+                    "y",
+                    "z",
+                    "death_x",
+                    "death_y",
+                    "death_z",
+                    "respawn_x",
+                    "respawn_y",
+                    "respawn_z",
+                    "distance",
+                    "dimension",
+                    "death_dimension",
+                    "respawn_dimension",
+                ):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
             if self._on_event is not None:
                 result = self._on_event(data)
                 if asyncio.iscoroutine(result):
                     await result
         elif msg_type == "hello":
             self._log_append("Headful WS hello received.")
+        elif msg_type == "path_ack":
+            status = data.get("status")
+            nodes = data.get("nodes")
+            self._log_append(f"Headful WS path_ack: status={status} nodes={nodes}")
         elif msg_type == "screen_snapshot":
             self.last_screen = data
             if self._screen_waiters:

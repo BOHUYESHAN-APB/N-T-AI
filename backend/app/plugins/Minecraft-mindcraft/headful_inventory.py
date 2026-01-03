@@ -589,6 +589,44 @@ CONTAINER_BLOCKS = {
 }
 CONTAINER_BLOCKS.update({f"{color}_shulker_box" for color in SHULKER_COLORS})
 
+DOOR_BLOCKS = {
+    "oak_door",
+    "spruce_door",
+    "birch_door",
+    "jungle_door",
+    "acacia_door",
+    "dark_oak_door",
+    "mangrove_door",
+    "cherry_door",
+    "bamboo_door",
+    "crimson_door",
+    "warped_door",
+    "iron_door",
+    "oak_trapdoor",
+    "spruce_trapdoor",
+    "birch_trapdoor",
+    "jungle_trapdoor",
+    "acacia_trapdoor",
+    "dark_oak_trapdoor",
+    "mangrove_trapdoor",
+    "cherry_trapdoor",
+    "bamboo_trapdoor",
+    "crimson_trapdoor",
+    "warped_trapdoor",
+    "iron_trapdoor",
+    "oak_fence_gate",
+    "spruce_fence_gate",
+    "birch_fence_gate",
+    "jungle_fence_gate",
+    "acacia_fence_gate",
+    "dark_oak_fence_gate",
+    "mangrove_fence_gate",
+    "cherry_fence_gate",
+    "bamboo_fence_gate",
+    "crimson_fence_gate",
+    "warped_fence_gate",
+}
+
 CRAFTING_TABLE_BLOCK = "crafting_table"
 SMELTING_BLOCKS = {"furnace", "blast_furnace", "smoker"}
 
@@ -626,6 +664,24 @@ TOOL_CANDIDATES = {
         "golden_shovel",
         "wooden_shovel",
     ],
+}
+
+WEAPON_MATERIAL_RANK = [
+    ("netherite", 6),
+    ("diamond", 5),
+    ("iron", 4),
+    ("stone", 3),
+    ("golden", 2),
+    ("wooden", 1),
+]
+
+WEAPON_BASE_SCORE = {
+    "mace": 320,
+    "sword": 300,
+    "trident": 280,
+    "axe": 260,
+    "bow": 200,
+    "crossbow": 200,
 }
 
 CN_ITEM_ALIASES = {
@@ -877,6 +933,31 @@ def _hotbar_score(item_name: str) -> int:
     return 0
 
 
+def _weapon_material_score(item_name: str) -> int:
+    for material, score in WEAPON_MATERIAL_RANK:
+        if item_name.startswith(f"{material}_"):
+            return score
+    return 0
+
+
+def _weapon_score(item_name: str) -> int:
+    if not item_name:
+        return 0
+    if item_name.endswith("_sword"):
+        return WEAPON_BASE_SCORE["sword"] + _weapon_material_score(item_name) * 10
+    if item_name.endswith("_axe"):
+        return WEAPON_BASE_SCORE["axe"] + _weapon_material_score(item_name) * 10
+    if item_name == "trident":
+        return WEAPON_BASE_SCORE["trident"]
+    if item_name == "mace":
+        return WEAPON_BASE_SCORE["mace"]
+    if item_name == "bow":
+        return WEAPON_BASE_SCORE["bow"]
+    if item_name == "crossbow":
+        return WEAPON_BASE_SCORE["crossbow"]
+    return 0
+
+
 class HeadfulInventoryController:
     def __init__(
         self,
@@ -907,6 +988,7 @@ class HeadfulInventoryController:
         self._container_registry_cache: Optional[Dict[str, Any]] = None
         self._container_registry_path: Optional[Path] = None
         self._container_registry_loaded_at = 0.0
+        self._blocked_positions: Dict[str, float] = {}
         self._cancel_requested = False
         self._autonomy_last_guard = 0.0
         self._autonomy_last_gather = 0.0
@@ -914,6 +996,8 @@ class HeadfulInventoryController:
         self._autonomy_last_idle = 0.0
         self._autonomy_last_crop = 0.0
         self._autonomy_last_patrol = 0.0
+        self._last_death: Optional[Dict[str, Any]] = None
+        self._last_death_at = 0.0
 
     def _get_recipe_book(self) -> RecipeBook:
         if self._recipe_book is not None:
@@ -989,7 +1073,15 @@ class HeadfulInventoryController:
     def _debug_log(self, message: str, params: Optional[Dict[str, Any]] = None) -> None:
         if not self._debug_enabled(params):
             return
-        self._log_append(f"[headful-debug] {message}")
+        line = f"[headful-debug] {message}"
+        self._log_append(line)
+        self._backend_log(line)
+
+    def _backend_log(self, message: str) -> None:
+        try:
+            self._logger.info(message)
+        except Exception:
+            pass
 
     async def _emit_alert(
         self, message: str, payload: Optional[Dict[str, Any]] = None
@@ -1013,6 +1105,107 @@ class HeadfulInventoryController:
         if isinstance(state, dict):
             return str(state.get("dimension") or "")
         return ""
+
+    def _interaction_ranges(
+        self,
+        kind: str,
+        params: Optional[Dict[str, Any]],
+        default_distance: float,
+    ) -> List[float]:
+        cfg = self._headful_config()
+        ranges_raw = None
+        if params:
+            ranges_raw = params.get("interaction_ranges") or params.get("interaction_ranges_m")
+        if ranges_raw is None:
+            ranges_raw = cfg.get(f"{kind}_interaction_ranges")
+        ranges: List[float] = []
+        if isinstance(ranges_raw, list):
+            for value in ranges_raw:
+                try:
+                    num = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if num > 0:
+                    ranges.append(num)
+        if not ranges:
+            base = default_distance
+            if params:
+                base = params.get("interaction_range", base)
+            base = cfg.get(f"{kind}_interact_distance", base)
+            try:
+                ranges = [float(base)]
+            except (TypeError, ValueError):
+                ranges = [default_distance]
+        deduped: List[float] = []
+        for value in ranges:
+            if value <= 0:
+                continue
+            if value not in deduped:
+                deduped.append(value)
+        return deduped
+
+    def _group_container_positions(
+        self, positions: List[Dict[str, Any]]
+    ) -> List[List[Dict[str, Any]]]:
+        pos_map: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
+        for pos in positions:
+            try:
+                key = (int(pos.get("x")), int(pos.get("y")), int(pos.get("z")))
+            except (TypeError, ValueError):
+                continue
+            pos_map[key] = pos
+        groups: List[List[Dict[str, Any]]] = []
+        used: set[str] = set()
+        dimension = self._current_dimension()
+        for pos in positions:
+            try:
+                x = int(pos.get("x"))
+                y = int(pos.get("y"))
+                z = int(pos.get("z"))
+            except (TypeError, ValueError):
+                continue
+            block_name = str(pos.get("block", "")).lower()
+            group_key = self._container_key(pos) or f"unknown:{x}:{y}:{z}"
+            members = [pos]
+            if "chest" in block_name:
+                for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    neighbor = pos_map.get((x + dx, y, z + dz))
+                    if not neighbor:
+                        continue
+                    n_block = str(neighbor.get("block", "")).lower()
+                    if "chest" not in n_block:
+                        continue
+                    pair = sorted([(x, y, z), (x + dx, y, z + dz)])
+                    group_key = (
+                        f"{dimension}:{pair[0][0]}:{pair[0][1]}:{pair[0][2]}"
+                        f"|{pair[1][0]}:{pair[1][1]}:{pair[1][2]}"
+                    )
+                    members = [pos, neighbor]
+                    break
+            if group_key in used:
+                continue
+            used.add(group_key)
+            groups.append(members)
+        return groups
+
+    def _scaled_move_timeout(
+        self,
+        pos: Dict[str, Any],
+        base_timeout: float,
+        per_block: float = 0.35,
+        max_timeout: float = 12.0,
+    ) -> float:
+        current = self._player_pos()
+        if not current:
+            return base_timeout
+        try:
+            dx = float(pos.get("x")) - float(current[0])
+            dz = float(pos.get("z")) - float(current[2])
+        except (TypeError, ValueError):
+            return base_timeout
+        dist = math.sqrt(dx * dx + dz * dz)
+        estimate = dist * per_block + 1.5
+        return min(max_timeout, max(base_timeout, estimate))
 
     def _registry_base_dir(self) -> Path:
         cfg = self._headful_config()
@@ -1071,6 +1264,45 @@ class HeadfulInventoryController:
             return None
         dimension = self._current_dimension()
         return f"{dimension}:{x}:{y}:{z}"
+
+    def _blocked_key(self, pos: Dict[str, Any]) -> Optional[str]:
+        key = self._container_key(pos)
+        if key:
+            return key
+        try:
+            x = int(pos.get("x"))
+            y = int(pos.get("y"))
+            z = int(pos.get("z"))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return f"unknown:{x}:{y}:{z}"
+
+    def _is_blocked_position(self, pos: Dict[str, Any]) -> bool:
+        key = self._blocked_key(pos)
+        if not key:
+            return False
+        until = self._blocked_positions.get(key)
+        if until is None:
+            return False
+        if until <= time.time():
+            self._blocked_positions.pop(key, None)
+            return False
+        return True
+
+    def _mark_blocked_position(self, pos: Dict[str, Any], reason: str) -> None:
+        key = self._blocked_key(pos)
+        if not key:
+            return
+        cfg = self._headful_config()
+        try:
+            cooldown = float(cfg.get("blocked_position_cooldown_sec", 20.0))
+        except (TypeError, ValueError):
+            cooldown = 20.0
+        cooldown = max(3.0, cooldown)
+        self._blocked_positions[key] = time.time() + cooldown
+        line = f"[blocked] {key} reason={reason} cooldown={cooldown:.1f}s"
+        self._log_append(line)
+        self._backend_log(line)
 
     async def _register_found_positions(self, positions: List[Dict[str, Any]]) -> None:
         if not positions:
@@ -1183,11 +1415,18 @@ class HeadfulInventoryController:
         normalized = [self._normalize_block_name(b) for b in blocks if b]
         if not normalized:
             return {"ok": False, "error": "missing_block"}
+        cfg = self._headful_config()
         action: Dict[str, Any] = {
             "type": "findBlock",
             "radius": int(radius),
             "maxResults": int(max_results),
         }
+        vertical_range = cfg.get("scan_vertical_range")
+        if vertical_range is not None:
+            try:
+                action["verticalRange"] = int(vertical_range)
+            except (TypeError, ValueError):
+                pass
         if len(normalized) == 1:
             action["block"] = normalized[0]
         else:
@@ -1209,11 +1448,18 @@ class HeadfulInventoryController:
         normalized = [self._normalize_block_name(b) for b in blocks if b]
         if not normalized:
             return {"ok": False, "error": "missing_block"}
+        cfg = self._headful_config()
         action: Dict[str, Any] = {
             "type": "findCrop",
             "radius": int(radius),
             "maxResults": int(max_results),
         }
+        vertical_range = cfg.get("scan_vertical_range")
+        if vertical_range is not None:
+            try:
+                action["verticalRange"] = int(vertical_range)
+            except (TypeError, ValueError):
+                pass
         if len(normalized) == 1:
             action["block"] = normalized[0]
         else:
@@ -1233,6 +1479,80 @@ class HeadfulInventoryController:
             return float(state.get("x")), float(state.get("y")), float(state.get("z"))
         except (TypeError, ValueError):
             return None
+
+    def record_death_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        def _as_float(value: Any) -> Optional[float]:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        x = _as_float(payload.get("x") if payload.get("x") is not None else payload.get("death_x"))
+        y = _as_float(payload.get("y") if payload.get("y") is not None else payload.get("death_y"))
+        z = _as_float(payload.get("z") if payload.get("z") is not None else payload.get("death_z"))
+        dimension = payload.get("dimension") or payload.get("death_dimension")
+        if x is None or y is None or z is None:
+            return {"ok": False, "error": "missing_death_position"}
+        self._last_death = {
+            "x": x,
+            "y": y,
+            "z": z,
+            "dimension": str(dimension) if dimension else None,
+        }
+        self._last_death_at = time.time()
+        self._backend_log(f"[death] recorded at {x:.2f},{y:.2f},{z:.2f}")
+        return {"ok": True, "position": self._last_death}
+
+    async def handle_respawn_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        if not bool(cfg.get("auto_recover_death_items", True)):
+            return {"ok": False, "error": "recover_disabled"}
+        state = getattr(self._adapter, "last_state", None)
+        if isinstance(state, dict) and bool(state.get("manualOverride")):
+            return {"ok": False, "error": "manual_override"}
+        death = self._last_death
+        if not isinstance(death, dict):
+            return {"ok": False, "error": "no_death_record"}
+        respawn_x = payload.get("respawn_x")
+        respawn_y = payload.get("respawn_y")
+        respawn_z = payload.get("respawn_z")
+        if respawn_x is None or respawn_y is None or respawn_z is None:
+            current = self._player_pos()
+            if current:
+                respawn_x, respawn_y, respawn_z = current
+        if respawn_x is None or respawn_y is None or respawn_z is None:
+            return {"ok": False, "error": "missing_respawn_position"}
+        death_dim = death.get("dimension")
+        respawn_dim = payload.get("respawn_dimension") or payload.get("dimension")
+        if death_dim and respawn_dim and str(death_dim) != str(respawn_dim):
+            self._last_death = None
+            return {"ok": False, "error": "dimension_mismatch"}
+        try:
+            dx = float(respawn_x) - float(death.get("x"))
+            dz = float(respawn_z) - float(death.get("z"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "invalid_distance"}
+        distance = math.sqrt(dx * dx + dz * dz)
+        max_distance = float(cfg.get("death_recover_distance", 64.0))
+        if distance > max_distance:
+            self._backend_log(f"[death] skip recover distance={distance:.1f} limit={max_distance}")
+            self._last_death = None
+            return {"ok": False, "error": "death_too_far", "distance": distance}
+        timeout = float(cfg.get("death_recover_timeout", 12.0))
+        pickup_range = float(cfg.get("death_recover_pickup_range", 6.0))
+        pickup_timeout = float(cfg.get("death_recover_pickup_timeout", 4.0))
+        await self.cancel_current()
+        await self._move_near_position(
+            {"x": death.get("x"), "y": death.get("y"), "z": death.get("z")},
+            distance=1.6,
+            timeout=timeout,
+            horizontal_only=False,
+        )
+        pickup = await self.pickup_nearby_items(
+            {"range": pickup_range, "timeout": pickup_timeout}
+        )
+        self._last_death = None
+        return {"ok": True, "distance": distance, "pickup": pickup}
 
     async def _ensure_hotbar_slot_for_item(
         self, snapshot: ScreenSnapshot, item_names: Iterable[str]
@@ -1395,6 +1715,9 @@ class HeadfulInventoryController:
                 best_dist = dist
         return best
 
+    def peek_nearest_hostile(self, max_distance: float = 12.0) -> Optional[Dict[str, Any]]:
+        return self._select_nearest_hostile_entity(max_distance_sq=max_distance * max_distance)
+
     def _select_nearest_entity(
         self,
         target_type: Optional[str] = None,
@@ -1467,8 +1790,56 @@ class HeadfulInventoryController:
                 return True
         return False
 
+    async def _open_nearby_doors(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        cfg = self._headful_config()
+        try:
+            radius = int(params.get("radius", cfg.get("door_open_radius", 3)))
+        except (TypeError, ValueError):
+            radius = 3
+        try:
+            max_doors = int(params.get("max_doors", cfg.get("door_open_max", 2)))
+        except (TypeError, ValueError):
+            max_doors = 2
+        timeout = float(params.get("timeout", cfg.get("door_open_timeout", 1.5)))
+        if radius <= 0 or max_doors <= 0:
+            return {"ok": False, "error": "door_scan_disabled"}
+        result = await self._find_blocks(
+            list(DOOR_BLOCKS),
+            radius=radius,
+            max_results=max_doors,
+            timeout=timeout,
+        )
+        if not result.get("ok"):
+            return {"ok": False, "error": "door_not_found"}
+        positions = [
+            pos for pos in (result.get("positions") or []) if isinstance(pos, dict)
+        ]
+        if not positions:
+            return {"ok": False, "error": "door_not_found"}
+        opened = 0
+        for pos in positions:
+            moved = await self._move_near_position(
+                pos,
+                distance=1.6,
+                timeout=timeout,
+                horizontal_only=True,
+            )
+            if not moved:
+                continue
+            await self._look_at_position(pos, duration_ms=120)
+            used = await self._use_block_at(pos, face="up")
+            if used:
+                opened += 1
+                await asyncio.sleep(0.15)
+            if opened >= max_doors:
+                break
+        return {"ok": opened > 0, "opened": opened}
+
     async def _use_block_at(
-        self, pos: Dict[str, Any], face: str = "up"
+        self,
+        pos: Dict[str, Any],
+        face: str = "up",
+        max_horizontal: Optional[float] = None,
     ) -> bool:
         try:
             x = int(pos.get("x"))
@@ -1476,10 +1847,13 @@ class HeadfulInventoryController:
             z = int(pos.get("z"))
         except (TypeError, ValueError, AttributeError):
             return False
-        return await self._adapter.send_action(
-            {"type": "useBlock", "x": x, "y": y, "z": z, "face": face},
-            self._headful_config(),
-        )
+        payload = {"type": "useBlock", "x": x, "y": y, "z": z, "face": face}
+        if max_horizontal is not None:
+            try:
+                payload["maxHorizontal"] = float(max_horizontal)
+            except (TypeError, ValueError):
+                pass
+        return await self._adapter.send_action(payload, self._headful_config())
 
     def _snapshot_has_container(self, snapshot: ScreenSnapshot) -> bool:
         return any(slot.group.startswith("container") for slot in snapshot.slots)
@@ -1511,6 +1885,7 @@ class HeadfulInventoryController:
         remaining: Optional[Dict[str, int]] = None,
         smelt_groups: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
+        positions = [pos for pos in positions if not self._is_blocked_position(pos)]
         player_pos = self._player_pos()
         containers = {}
         if isinstance(registry, dict):
@@ -1649,12 +2024,21 @@ class HeadfulInventoryController:
             await asyncio.sleep(0.2)
         return None
 
+    def _is_ai_control_overlay(self, snapshot: ScreenSnapshot) -> bool:
+        handler = (snapshot.handler or "").lower()
+        title = str(snapshot.title or "").lower()
+        return (
+            "aicontrol" in handler
+            or "ai control" in title
+            or "ai控制" in title
+        )
+
     async def _wait_for_screen_closed(self, timeout: float = 1.2) -> bool:
         start = time.time()
         while time.time() - start < timeout:
             raw = await self._get_snapshot(refresh=True)
             snapshot = ScreenSnapshot.from_dict(raw)
-            if snapshot and not snapshot.screen_open:
+            if snapshot and (not snapshot.screen_open or self._is_ai_control_overlay(snapshot)):
                 return True
             await asyncio.sleep(0.1)
         return False
@@ -1756,7 +2140,10 @@ class HeadfulInventoryController:
         return item_name.endswith(("pickaxe", "axe", "shovel", "hoe"))
 
     def _is_weapon_item(self, item_name: str) -> bool:
-        return item_name.endswith("sword") or item_name in {"bow", "crossbow", "shield"}
+        return (
+            item_name.endswith(("_sword", "_axe"))
+            or item_name in {"bow", "crossbow", "shield", "trident", "mace"}
+        )
 
     def _is_container_item(self, item_name: str) -> bool:
         if item_name in CONTAINER_EXCLUDE:
@@ -2342,7 +2729,14 @@ class HeadfulInventoryController:
         return {"ok": True, "position": pos}
 
     async def open_crafting_table(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        radius = int(params.get("radius", 8))
+        cfg = self._headful_config()
+        radius = int(params.get("radius", cfg.get("scan_radius", 8)))
+        max_results = int(
+            params.get(
+                "max_results",
+                params.get("maxResults", cfg.get("workstation_scan_max_results", 3)),
+            )
+        )
         timeout = float(params.get("timeout", 4.0))
         move = bool(params.get("move", True))
         look_at = bool(params.get("look_at", True))
@@ -2356,15 +2750,19 @@ class HeadfulInventoryController:
         if not isinstance(faces, list) or not faces:
             faces = [face, "north", "south", "west", "east", "up", "down"]
         faces = [str(f) for f in faces if f]
-        result = await self._find_blocks([CRAFTING_TABLE_BLOCK], radius=radius, timeout=timeout)
-        if not result.get("ok"):
-            result = {"ok": False, "error": "crafting_table_not_found"}
-        positions = result.get("positions")
-        pos = None
-        if isinstance(positions, list) and positions:
-            pos = positions[0]
+        result = await self._find_blocks(
+            [CRAFTING_TABLE_BLOCK],
+            radius=radius,
+            max_results=max_results,
+            timeout=timeout,
+        )
+        positions: List[Dict[str, Any]] = []
+        if result.get("ok"):
+            raw_positions = result.get("positions")
+            if isinstance(raw_positions, list):
+                positions = [pos for pos in raw_positions if isinstance(pos, dict)]
         # 如果附近没有工作台，尝试用 2x2 合成一个并放下
-        if pos is None and bool(params.get("place_if_missing", True)):
+        if not positions and bool(params.get("place_if_missing", True)):
             raw = await self._get_snapshot(refresh=True)
             snap = ScreenSnapshot.from_dict(raw)
             if snap and not self._inventory_has_item(snap, "crafting_table", 1):
@@ -2399,17 +2797,22 @@ class HeadfulInventoryController:
                     result_retry = await self._find_blocks(
                         [CRAFTING_TABLE_BLOCK], radius=radius, timeout=timeout
                     )
-                    positions = result_retry.get("positions") if isinstance(result_retry, dict) else None
-                    if isinstance(positions, list) and positions:
-                        pos = positions[0]
-            if pos is None:
+                    raw_positions = result_retry.get("positions") if isinstance(result_retry, dict) else None
+                    if isinstance(raw_positions, list):
+                        positions = [pos for pos in raw_positions if isinstance(pos, dict)]
+            if not positions:
                 return {"ok": False, "error": "crafting_table_place_failed"}
-        elif pos is None:
+        if not positions:
             return {"ok": False, "error": "crafting_table_not_found"}
         attempt_timeout = float(params.get("open_timeout", max(0.8, timeout / retries)))
         snapshot = await self._wait_for_crafting_table(timeout=0.1)
         if snapshot:
-            return {"ok": True, "position": pos, "snapshot": snapshot, "already_open": True}
+            return {
+                "ok": True,
+                "position": positions[0],
+                "snapshot": snapshot,
+                "already_open": True,
+            }
         max_reach = float(params.get("max_reach", 4.2))
         approach_distance = float(
             params.get(
@@ -2417,54 +2820,137 @@ class HeadfulInventoryController:
                 self._headful_config().get("workstation_interact_distance", 2.0),
             )
         )
+        open_doors = bool(params.get("open_doors", cfg.get("open_doors_on_fail", True)))
+        interaction_ranges = self._interaction_ranges(
+            "workstation", params, approach_distance
+        )
         await self._adapter.send_action({"type": "stopMove"}, self._headful_config())
         await self._adapter.send_action({"type": "stopInput"}, self._headful_config())
-        for attempt in range(1, retries + 1):
-            if move:
-                moved = await self._move_near_position(
-                    pos,
-                    distance=approach_distance,
-                    timeout=timeout,
-                    horizontal_only=True,
+        last_error: Optional[str] = None
+        for pos in positions:
+            if self._is_blocked_position(pos):
+                self._backend_log(
+                    f"[open_table] skip blocked pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
                 )
-                if not moved:
-                    self._debug_log("open_crafting_table too far", params)
-                    continue
-            current = self._player_pos()
-            if current:
-                try:
-                    dx = float(current[0]) - float(pos.get("x"))
-                    dz = float(current[2]) - float(pos.get("z"))
-                    if dx * dx + dz * dz > max_reach * max_reach:
-                        await self._adapter.send_action(
-                            {"type": "move", "forward": 1.0, "durationMs": 300},
-                            self._headful_config(),
+                continue
+            self._backend_log(
+                f"[open_table] try pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+            )
+            for attempt in range(1, retries + 1):
+                move_timeout = self._scaled_move_timeout(pos, timeout)
+                if move:
+                    moved = await self._move_near_position(
+                        pos,
+                        distance=approach_distance,
+                        timeout=move_timeout,
+                        horizontal_only=True,
+                    )
+                    if not moved and open_doors:
+                        door_result = await self._open_nearby_doors(
+                            {
+                                "radius": cfg.get("door_open_radius", 3),
+                                "max_doors": cfg.get("door_open_max", 2),
+                                "timeout": cfg.get("door_open_timeout", 1.5),
+                            }
                         )
-                except (TypeError, ValueError):
-                    pass
-            if look_at:
-                await self._look_at_position(pos, duration_ms=look_duration_ms)
-            if interaction_delay_ms > 0:
-                delay = max(interaction_delay_ms, look_duration_ms + 50)
-                await asyncio.sleep(delay / 1000.0)
-            for face_name in faces:
-                used = await self._use_block_at(pos, str(face_name))
-                if used:
-                    snapshot = await self._wait_for_crafting_table(timeout=attempt_timeout)
-                    if snapshot:
-                        return {
-                            "ok": True,
-                            "position": pos,
-                            "snapshot": snapshot,
-                            "attempt": attempt,
-                            "face": face_name,
+                        if door_result.get("ok"):
+                            moved = await self._move_near_position(
+                                pos,
+                                distance=approach_distance,
+                                timeout=move_timeout,
+                                horizontal_only=True,
+                            )
+                    if not moved:
+                        moved = await self._move_near_block_target(
+                            pos,
+                            distance=max(1.4, approach_distance),
+                            timeout=move_timeout,
+                        )
+                    if not moved:
+                        last_error = "crafting_table_too_far"
+                        self._backend_log(
+                            f"[open_table] move_failed pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                        )
+                        continue
+                current = self._player_pos()
+                if current:
+                    try:
+                        dx = float(current[0]) - float(pos.get("x"))
+                        dz = float(current[2]) - float(pos.get("z"))
+                        if dx * dx + dz * dz > max_reach * max_reach:
+                            await self._adapter.send_action(
+                                {"type": "move", "forward": 1.0, "durationMs": 300},
+                                self._headful_config(),
+                            )
+                    except (TypeError, ValueError):
+                        pass
+                if look_at:
+                    await self._look_at_position(pos, duration_ms=look_duration_ms)
+                if interaction_delay_ms > 0:
+                    delay = max(interaction_delay_ms, look_duration_ms + 50)
+                    await asyncio.sleep(delay / 1000.0)
+                for max_range in interaction_ranges:
+                    for face_name in faces:
+                        used = await self._use_block_at(
+                            pos, str(face_name), max_horizontal=max_range
+                        )
+                        if used:
+                            snapshot = await self._wait_for_crafting_table(timeout=attempt_timeout)
+                            if snapshot:
+                                return {
+                                    "ok": True,
+                                    "position": pos,
+                                    "snapshot": snapshot,
+                                    "attempt": attempt,
+                                    "face": face_name,
+                                }
+                await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
+                snapshot = await self._wait_for_crafting_table(timeout=attempt_timeout)
+                if snapshot:
+                    return {"ok": True, "position": pos, "snapshot": snapshot, "attempt": attempt}
+                if open_doors:
+                    door_result = await self._open_nearby_doors(
+                        {
+                            "radius": cfg.get("door_open_radius", 3),
+                            "max_doors": cfg.get("door_open_max", 2),
+                            "timeout": cfg.get("door_open_timeout", 1.5),
                         }
-            await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
-            snapshot = await self._wait_for_crafting_table(timeout=attempt_timeout)
-            if snapshot:
-                return {"ok": True, "position": pos, "snapshot": snapshot, "attempt": attempt}
-            self._debug_log(f"open_crafting_table retry {attempt}/{retries} failed", params)
-        return {"ok": False, "error": "crafting_table_open_failed", "position": pos}
+                    )
+                    if door_result.get("ok"):
+                        if move:
+                            await self._move_near_position(
+                                pos,
+                                distance=approach_distance,
+                                timeout=timeout,
+                                horizontal_only=True,
+                            )
+                        if look_at:
+                            await self._look_at_position(pos, duration_ms=look_duration_ms)
+                        for max_range in interaction_ranges:
+                            for face_name in faces:
+                                used = await self._use_block_at(
+                                    pos, str(face_name), max_horizontal=max_range
+                                )
+                                if used:
+                                    snapshot = await self._wait_for_crafting_table(
+                                        timeout=attempt_timeout
+                                    )
+                                    if snapshot:
+                                        return {
+                                            "ok": True,
+                                            "position": pos,
+                                            "snapshot": snapshot,
+                                            "attempt": attempt,
+                                            "face": face_name,
+                                        }
+                last_error = "crafting_table_open_failed"
+                self._debug_log(f"open_crafting_table retry {attempt}/{retries} failed", params)
+            self._mark_blocked_position(pos, "crafting_table_open_failed")
+        return {
+            "ok": False,
+            "error": last_error or "crafting_table_open_failed",
+            "position": positions[0] if positions else None,
+        }
 
     async def open_brewing_stand(self, params: Dict[str, Any]) -> Dict[str, Any]:
         radius = int(params.get("radius", 8))
@@ -2477,6 +2963,15 @@ class HeadfulInventoryController:
         cfg = self._headful_config()
         approach_distance = float(
             params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
+        interaction_ranges = self._interaction_ranges(
+            "workstation", params, approach_distance
+        )
+        interaction_ranges = self._interaction_ranges(
+            "workstation", params, approach_distance
+        )
+        interaction_ranges = self._interaction_ranges(
+            "workstation", params, approach_distance
         )
         result = await self._find_blocks(["brewing_stand"], radius=radius, timeout=timeout)
         if not result.get("ok"):
@@ -2504,16 +2999,17 @@ class HeadfulInventoryController:
                     continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
-            used = await self._use_block_at(pos, str(face))
-            if used:
-                snapshot = await self._wait_for_brewing_stand(timeout=attempt_timeout)
-                if snapshot:
-                    return {
-                        "ok": True,
-                        "position": pos,
-                        "snapshot": snapshot,
-                        "attempt": attempt,
-                    }
+            for max_range in interaction_ranges:
+                used = await self._use_block_at(pos, str(face), max_horizontal=max_range)
+                if used:
+                    snapshot = await self._wait_for_brewing_stand(timeout=attempt_timeout)
+                    if snapshot:
+                        return {
+                            "ok": True,
+                            "position": pos,
+                            "snapshot": snapshot,
+                            "attempt": attempt,
+                        }
             await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
             snapshot = await self._wait_for_brewing_stand(timeout=attempt_timeout)
             if snapshot:
@@ -2558,16 +3054,17 @@ class HeadfulInventoryController:
                     continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
-            used = await self._use_block_at(pos, str(face))
-            if used:
-                snapshot = await self._wait_for_smithing_table(timeout=attempt_timeout)
-                if snapshot:
-                    return {
-                        "ok": True,
-                        "position": pos,
-                        "snapshot": snapshot,
-                        "attempt": attempt,
-                    }
+            for max_range in interaction_ranges:
+                used = await self._use_block_at(pos, str(face), max_horizontal=max_range)
+                if used:
+                    snapshot = await self._wait_for_smithing_table(timeout=attempt_timeout)
+                    if snapshot:
+                        return {
+                            "ok": True,
+                            "position": pos,
+                            "snapshot": snapshot,
+                            "attempt": attempt,
+                        }
             await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
             snapshot = await self._wait_for_smithing_table(timeout=attempt_timeout)
             if snapshot:
@@ -2612,16 +3109,17 @@ class HeadfulInventoryController:
                     continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
-            used = await self._use_block_at(pos, str(face))
-            if used:
-                snapshot = await self._wait_for_enchanting_table(timeout=attempt_timeout)
-                if snapshot:
-                    return {
-                        "ok": True,
-                        "position": pos,
-                        "snapshot": snapshot,
-                        "attempt": attempt,
-                    }
+            for max_range in interaction_ranges:
+                used = await self._use_block_at(pos, str(face), max_horizontal=max_range)
+                if used:
+                    snapshot = await self._wait_for_enchanting_table(timeout=attempt_timeout)
+                    if snapshot:
+                        return {
+                            "ok": True,
+                            "position": pos,
+                            "snapshot": snapshot,
+                            "attempt": attempt,
+                        }
             await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
             snapshot = await self._wait_for_enchanting_table(timeout=attempt_timeout)
             if snapshot:
@@ -2677,6 +3175,9 @@ class HeadfulInventoryController:
         cfg = self._headful_config()
         approach_distance = float(
             params.get("approach_distance", cfg.get("workstation_interact_distance", 2.0))
+        )
+        interaction_ranges = self._interaction_ranges(
+            "workstation", params, approach_distance
         )
         blocks = params.get("blocks")
         block = params.get("block")
@@ -2809,16 +3310,17 @@ class HeadfulInventoryController:
                     continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=look_duration_ms)
-            used = await self._use_block_at(pos, str(face))
-            if used:
-                snapshot = await self._wait_for_smelting_container(timeout=attempt_timeout)
-                if snapshot:
-                    return {
-                        "ok": True,
-                        "position": pos,
-                        "snapshot": snapshot,
-                        "attempt": attempt,
-                    }
+            for max_range in interaction_ranges:
+                used = await self._use_block_at(pos, str(face), max_horizontal=max_range)
+                if used:
+                    snapshot = await self._wait_for_smelting_container(timeout=attempt_timeout)
+                    if snapshot:
+                        return {
+                            "ok": True,
+                            "position": pos,
+                            "snapshot": snapshot,
+                            "attempt": attempt,
+                        }
             await self._adapter.send_action({"type": "useTarget"}, self._headful_config())
             snapshot = await self._wait_for_smelting_container(timeout=attempt_timeout)
             if snapshot:
@@ -2829,16 +3331,30 @@ class HeadfulInventoryController:
         block = params.get("block")
         blocks = params.get("blocks")
         position = params.get("position")
-        radius = int(params.get("radius", 8))
+        cfg = self._headful_config()
+        radius = int(params.get("radius", cfg.get("scan_radius", 8)))
+        max_results = int(
+            params.get(
+                "max_results",
+                params.get("maxResults", cfg.get("container_scan_max_results", 6)),
+            )
+        )
         timeout = float(params.get("timeout", 4.0))
         move = bool(params.get("move", True))
         look_at = bool(params.get("look_at", True))
         look_duration_ms = int(params.get("look_duration_ms", 200))
         face = params.get("face", "up")
-        cfg = self._headful_config()
         approach_distance = float(
             params.get("approach_distance", cfg.get("container_interact_distance", 2.0))
         )
+        open_doors = bool(params.get("open_doors", cfg.get("open_doors_on_fail", True)))
+        interaction_delay_ms = int(
+            params.get(
+                "interaction_delay_ms",
+                cfg.get("container_interaction_delay_ms", 120),
+            )
+        )
+        interaction_ranges = self._interaction_ranges("container", params, approach_distance)
         deny_raw = params.get("container_denylist", cfg.get("container_denylist"))
         if deny_raw is None:
             deny_raw = ["ender_chest"]
@@ -2860,17 +3376,15 @@ class HeadfulInventoryController:
         if ensure_closed:
             raw = await self._get_snapshot(refresh=True)
             snapshot = ScreenSnapshot.from_dict(raw)
-            if snapshot and snapshot.screen_open:
+            if snapshot and snapshot.screen_open and not self._is_ai_control_overlay(snapshot):
                 await self._adapter.send_action(
                     {"type": "closeScreen"}, self._headful_config()
                 )
                 await self._wait_for_screen_closed(timeout=close_timeout_ms / 1000.0)
+        positions: List[Dict[str, Any]] = []
         if position:
-            pos = position
-            if deny_set and isinstance(pos, dict):
-                block_name = str(pos.get("block", ""))
-                if block_name and block_name.split(":", 1)[-1] in deny_set:
-                    return {"ok": False, "error": "container_denied"}
+            if isinstance(position, dict):
+                positions = [position]
         else:
             if not targets:
                 targets = list(CONTAINER_BLOCKS)
@@ -2882,37 +3396,174 @@ class HeadfulInventoryController:
                 ]
                 if not targets:
                     return {"ok": False, "error": "container_denied"}
-            result = await self._find_blocks(targets, radius=radius, timeout=timeout)
+            result = await self._find_blocks(
+                targets, radius=radius, max_results=max_results, timeout=timeout
+            )
             if not result.get("ok"):
                 return result
-            positions = result.get("positions")
-            if not isinstance(positions, list) or not positions:
-                return {"ok": False, "error": "container_not_found"}
-            pos = positions[0]
-            if deny_set and isinstance(pos, dict):
+            raw_positions = result.get("positions")
+            if isinstance(raw_positions, list):
+                positions = [pos for pos in raw_positions if isinstance(pos, dict)]
+        if not positions:
+            return {"ok": False, "error": "container_not_found"}
+        last_error = "container_open_failed"
+        grouped_positions = self._group_container_positions(positions)
+        for group in grouped_positions:
+            for pos in group:
+                per_block = cfg.get("container_move_timeout_per_block", 0.35)
+                max_timeout = cfg.get("container_move_timeout_max", 12.0)
+                try:
+                    per_block = float(per_block)
+                except (TypeError, ValueError):
+                    per_block = 0.35
+                try:
+                    max_timeout = float(max_timeout)
+                except (TypeError, ValueError):
+                    max_timeout = 12.0
+                move_timeout = self._scaled_move_timeout(
+                    pos, timeout, per_block=per_block, max_timeout=max_timeout
+                )
+                if deny_set and isinstance(pos, dict):
+                    block_name = str(pos.get("block", ""))
+                    if block_name and block_name.split(":", 1)[-1] in deny_set:
+                        last_error = "container_denied"
+                        continue
+                if self._is_blocked_position(pos):
+                    self._backend_log(
+                        f"[open_container] skip blocked pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                    )
+                    last_error = "container_blocked"
+                    continue
+                self._backend_log(
+                    f"[open_container] try pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                )
+                if move:
+                    moved = await self._move_near_position(
+                        pos,
+                        distance=approach_distance,
+                        timeout=move_timeout,
+                        horizontal_only=True,
+                    )
+                    if not moved and open_doors:
+                        door_result = await self._open_nearby_doors(
+                            {
+                                "radius": cfg.get("door_open_radius", 3),
+                                "max_doors": cfg.get("door_open_max", 2),
+                                "timeout": cfg.get("door_open_timeout", 1.5),
+                            }
+                        )
+                        if door_result.get("ok"):
+                            moved = await self._move_near_position(
+                                pos,
+                                distance=approach_distance,
+                                timeout=move_timeout,
+                                horizontal_only=True,
+                            )
+                    if not moved:
+                        moved = await self._move_near_block_target(
+                            pos,
+                            distance=max(1.4, approach_distance),
+                            timeout=move_timeout,
+                        )
+                    if not moved:
+                        last_error = "container_too_far"
+                        self._backend_log(
+                            f"[open_container] move_failed pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                        )
+                        self._mark_blocked_position(pos, "container_too_far")
+                        continue
+                if look_at:
+                    await self._look_at_position(pos, duration_ms=look_duration_ms)
+                if interaction_delay_ms > 0:
+                    delay = max(interaction_delay_ms, look_duration_ms + 50)
+                    await asyncio.sleep(delay / 1000.0)
+                aim_positions = [pos]
                 block_name = str(pos.get("block", ""))
-                if block_name and block_name.split(":", 1)[-1] in deny_set:
-                    return {"ok": False, "error": "container_denied"}
-        if move:
-            moved = await self._move_near_position(
-                pos,
-                distance=approach_distance,
-                timeout=timeout,
-                horizontal_only=True,
-            )
-            if not moved:
-                return {"ok": False, "error": "container_too_far", "position": pos}
-        if look_at:
-            await self._look_at_position(pos, duration_ms=look_duration_ms)
-        used = await self._use_block_at(pos, str(face))
-        if not used:
-            return {"ok": False, "error": "use_block_failed", "position": pos}
-        snapshot = await self._wait_for_container(timeout=timeout)
-        if not snapshot:
-            return {"ok": False, "error": "container_open_failed", "position": pos}
-        snapshot = await self._stabilize_container_snapshot(snapshot, settle_ms)
-        await self._update_container_registry(pos, snapshot)
-        return {"ok": True, "position": pos, "snapshot": snapshot}
+                if "chest" in block_name:
+                    try:
+                        base_y = float(pos.get("y"))
+                        aim_positions = [
+                            pos,
+                            {"x": pos.get("x"), "y": base_y + 0.6, "z": pos.get("z")},
+                            {"x": pos.get("x"), "y": base_y - 0.6, "z": pos.get("z")},
+                        ]
+                    except (TypeError, ValueError):
+                        pass
+                snapshot = None
+                used = False
+                for max_range in interaction_ranges:
+                    for aim in aim_positions:
+                        if look_at:
+                            await self._look_at_position(aim, duration_ms=look_duration_ms)
+                        if interaction_delay_ms > 0:
+                            await asyncio.sleep(max(0.05, interaction_delay_ms / 1000.0))
+                        used = await self._use_block_at(pos, str(face), max_horizontal=max_range)
+                        if used:
+                            snapshot = await self._wait_for_container(timeout=timeout)
+                            if snapshot:
+                                break
+                        if "chest" in block_name:
+                            await self._adapter.send_action(
+                                {"type": "useTarget"}, self._headful_config()
+                            )
+                            snapshot = await self._wait_for_container(timeout=timeout)
+                            if snapshot:
+                                break
+                    if snapshot:
+                        break
+                if not used:
+                    last_error = "use_block_failed"
+                    self._mark_blocked_position(pos, "use_block_failed")
+                    continue
+                if not snapshot and move:
+                    moved_adj = await self._move_near_block_target(
+                        pos,
+                        distance=max(1.4, approach_distance),
+                        timeout=move_timeout,
+                    )
+                    if moved_adj:
+                        if look_at:
+                            await self._look_at_position(pos, duration_ms=look_duration_ms)
+                        used = await self._use_block_at(
+                            pos, str(face), max_horizontal=interaction_ranges[0]
+                        )
+                        if used:
+                            snapshot = await self._wait_for_container(timeout=timeout)
+                if not snapshot and open_doors:
+                    door_result = await self._open_nearby_doors(
+                        {
+                            "radius": cfg.get("door_open_radius", 3),
+                            "max_doors": cfg.get("door_open_max", 2),
+                            "timeout": cfg.get("door_open_timeout", 1.5),
+                        }
+                    )
+                    if door_result.get("ok"):
+                        if move:
+                            await self._move_near_position(
+                                pos,
+                                distance=approach_distance,
+                                timeout=move_timeout,
+                                horizontal_only=True,
+                            )
+                        if look_at:
+                            await self._look_at_position(pos, duration_ms=look_duration_ms)
+                        used = await self._use_block_at(
+                            pos, str(face), max_horizontal=interaction_ranges[0]
+                        )
+                        if used:
+                            snapshot = await self._wait_for_container(timeout=timeout)
+                if not snapshot:
+                    last_error = "container_open_failed"
+                    self._mark_blocked_position(pos, "container_open_failed")
+                    continue
+                snapshot = await self._stabilize_container_snapshot(snapshot, settle_ms)
+                await self._update_container_registry(pos, snapshot)
+                return {"ok": True, "position": pos, "snapshot": snapshot}
+        return {
+            "ok": False,
+            "error": last_error,
+            "position": positions[0] if positions else None,
+        }
 
     async def place_block(self, params: Dict[str, Any]) -> Dict[str, Any]:
         block = _normalize_item_name(params.get("block") or params.get("item"))
@@ -3222,11 +3873,43 @@ class HeadfulInventoryController:
         entity_type = params.get("entity_type") or params.get("type")
         if not entity_type:
             return {"ok": False, "error": "missing_entity_type"}
+        cfg = self._headful_config()
+        auto_equip = bool(
+            params.get("auto_equip", cfg.get("auto_equip_on_attack", True))
+        )
+        auto_equip_weapon = bool(
+            params.get(
+                "auto_equip_weapon",
+                cfg.get("auto_equip_weapon_on_attack", cfg.get("auto_equip_weapon", True)),
+            )
+        )
+        equip_result = None
+        if auto_equip:
+            equip_result = await self.auto_equip()
+        elif auto_equip_weapon:
+            raw = await self._get_snapshot(refresh=True)
+            snapshot = ScreenSnapshot.from_dict(raw)
+            if snapshot is not None:
+                equip_result = await self._equip_best_weapon(snapshot)
         max_distance = float(params.get("range", params.get("distance", 24.0)))
         attack_distance = float(params.get("attack_distance", 3.0))
         timeout = float(params.get("timeout", 6.0))
         duration_sec = float(params.get("duration_sec", 6.0))
-        interval_sec = float(params.get("interval_sec", 0.6))
+        interval_param = params.get("interval_sec")
+        if interval_param is None:
+            interval_param = cfg.get("combat_attack_interval_sec", 0.9)
+        try:
+            interval_sec = float(interval_param)
+        except (TypeError, ValueError):
+            interval_sec = 0.9
+        interval_sec = max(0.2, interval_sec)
+        pickup_after = params.get("pickup_after_attack")
+        if pickup_after is None:
+            pickup_after = cfg.get("combat_pickup_after_attack", True)
+        pickup_range = float(params.get("pickup_range", cfg.get("combat_pickup_range", 6.0)))
+        pickup_timeout = float(
+            params.get("pickup_timeout", cfg.get("combat_pickup_timeout", 4.0))
+        )
         entity = self._select_nearest_entity(
             target_type=str(entity_type), max_distance=max_distance
         )
@@ -3236,6 +3919,7 @@ class HeadfulInventoryController:
         await self._look_at_position(entity, duration_ms=200)
         start = time.time()
         hits = 0
+        entity_gone = False
         while time.time() - start < duration_sec:
             await self._adapter.send_action(
                 {"type": "attack", "entityId": int(entity.get("id", -1))},
@@ -3249,9 +3933,21 @@ class HeadfulInventoryController:
                     refreshed = candidate
                     break
             if refreshed is None:
+                entity_gone = True
                 break
             entity = refreshed
-        return {"ok": True, "hits": hits, "entity": entity}
+        pickup_result = None
+        if pickup_after and entity_gone:
+            pickup_result = await self.pickup_nearby_items(
+                {"range": pickup_range, "timeout": pickup_timeout}
+            )
+        return {
+            "ok": True,
+            "hits": hits,
+            "entity": entity,
+            "equip": equip_result,
+            "pickup": pickup_result,
+        }
 
     async def defend_self(self, params: Dict[str, Any]) -> Dict[str, Any]:
         max_distance = float(params.get("range", params.get("distance", 12.0)))
@@ -3348,7 +4044,25 @@ class HeadfulInventoryController:
         for pos in positions:
             if broken >= count:
                 break
-            await self._move_near_position(pos, distance=distance, timeout=timeout)
+            moved = await self._move_near_position(pos, distance=distance, timeout=timeout)
+            if not moved:
+                cfg = self._headful_config()
+                if bool(cfg.get("open_doors_on_fail", True)):
+                    await self._open_nearby_doors(
+                        {
+                            "radius": cfg.get("door_open_radius", 3),
+                            "max_doors": cfg.get("door_open_max", 2),
+                            "timeout": cfg.get("door_open_timeout", 1.5),
+                        }
+                    )
+                    moved = await self._move_near_position(
+                        pos, distance=distance, timeout=timeout
+                    )
+            if not moved:
+                self._backend_log(
+                    f"[collect_block] move_failed pos={pos.get('x')},{pos.get('y')},{pos.get('z')}"
+                )
+                continue
             if look_at:
                 await self._look_at_position(pos, duration_ms=200)
             await self._adapter.send_action(
@@ -3376,13 +4090,21 @@ class HeadfulInventoryController:
             z = float(pos.get("z"))
         except (TypeError, ValueError, AttributeError):
             return False
-        candidates = [
-            {"x": x, "y": y + 1, "z": z},
-            {"x": x + 1, "y": y, "z": z},
-            {"x": x - 1, "y": y, "z": z},
-            {"x": x, "y": y, "z": z + 1},
-            {"x": x, "y": y, "z": z - 1},
+        offsets = [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
         ]
+        candidates = []
+        for dy in (0, 1, -1):
+            candidates.append({"x": x, "y": y + dy, "z": z})
+            for dx, dz in offsets:
+                candidates.append({"x": x + dx, "y": y + dy, "z": z + dz})
         for candidate in candidates:
             moved = await self._move_near_position(
                 candidate,
@@ -4053,34 +4775,36 @@ class HeadfulInventoryController:
                     await self._wait_for_screen_closed(timeout=close_timeout_ms / 1000.0)
                     await asyncio.sleep(0.2)
             elif positions:
-                visited = set()
-                for pos in positions:
+                grouped_positions = self._group_container_positions(positions)
+                for group in grouped_positions:
                     if needed is not None and not remaining:
                         break
-                    try:
-                        key = (int(pos.get("x")), int(pos.get("y")), int(pos.get("z")))
-                    except (TypeError, ValueError):
-                        key = None
-                    if key and key in visited:
-                        continue
-                    if key:
-                        visited.add(key)
-                    open_result = await self.open_container(
-                        {
-                            "position": pos,
-                            "move": move,
-                            "face": face,
-                            "timeout": container_timeout,
-                            "ensure_closed": True,
-                            "close_timeout_ms": close_timeout_ms,
-                        }
-                    )
-                    results.append(
-                        {"step": "open_container", "position": pos, "result": open_result}
-                    )
-                    if not open_result.get("ok"):
-                        continue
-                    snapshot = open_result.get("snapshot")
+                    opened = False
+                    last_open_result = None
+                    for pos in group:
+                        open_result = await self.open_container(
+                            {
+                                "position": pos,
+                                "move": move,
+                                "face": face,
+                                "timeout": container_timeout,
+                                "ensure_closed": True,
+                                "close_timeout_ms": close_timeout_ms,
+                            }
+                        )
+                        last_open_result = open_result
+                        results.append(
+                            {"step": "open_container", "position": pos, "result": open_result}
+                        )
+                        if open_result.get("ok"):
+                            opened = True
+                            break
+                    if not opened:
+                        if last_open_result and last_open_result.get("ok"):
+                            pass
+                        else:
+                            continue
+                    snapshot = last_open_result.get("snapshot") if last_open_result else None
                     if snapshot is None:
                         raw = await self._get_snapshot(refresh=True)
                         snapshot = ScreenSnapshot.from_dict(raw)
@@ -4136,7 +4860,7 @@ class HeadfulInventoryController:
                     results.append(
                         {
                             "step": "transfer_container",
-                            "position": pos,
+                            "position": group[0] if group else None,
                             "result": transfer_result,
                         }
                     )
@@ -6009,8 +6733,13 @@ class HeadfulInventoryController:
                     if auto_craft_result.get("ok"):
                         self._log_append(f"[auto-craft] ok: {item_name}")
                     else:
+                        detail = auto_craft_result.get("detail")
+                        detail_err = None
+                        if isinstance(detail, dict):
+                            detail_err = detail.get("error")
                         self._log_append(
                             f"[auto-craft] failed: {item_name} err={auto_craft_result.get('error')}"
+                            + (f" detail={detail_err}" if detail_err else "")
                         )
                     auto_substeps = [{"step": "auto_craft", "result": auto_craft_result}]
                     if auto_craft_result.get("ok"):
@@ -6182,10 +6911,17 @@ class HeadfulInventoryController:
         actions = planned.get("actions") if isinstance(planned, dict) else []
         equipped = planned.get("equipped") if isinstance(planned, dict) else {}
         ok = await self._send_sequence(actions)
+        cfg = self._headful_config()
+        weapon_result = None
+        if bool(cfg.get("auto_equip_weapon", True)):
+            raw = await self._get_snapshot(refresh=True)
+            snapshot_weapon = ScreenSnapshot.from_dict(raw) or snapshot
+            weapon_result = await self._equip_best_weapon(snapshot_weapon)
         return {
             "ok": ok,
             "actions": len(actions),
             "equipped": equipped,
+            "weapon": weapon_result,
         }
 
     async def auto_sort_hotbar(self) -> Dict[str, Any]:
@@ -6650,6 +7386,13 @@ class HeadfulInventoryController:
         leftovers: Dict[str, int] = {}
         crafted = {"required": {}, "steps": [], "leftovers": {}}
 
+        def display_name(name: str, planks_generic: bool = False) -> str:
+            if self._is_log(name):
+                return "any_log"
+            if self._is_planks(name):
+                return "planks" if planks_generic or name.endswith("_planks") else name
+            return name
+
         def craft_item_plan(item: str, needed: int) -> None:
             available_inv = inventory.get(item, 0)
             available_left = leftovers.get(item, 0)
@@ -6688,11 +7431,15 @@ class HeadfulInventoryController:
             for ingredient_name, ingredient_count in requirements.items():
                 craft_item_plan(ingredient_name, ingredient_count * batch_count)
 
+            planks_generic = all(self._is_planks(name) for name in requirements)
+            output_generic = self._is_planks(item)
             step_ingredients = " + ".join(
-                f"{amount * batch_count} {name}"
+                f"{amount * batch_count} {display_name(name, planks_generic)}"
                 for name, amount in requirements.items()
             )
-            crafted["steps"].append(f"Craft {step_ingredients} -> {total_produced} {item}")
+            crafted["steps"].append(
+                f"Craft {step_ingredients} -> {total_produced} {display_name(item, output_generic)}"
+            )
 
         craft_item_plan(target_item, count)
 
@@ -6700,9 +7447,13 @@ class HeadfulInventoryController:
         steps = crafted["steps"]
         leftovers_out = leftovers
         lines: List[str] = []
-        if required:
+        display_required: Dict[str, int] = {}
+        for item, amt in required.items():
+            key = display_name(item)
+            display_required[key] = display_required.get(key, 0) + amt
+        if display_required:
             lines.append("You are missing the following items:")
-            for item, amt in required.items():
+            for item, amt in display_required.items():
                 lines.append(f"- {amt} {item}")
             lines.append("")
             lines.append("Once you have these items, here's your crafting plan:")
@@ -6713,8 +7464,10 @@ class HeadfulInventoryController:
         lines.extend(steps)
         if requires_table:
             lines.append("Note: This recipe requires a crafting table (3x3).")
-        if any("oak" in item for item in required) and "oak" not in target_item:
-            lines.append("Note: Any variant of wood can be used for this recipe.")
+        if "any_log" in display_required:
+            lines.append(
+                "Note: Any overworld log or nether stem/hyphae can be used for planks and sticks."
+            )
         if leftovers_out:
             lines.append("")
             lines.append("You will have leftover:")
@@ -7231,7 +7984,7 @@ class HeadfulInventoryController:
                         {
                             "type": "go_to_nearest_block",
                             "blocks": targets,
-                            "radius": int(cfg.get("scan_radius", 16)),
+                            "radius": int(cfg.get("scan_radius", 48)),
                         }
                     ],
                     "reason": "go_to_block",
@@ -7382,6 +8135,12 @@ class HeadfulInventoryController:
                 "cherry_log",
                 "crimson_stem",
                 "warped_stem",
+                "crimson_hyphae",
+                "warped_hyphae",
+                "stripped_crimson_stem",
+                "stripped_warped_stem",
+                "stripped_crimson_hyphae",
+                "stripped_warped_hyphae",
             ]
         return sorted(set(logs))
 
@@ -7451,6 +8210,41 @@ class HeadfulInventoryController:
                 return name
         return None
 
+    def _best_weapon_name(self, snapshot: ScreenSnapshot) -> Optional[str]:
+        best_name = None
+        best_score = 0
+        for slot in snapshot.slots:
+            if slot.group not in {"player_main", "player_hotbar"}:
+                continue
+            if slot.item is None:
+                continue
+            score = _weapon_score(slot.item.name)
+            if score > best_score:
+                best_score = score
+                best_name = slot.item.name
+        return best_name
+
+    async def _equip_best_weapon(
+        self, snapshot: ScreenSnapshot
+    ) -> Dict[str, Any]:
+        weapon_name = self._best_weapon_name(snapshot)
+        if not weapon_name:
+            return {"ok": False, "error": "no_weapon"}
+        hotbar_index, updated_snapshot = await self._ensure_hotbar_slot_for_item(
+            snapshot, [weapon_name]
+        )
+        if hotbar_index is None:
+            return {
+                "ok": False,
+                "error": "weapon_not_found",
+                "weapon": weapon_name,
+            }
+        return {
+            "ok": True,
+            "weapon": weapon_name,
+            "hotbar_slot": hotbar_index,
+        }
+
     async def _auto_gather_missing_base_items(
         self, missing: Dict[str, int], params: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -7466,6 +8260,24 @@ class HeadfulInventoryController:
         except (TypeError, ValueError):
             radius = 12
         radius = max(3, radius)
+        search_radii_raw = params.get(
+            "auto_gather_search_radii", cfg.get("auto_gather_search_radii")
+        )
+        if isinstance(search_radii_raw, list):
+            search_radii = []
+            for value in search_radii_raw:
+                try:
+                    search_radii.append(max(3, int(value)))
+                except (TypeError, ValueError):
+                    continue
+            if not search_radii:
+                search_radii = [radius]
+        else:
+            search_radii = [
+                radius,
+                max(radius * 2, 16),
+                max(radius * 4, 32),
+            ]
         results: List[Dict[str, Any]] = []
         gathered_any = False
         use_containers = bool(
@@ -7510,8 +8322,11 @@ class HeadfulInventoryController:
                     if remaining <= 0:
                         gathered_any = True
                         continue
-            if self._is_log(item):
-                blocks = [item]
+            if self._is_log(item) or item in {"log", "wood"}:
+                blocks = [item] if self._is_log(item) else []
+                for candidate in self._log_block_variants():
+                    if candidate not in blocks:
+                        blocks.append(candidate)
             elif item == "cobblestone":
                 blocks = ["cobblestone", "stone"]
             elif item == "stone":
@@ -7524,14 +8339,18 @@ class HeadfulInventoryController:
             else:
                 results.append({"item": item, "ok": False, "error": "unsupported_base"})
                 continue
-            result = await self.collect_block(
-                {
-                    "blocks": blocks,
-                    "count": gather_count,
-                    "radius": radius,
-                    "auto_equip_tool": True,
-                }
-            )
+            result = {"ok": False, "error": "block_not_found"}
+            for search_radius in search_radii:
+                result = await self.collect_block(
+                    {
+                        "blocks": blocks,
+                        "count": gather_count,
+                        "radius": search_radius,
+                        "auto_equip_tool": True,
+                    }
+                )
+                if result.get("ok"):
+                    break
             results.append({"item": item, "need": count, "gather": result})
             if result.get("ok"):
                 gathered_any = True
@@ -8281,4 +9100,8 @@ class HeadfulInventoryController:
             return await self._craft_item_once(params, execute=False)
         if not bool(params.get("recursive", True)):
             return await self._craft_item_once(params, execute=True)
-        return await self._craft_item_recursive(params, depth=0, chain=None)
+        try:
+            return await self._craft_item_recursive(params, depth=0, chain=None)
+        except RecursionError:
+            self._logger.exception("craft_recursive_failed")
+            return {"ok": False, "error": "craft_recursion_error", "item": item_name}
