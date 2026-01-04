@@ -507,7 +507,7 @@ Please check our **[Plugin Development Guide](PLUGIN_DEV_GUIDE.md)**.
 N-T-AI stands on the shoulders of many great open-source projects and tools. We sincerely thank the following open-source projects and tools for their inspiration and support.
 
 ### 参考开源项目 / Referenced Open-Source Projects
-*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**：参考了其 **Live2D 交互逻辑** 与 **代码实现**。*许可证*: MIT License.
+*   **[N.E.K.O. (Next-gen Emotive Kernel for Operators)](https://github.com/BOHUYESHAN-APB/N.E.K.O.)**：参考了其 **Live2D 交互逻辑** 与 **桌宠模式的代码实现**。*许可证*: MIT License.
     *   **Reference for Live2D interaction logic and code implementation.** *License*: MIT.
 *   **[dlp3d.ai](https://github.com/dlp3d/dlp3d.ai)**：为 **3D 渲染引擎** 的架构设计提供参考。*许可证*: MIT License.
     *   **3D rendering and scene management architecture inspiration.** *License*: MIT.
