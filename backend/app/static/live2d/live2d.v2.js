@@ -3200,7 +3200,6 @@ class Live2DManager {
     setupFloatingButtons(model) {
         // 检查 URL 参数以识别是否处于独立浮窗模式，但允许在应用内也显示 JS 按钮
         const urlParams = new URLSearchParams(window.location.search);
-        const isFloating = urlParams.get('floating') === 'true';
         const controlsParam = urlParams.get('controls');
 
         // Logic:
@@ -3217,11 +3216,7 @@ class Live2DManager {
             console.log('[Live2D] Controls explicitly enabled via URL.');
             // Proceed to show buttons
         } else {
-            // Fallback
-            if (isFloating) {
-                console.log('[Live2D] Floating mode detected (no controls param): Hiding Web-based floating buttons.');
-                return;
-            }
+            console.log('[Live2D] Controls defaulting to enabled.');
         }
 
         const container = document.getElementById('live2d-canvas');
@@ -3270,6 +3265,12 @@ class Live2DManager {
         // 移除了关闭按钮，使用 Windows 原生关闭
         const buttonConfigs = [
             { id: 'settings', emoji: '⚙️', title: '设置', hasPopup: true, popupToggle: true },
+            { id: 'mic', emoji: '🎤', title: '麦克风', toggle: true },
+            { id: 'screen', emoji: '🖥️', title: '屏幕共享', toggle: true },
+            { id: 'screenshot', emoji: '📸', title: '截图', hasPopup: false },
+            { id: 'text', emoji: '💬', title: '文本输入', hasPopup: false },
+            { id: 'tts', emoji: '🔊', title: 'TTS', toggle: true, stateKey: 'tts' },
+            { id: 'voice', emoji: '🎧', title: '语音频道', toggle: true, stateKey: 'voiceChannelMonitor' },
             { id: 'lock', emoji: this.isLocked ? '🔒' : '🔓', title: '锁定位置', hasPopup: false },
             { id: 'reload', emoji: '🔄', title: '重载模型', hasPopup: false }
         ];
@@ -3540,10 +3541,6 @@ class Live2DManager {
 
         // 根据不同按钮创建不同的弹出内容
         if (buttonId === 'settings') {
-            // 检查是否在独立悬浮窗模式
-            const urlParams = new URLSearchParams(window.location.search);
-            const isFloating = urlParams.get('floating') === 'true';
-
             // 如果不是独立悬浮窗（即在软件内），点击设置应跳转到软件设置
             // 但由于这是 Web 内部的 popup 创建逻辑，我们可以在按钮点击时拦截
             // 见 setupFloatingButtons 中的 click handler
@@ -3553,14 +3550,18 @@ class Live2DManager {
             // 先添加 Focus 模式、主动搭话、眼神跟随开关
             const settingsToggles = [
                 { id: 'focus-mode', label: '🎯 允许打断', storageKey: 'focusModeEnabled', inverted: true },
-                { id: 'proactive-chat', label: '💬 主动搭话', storageKey: 'proactiveChatEnabled' }
+                { id: 'proactive-chat', label: '💬 主动搭话', storageKey: 'proactiveChatEnabled' },
+                { id: 'mouse-tracking', label: '👀 眼神跟随', storageKey: 'mouseTrackingEnabled' },
+                { id: 'tts', label: 'TTS 语音播放' },
+                { id: 'voice-channel', label: '语音频道监听' },
+                { id: 'subtitle-ai-toggle', label: '字幕 · LLM' },
+                { id: 'subtitle-user-toggle', label: '字幕 · 用户/语音' },
+                { id: 'bubble-toggle', label: '对话气泡' },
+                { id: 'screen-capture-toggle', label: '截图开关' }
             ];
-
-            // 只有在非浮窗模式下才显示眼神跟随开关 (因为浮窗模式下通常有系统级控制或不需要，避免冲突)
-            if (!isFloating) {
-                settingsToggles.push({ id: 'mouse-tracking', label: '👀 眼神跟随', storageKey: 'mouseTrackingEnabled' });
-            }
             
+            const overlayState = (typeof window.getLive2dOverlayState === 'function') ? window.getLive2dOverlayState() : {};
+
             settingsToggles.forEach(toggle => {
                 const toggleItem = document.createElement('div');
                 Object.assign(toggleItem.style, {
@@ -3588,6 +3589,18 @@ class Live2DManager {
                     checkbox.checked = window.proactiveChatEnabled;
                 } else if (toggle.id === 'mouse-tracking') {
                     checkbox.checked = this.mouseTrackingEnabled;
+                } else if (toggle.id === 'tts') {
+                    checkbox.checked = overlayState.tts !== undefined ? overlayState.tts : true;
+                } else if (toggle.id === 'voice-channel') {
+                    checkbox.checked = overlayState.voiceChannelMonitor === true;
+                } else if (toggle.id === 'subtitle-ai-toggle') {
+                    checkbox.checked = overlayState.aiSubtitle !== undefined ? overlayState.aiSubtitle : true;
+                } else if (toggle.id === 'subtitle-user-toggle') {
+                    checkbox.checked = overlayState.userSubtitle !== undefined ? overlayState.userSubtitle : true;
+                } else if (toggle.id === 'bubble-toggle') {
+                    checkbox.checked = overlayState.bubble !== undefined ? overlayState.bubble : true;
+                } else if (toggle.id === 'screen-capture-toggle') {
+                    checkbox.checked = overlayState.screenshotEnabled !== undefined ? overlayState.screenshotEnabled : true;
                 }
                 
                 const label = document.createElement('label');
@@ -3621,7 +3634,11 @@ class Live2DManager {
                             appCheckbox.checked = actualValue;
                             appCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
                         } else if (!appCheckbox) {
-                            window.focusModeEnabled = actualValue;
+                            if (typeof window.setFocusModeEnabled === 'function') {
+                                window.setFocusModeEnabled(actualValue);
+                            } else {
+                                window.focusModeEnabled = actualValue;
+                            }
                             console.log(`允许打断已${isChecked ? '开启' : '关闭'}（focusModeEnabled=${actualValue}）`);
                         }
                     } else if (toggle.id === 'proactive-chat') {
@@ -3653,6 +3670,38 @@ class Live2DManager {
                         // 如果关闭，重置视线到中心
                         if (!isChecked && this.currentModel) {
                             this.currentModel.focus(0, 0);
+                        }
+                    } else if (toggle.id === 'tts') {
+                        if (typeof window.setLive2dTtsEnabled === 'function') {
+                            window.setLive2dTtsEnabled(isChecked);
+                        } else if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('tts', isChecked);
+                        } else {
+                            window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !isChecked;
+                        }
+                    } else if (toggle.id === 'voice-channel') {
+                        if (typeof window.setVoiceChannelMonitorEnabled === 'function') {
+                            window.setVoiceChannelMonitorEnabled(isChecked);
+                        } else if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('voiceChannelMonitor', isChecked);
+                        }
+                    } else if (toggle.id === 'subtitle-ai-toggle') {
+                        if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('aiSubtitle', isChecked);
+                        }
+                    } else if (toggle.id === 'subtitle-user-toggle') {
+                        if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('userSubtitle', isChecked);
+                        }
+                    } else if (toggle.id === 'bubble-toggle') {
+                        if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('bubble', isChecked);
+                        }
+                    } else if (toggle.id === 'screen-capture-toggle') {
+                        if (typeof window.setLive2dScreenshotEnabled === 'function') {
+                            window.setLive2dScreenshotEnabled(isChecked);
+                        } else if (typeof window.setLive2dOverlayState === 'function') {
+                            window.setLive2dOverlayState('screenshotEnabled', isChecked);
                         }
                     }
                 });
@@ -3747,6 +3796,12 @@ class Live2DManager {
             const focusCheckbox = popup.querySelector('#live2d-focus-mode');
             const proactiveChatCheckbox = popup.querySelector('#live2d-proactive-chat');
             const mouseTrackingCheckbox = popup.querySelector('#live2d-mouse-tracking');
+            const ttsCheckbox = popup.querySelector('#live2d-tts');
+            const voiceChannelCheckbox = popup.querySelector('#live2d-voice-channel');
+            const subtitleAiCheckbox = popup.querySelector('#live2d-subtitle-ai-toggle');
+            const subtitleUserCheckbox = popup.querySelector('#live2d-subtitle-user-toggle');
+            const bubbleCheckbox = popup.querySelector('#live2d-bubble-toggle');
+            const screenCaptureCheckbox = popup.querySelector('#live2d-screen-capture-toggle');
             
             if (focusCheckbox && typeof window.focusModeEnabled !== 'undefined') {
                 // "允许打断"按钮值与 focusModeEnabled 相反
@@ -3757,6 +3812,15 @@ class Live2DManager {
             }
             if (mouseTrackingCheckbox) {
                 mouseTrackingCheckbox.checked = this.mouseTrackingEnabled;
+            }
+            const overlayState = (typeof window.getLive2dOverlayState === 'function') ? window.getLive2dOverlayState() : null;
+            if (overlayState) {
+                if (ttsCheckbox) ttsCheckbox.checked = overlayState.tts !== undefined ? overlayState.tts : true;
+                if (voiceChannelCheckbox) voiceChannelCheckbox.checked = overlayState.voiceChannelMonitor === true;
+                if (subtitleAiCheckbox) subtitleAiCheckbox.checked = overlayState.aiSubtitle !== undefined ? overlayState.aiSubtitle : true;
+                if (subtitleUserCheckbox) subtitleUserCheckbox.checked = overlayState.userSubtitle !== undefined ? overlayState.userSubtitle : true;
+                if (bubbleCheckbox) bubbleCheckbox.checked = overlayState.bubble !== undefined ? overlayState.bubble : true;
+                if (screenCaptureCheckbox) screenCaptureCheckbox.checked = overlayState.screenshotEnabled !== undefined ? overlayState.screenshotEnabled : true;
             }
         }
         

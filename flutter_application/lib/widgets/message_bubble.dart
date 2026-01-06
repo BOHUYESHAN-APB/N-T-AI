@@ -303,27 +303,49 @@ class MessageBubble extends StatelessWidget {
     final isSttHeard = kind == ChatMessageKind.sttHeard;
     final isVoiceChannel = source == 'voice_channel' || message.role == 'chat_voice_channel';
     final alignRight = isMine || isSttHeard;
+    final sttRightPadding = isSttHeard ? (isVoiceChannel ? 32.0 : 8.0) : 8.0;
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
+    final sttBorderColor = isVoiceChannel
+        ? (isDark
+            ? const Color(0xFFF59E0B).withValues(alpha: 0.45)
+            : const Color(0xFFF59E0B).withValues(alpha: 0.35))
+        : (isDark
+            ? const Color(0xFF2DD4BF).withValues(alpha: 0.45)
+            : const Color(0xFF14B8A6).withValues(alpha: 0.35));
+    final sttBubbleBg = isDark
+        ? (isVoiceChannel
+            ? const Color(0xFF4E2A0C).withValues(alpha: 0.55)
+            : const Color(0xFF0F3B33).withValues(alpha: 0.55))
+        : (isVoiceChannel ? const Color(0xFFFFF3E0) : const Color(0xFFE6F7F4));
+    final sttBubbleTxt = isDark
+        ? (isVoiceChannel ? const Color(0xFFFDE68A) : const Color(0xFF99F6E4))
+        : theme.colorScheme.onSurface;
+    final sttBadgeBg = isDark
+        ? (isVoiceChannel
+            ? const Color(0xFF4E2A0C).withValues(alpha: 0.6)
+            : const Color(0xFF0F3B33).withValues(alpha: 0.6))
+        : (isVoiceChannel ? const Color(0xFFFFF3E0) : const Color(0xFFE6F7F4));
+    final sttBadgeBorder = isVoiceChannel
+        ? (isDark
+            ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+            : const Color(0xFFF59E0B).withValues(alpha: 0.25))
+        : (isDark
+            ? const Color(0xFF2DD4BF).withValues(alpha: 0.4)
+            : const Color(0xFF14B8A6).withValues(alpha: 0.25));
+    final sttBadgeText = isVoiceChannel
+        ? (isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309))
+        : (isDark ? const Color(0xFF99F6E4) : const Color(0xFF0F766E));
     final borderColor = switch (kind) {
       ChatMessageKind.assistant => Colors.red.withValues(alpha: isDark ? 0.3 : 0.45),
       ChatMessageKind.user => Colors.blue.withValues(alpha: isDark ? 0.3 : 0.45),
-      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: isDark ? 0.3 : 0.45),
+      ChatMessageKind.sttHeard => sttBorderColor,
       ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: isDark ? 0.2 : 0.35),
       _ => theme.colorScheme.outline.withValues(alpha: isDark ? 0.15 : 0.25),
     };
-    final bubbleBg = isSttHeard 
-        ? (isDark ? const Color(0xFF4527A0).withValues(alpha: 0.4) : const Color(0xFFEDE7F6)) 
-        : (isMine ? bgMine : bgOther);
-    final bubbleTxt = isSttHeard 
-        ? (isDark ? Colors.deepPurple[100]! : theme.colorScheme.onSurface) 
-        : (isMine ? txtMine : txtOther);
-    final outerPadding = EdgeInsets.fromLTRB(
-      8,
-      6,
-      kind == ChatMessageKind.sttHeard ? 56 : 8,
-      6,
-    );
+    final bubbleBg = isSttHeard ? sttBubbleBg : (isMine ? bgMine : bgOther);
+    final bubbleTxt = isSttHeard ? sttBubbleTxt : (isMine ? txtMine : txtOther);
+    final outerPadding = EdgeInsets.fromLTRB(8, 6, sttRightPadding, 6);
 
     // Parse content into blocks (Text or Image)
     final suppressInnerMonologue = !isMine && !isSttHeard && settings.suppressInnerMonologue;
@@ -346,20 +368,10 @@ class MessageBubble extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark
-                      ? (isVoiceChannel
-                          ? const Color(0xFF283593).withValues(alpha: 0.5)
-                          : const Color(0xFF4527A0).withValues(alpha: 0.5))
-                      : (isVoiceChannel ? const Color(0xFFE8EAF6) : const Color(0xFFEDE7F6)),
+                  color: sttBadgeBg,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isDark
-                        ? (isVoiceChannel
-                            ? Colors.indigo.withValues(alpha: 0.3)
-                            : Colors.deepPurple.withValues(alpha: 0.3))
-                        : (isVoiceChannel
-                            ? Colors.indigo.withValues(alpha: 0.25)
-                            : Colors.deepPurple.withValues(alpha: 0.25)),
+                    color: sttBadgeBorder,
                   ),
                 ),
                 child: Row(
@@ -368,18 +380,14 @@ class MessageBubble extends StatelessWidget {
                     Icon(
                       isVoiceChannel ? Icons.headphones : Icons.mic,
                       size: 12,
-                      color: isDark
-                          ? (isVoiceChannel ? Colors.indigo[200] : Colors.deepPurple[200])
-                          : (isVoiceChannel ? Colors.indigo[700] : Colors.deepPurple),
+                      color: sttBadgeText,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       isVoiceChannel ? "语音频道来源" : "麦克风来源",
                       style: TextStyle(
                         fontSize: 10,
-                        color: isDark
-                            ? (isVoiceChannel ? Colors.indigo[100] : Colors.deepPurple[100])
-                            : (isVoiceChannel ? Colors.indigo[700] : Colors.deepPurple[700]),
+                        color: sttBadgeText,
                       ),
                     ),
                   ],

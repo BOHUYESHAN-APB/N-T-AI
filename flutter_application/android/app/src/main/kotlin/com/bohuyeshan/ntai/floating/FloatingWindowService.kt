@@ -27,6 +27,7 @@ class FloatingWindowService : Service() {
     companion object {
         private const val TAG = "FloatingWindowService"
         private const val NOTIFICATION_ID = 1001
+        private var activeInstance: FloatingWindowService? = null
 
         fun startService(
             context: Context,
@@ -53,6 +54,38 @@ class FloatingWindowService : Service() {
             val intent = Intent(context, FloatingWindowService::class.java)
             context.stopService(intent)
         }
+
+        fun show(): Boolean {
+            return activeInstance?.setWindowVisible(true) ?: false
+        }
+
+        fun hide(): Boolean {
+            return activeInstance?.setWindowVisible(false) ?: false
+        }
+
+        fun isVisible(): Boolean {
+            return activeInstance?.isWindowVisible() ?: false
+        }
+
+        fun setPosition(x: Int, y: Int): Boolean {
+            return activeInstance?.updatePosition(x, y) ?: false
+        }
+
+        fun setSize(width: Int, height: Int): Boolean {
+            return activeInstance?.updateSize(width, height) ?: false
+        }
+
+        fun setAlwaysOnTop(alwaysOnTop: Boolean): Boolean {
+            return activeInstance?.updateAlwaysOnTop(alwaysOnTop) ?: false
+        }
+
+        fun updateBackendUrl(backendUrl: String): Boolean {
+            return activeInstance?.reloadBackendUrl(backendUrl) ?: false
+        }
+
+        fun executeJavaScript(code: String): Boolean {
+            return activeInstance?.runJavaScript(code) ?: false
+        }
     }
 
     private var windowManager: WindowManager? = null
@@ -60,6 +93,10 @@ class FloatingWindowService : Service() {
     private var webView: WebView? = null
     private var webViewClient: FloatingWebViewClient? = null
     private var isInitialized = false
+    private var windowParams: WindowManager.LayoutParams? = null
+    private var currentModelPath: String = ""
+    private var currentBackendUrl: String = ""
+    private var currentShowControls: Boolean = false
 
     private var lastX = 0
     private var lastY = 0
@@ -69,6 +106,7 @@ class FloatingWindowService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "FloatingWindowService created")
+        activeInstance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -169,10 +207,14 @@ class FloatingWindowService : Service() {
 
         // 添加浮窗视图
         windowManager?.addView(floatingView, params)
+        windowParams = params
 
         // 加载 Web 页面
         val base = backendUrl.trimEnd('/')
-        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true&controls=$showControls"
+        currentBackendUrl = base
+        currentModelPath = modelPath
+        currentShowControls = showControls
+        val url = "$base/static/live2d/index.html?model=$modelPath&floating=true&controls=$showControls&capture=flutter"
         webView?.loadUrl(url)
 
         // 设置触摸事件
@@ -183,6 +225,65 @@ class FloatingWindowService : Service() {
 
         isInitialized = true
         Log.d(TAG, "Floating window created successfully")
+    }
+
+    private fun setWindowVisible(visible: Boolean): Boolean {
+        val view = floatingView ?: return false
+        view.visibility = if (visible) View.VISIBLE else View.GONE
+        return true
+    }
+
+    private fun isWindowVisible(): Boolean {
+        val view = floatingView ?: return false
+        return view.visibility == View.VISIBLE
+    }
+
+    private fun updatePosition(x: Int, y: Int): Boolean {
+        val view = floatingView ?: return false
+        val manager = windowManager ?: return false
+        val params = windowParams ?: return false
+        params.x = x
+        params.y = y
+        manager.updateViewLayout(view, params)
+        return true
+    }
+
+    private fun updateSize(width: Int, height: Int): Boolean {
+        val view = floatingView ?: return false
+        val manager = windowManager ?: return false
+        val params = windowParams ?: return false
+        params.width = width
+        params.height = height
+        manager.updateViewLayout(view, params)
+        return true
+    }
+
+    private fun updateAlwaysOnTop(alwaysOnTop: Boolean): Boolean {
+        val view = floatingView ?: return false
+        val manager = windowManager ?: return false
+        val params = windowParams ?: return false
+        params.flags = if (alwaysOnTop) {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        manager.updateViewLayout(view, params)
+        return true
+    }
+
+    private fun reloadBackendUrl(backendUrl: String): Boolean {
+        val view = webView ?: return false
+        val base = backendUrl.trimEnd('/')
+        currentBackendUrl = base
+        val url = "$base/static/live2d/index.html?model=$currentModelPath&floating=true&controls=$currentShowControls&capture=flutter"
+        view.post { view.loadUrl(url) }
+        return true
+    }
+
+    private fun runJavaScript(code: String): Boolean {
+        val view = webView ?: return false
+        view.post { view.evaluateJavascript(code, null) }
+        return true
     }
 
     private fun handleTouchEvent(
@@ -218,6 +319,7 @@ class FloatingWindowService : Service() {
             }
         }
         webView?.destroy()
+        activeInstance = null
         isInitialized = false
     }
 

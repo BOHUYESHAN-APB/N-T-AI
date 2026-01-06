@@ -219,6 +219,7 @@ class AudioManager {
              return;
         }
         if (m) m.isLipSyncing = true;
+        window.LIVE2D_AUDIO_PLAYING = true;
         if (window.live2dManager && typeof window.live2dManager.setSpeaking === 'function') {
             try { window.live2dManager.setSpeaking(true); } catch (_) {}
         }
@@ -386,6 +387,7 @@ class AudioManager {
         if (!model) return;
         const m = this.models.get(modelId);
         if (m) m.isLipSyncing = false; // [Fix] Reset lip sync flag so it can restart for next chunk
+        window.LIVE2D_AUDIO_PLAYING = false;
         if (m && m.animationFrameId) {
             cancelAnimationFrame(m.animationFrameId);
         }

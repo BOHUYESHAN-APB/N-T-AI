@@ -62,7 +62,7 @@ class FloatingWindowWindows implements FloatingWindowService {
       final prefs = await SharedPreferences.getInstance();
       final debug = prefs.getBool('settings.live2dDebug') ?? false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=$_showControls';
+          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=$_showControls&capture=flutter';
       
       if (_webview != null) {
         _webview!.launch(url);
@@ -139,7 +139,7 @@ class FloatingWindowWindows implements FloatingWindowService {
       // 构建 Live2D URL，根据设置决定是否开启调试
       final debug = prefs.getBool('settings.live2dDebug') ?? false;
       final url =
-          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=$showControls';
+          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=$showControls&capture=flutter';
 
       // 创建独立 WebView 窗口（隐藏标题栏和工具栏，只显示纯 WebView 内容）
       _webview = await WebviewWindow.create(
@@ -174,16 +174,27 @@ class FloatingWindowWindows implements FloatingWindowService {
       });
 
       // 监听来自 JS 的消息 (用于关闭窗口等交互)
-      // TODO: desktop_webview_window 0.2.3 可能不支持 onMessage，暂时注释掉
-      // 需要确认如何从 JS 发送消息到 Dart
-      /*
-      _webview!.onMessage.listen((message) {
-        if (message == 'close') {
+      _webview!.addOnWebMessageReceivedCallback((message) {
+        final trimmed = message.trim();
+        if (trimmed.isEmpty) return;
+
+        String? action;
+        if (trimmed == 'close') {
+          action = 'close';
+        } else {
+          try {
+            final data = jsonDecode(trimmed);
+            if (data is Map && data['action'] != null) {
+              action = data['action'].toString();
+            }
+          } catch (_) {}
+        }
+
+        if (action == 'close') {
           debugPrint('[FloatingWindowWindows] Received close message from JS');
-          closeFloatingWindow();
+          unawaited(closeFloatingWindow());
         }
       });
-      */
 
       _isVisible = true;
       debugPrint(

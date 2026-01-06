@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/services/llm_service.dart';
+import '../../../core/services/backend_service.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
 import '../../../settings/settings_controller.dart';
@@ -419,6 +421,18 @@ class CapabilitiesTab extends StatelessWidget {
                 onChanged: (v) => controller.setEnableFloatingWindow(v),
               ),
               SwitchListTile(
+                title: const Text('启用 AI 字幕窗口'),
+                subtitle: const Text('创建独立字幕窗口（可被 OBS 捕获）'),
+                value: settings.enableAiSubtitleWindow,
+                onChanged: (v) => controller.setEnableAiSubtitleWindow(v),
+              ),
+              SwitchListTile(
+                title: const Text('启用 用户/语音 字幕窗口'),
+                subtitle: const Text('创建独立字幕窗口（可被 OBS 捕获）'),
+                value: settings.enableUserSubtitleWindow,
+                onChanged: (v) => controller.setEnableUserSubtitleWindow(v),
+              ),
+              SwitchListTile(
                 title: const Text('Live2D 调试模式'),
                 subtitle: const Text('在角色窗口显示动作/表情日志'),
                 value: settings.live2dDebug,
@@ -611,20 +625,42 @@ class CapabilitiesTab extends StatelessWidget {
             // Placeholder buttons for process management
             // In a real implementation, these would call a native bridge or shell command
             OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('正在尝试启动后端进程...')));
-                // TODO: Implement Process.run for backend
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('正在尝试启动后端进程...')),
+                );
+
+                if (!settings.enablePythonBackend) {
+                  await controller.setEnablePythonBackend(true);
+                }
+
+                final result = await BackendService().startLocalBackend(
+                  allowDebug: kDebugMode,
+                );
+                if (!context.mounted) return;
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(result.message)),
+                );
               },
               icon: const Icon(Icons.play_arrow, color: Colors.green),
               label: const Text('启动服务'),
             ),
             OutlinedButton.icon(
-              onPressed: () {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('正在停止服务...')));
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('正在停止服务...')),
+                );
+                final result = await BackendService().stopLocalBackend();
+                if (!context.mounted) return;
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  SnackBar(content: Text(result.message)),
+                );
               },
               icon: const Icon(Icons.stop, color: Colors.red),
               label: const Text('停止服务'),

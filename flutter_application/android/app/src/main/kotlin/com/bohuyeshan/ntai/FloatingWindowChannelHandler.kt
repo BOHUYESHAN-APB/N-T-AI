@@ -21,7 +21,14 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
         private const val PERMISSION_REQUEST_CODE = 2024
     }
 
-    private var pendingAction: String? = null
+    private data class PendingCreateRequest(
+        val modelPath: String,
+        val width: Double,
+        val height: Double,
+        val showControls: Boolean
+    )
+
+    private var pendingCreateRequest: PendingCreateRequest? = null
     private var backendUrl: String = "http://localhost:23456"
 
     fun setupChannel(flutterEngine: FlutterEngine) {
@@ -83,7 +90,12 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             // 请求权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 if (!Settings.canDrawOverlays(activity)) {
-                    pendingAction = "create"
+                    pendingCreateRequest = PendingCreateRequest(
+                        modelPath = modelPath,
+                        width = width,
+                        height = height,
+                        showControls = showControls
+                    )
                     requestOverlayPermission()
                     result.error("PERMISSION_REQUIRED", "Need SYSTEM_ALERT_WINDOW permission", null)
                     return
@@ -105,6 +117,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             if (provided != null && provided.isNotEmpty()) {
                 backendUrl = provided
                 Log.d(TAG, "Backend URL updated to $backendUrl")
+                FloatingWindowService.updateBackendUrl(backendUrl)
             }
             result.success(null)
         } catch (e: Exception) {
@@ -116,7 +129,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
     private fun handleShowFloatingWindow(call: MethodCall, result: MethodChannel.Result) {
         try {
             Log.d(TAG, "Show floating window")
-            // TODO: 实现显示逻辑
+            FloatingWindowService.show()
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Show floating window error", e)
@@ -127,7 +140,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
     private fun handleHideFloatingWindow(call: MethodCall, result: MethodChannel.Result) {
         try {
             Log.d(TAG, "Hide floating window")
-            // TODO: 实现隐藏逻辑
+            FloatingWindowService.hide()
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Hide floating window error", e)
@@ -148,8 +161,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
 
     private fun handleIsFloatingWindowVisible(call: MethodCall, result: MethodChannel.Result) {
         try {
-            // TODO: 实现可见性检查
-            result.success(false)
+            result.success(FloatingWindowService.isVisible())
         } catch (e: Exception) {
             Log.e(TAG, "Is visible error", e)
             result.error("ERROR", e.message, null)
@@ -161,7 +173,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             val x = call.argument<Double>("x") ?: 0.0
             val y = call.argument<Double>("y") ?: 0.0
             Log.d(TAG, "Set position: x=$x, y=$y")
-            // TODO: 实现位置设置
+            FloatingWindowService.setPosition(x.toInt(), y.toInt())
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Set position error", e)
@@ -174,7 +186,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
             val width = call.argument<Double>("width") ?: 600.0
             val height = call.argument<Double>("height") ?: 800.0
             Log.d(TAG, "Set size: ${width}x$height")
-            // TODO: 实现大小设置
+            FloatingWindowService.setSize(width.toInt(), height.toInt())
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Set size error", e)
@@ -186,7 +198,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
         try {
             val alwaysOnTop = call.argument<Boolean>("alwaysOnTop") ?: false
             Log.d(TAG, "Set always on top: $alwaysOnTop")
-            // TODO: 实现置顶设置
+            FloatingWindowService.setAlwaysOnTop(alwaysOnTop)
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Set always on top error", e)
@@ -198,7 +210,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
         try {
             val code = call.argument<String>("code") ?: ""
             Log.d(TAG, "Execute JavaScript")
-            // TODO: 实现 JS 执行
+            FloatingWindowService.executeJavaScript(code)
             result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Execute JS error", e)
@@ -255,7 +267,7 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:${activity.packageName}")
             )
-            activity.startActivity(intent)
+            activity.startActivityForResult(intent, PERMISSION_REQUEST_CODE)
         }
     }
 
@@ -263,10 +275,22 @@ class FloatingWindowChannelHandler(private val activity: Activity) {
         if (requestCode == PERMISSION_REQUEST_CODE) {
             Log.d(TAG, "Permission result: $resultCode")
             // 权限请求完成后的处理
-            if (pendingAction == "create") {
-                // TODO: 重试创建浮窗
-                pendingAction = null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (!Settings.canDrawOverlays(activity)) {
+                    return
+                }
             }
+
+            val pending = pendingCreateRequest ?: return
+            pendingCreateRequest = null
+            FloatingWindowService.startService(
+                activity,
+                pending.modelPath,
+                backendUrl,
+                pending.showControls,
+                pending.width,
+                pending.height
+            )
         }
     }
 }

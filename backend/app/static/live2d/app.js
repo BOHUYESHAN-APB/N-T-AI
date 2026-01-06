@@ -49,8 +49,16 @@ function init_app(){
     const screenshotsList = getEl('screenshots-list');
     const screenshotCount = getEl('screenshot-count');
     const clearAllScreenshots = getEl('clear-all-screenshots');
+    const overlayAiSubtitle = getEl('live2d-subtitle-ai');
+    const overlayUserSubtitle = getEl('live2d-subtitle-user');
+    const overlayBubble = getEl('live2d-speech-bubble');
+    const textInputArea = getEl('text-input-area');
     const isLiteMode = !chatContainer;
     window.live2dLiteMode = isLiteMode;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('capture') === 'flutter') {
+        window.LIVE2D_SCREEN_CAPTURE_VIA_FLUTTER = true;
+    }
 
     let audioContext;
     let workletNode;
@@ -105,6 +113,23 @@ function init_app(){
     window.proactiveChatEnabled = proactiveChatEnabled;
     window.focusModeEnabled = focusModeEnabled;
 
+    const readBool = (key, fallback) => {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === 'true' || raw === 'false') return raw === 'true';
+        } catch (_) {}
+        return fallback;
+    };
+
+    const writeBool = (key, value) => {
+        try {
+            localStorage.setItem(key, value ? 'true' : 'false');
+        } catch (_) {}
+    };
+
+    focusModeEnabled = readBool('live2d.focusModeEnabled', focusModeEnabled);
+    window.focusModeEnabled = focusModeEnabled;
+
     try {
         const raw = localStorage.getItem('proactiveChatEnabled');
         if (raw === 'true' || raw === 'false') {
@@ -112,6 +137,241 @@ function init_app(){
             window.proactiveChatEnabled = proactiveChatEnabled;
         }
     } catch (_) {}
+
+    const overlayStorageKeys = {
+        aiSubtitle: 'live2d.subtitle.ai',
+        userSubtitle: 'live2d.subtitle.user',
+        bubble: 'live2d.bubble',
+        tts: 'live2d.tts.enabled',
+        voiceChannelMonitor: 'live2d.voiceChannelMonitor',
+        screenshotEnabled: 'live2d.screenshot.enabled',
+    };
+
+    const overlayState = {
+        aiSubtitle: readBool(overlayStorageKeys.aiSubtitle, true),
+        userSubtitle: readBool(overlayStorageKeys.userSubtitle, true),
+        bubble: readBool(overlayStorageKeys.bubble, true),
+        tts: readBool(overlayStorageKeys.tts, true),
+        voiceChannelMonitor: readBool(overlayStorageKeys.voiceChannelMonitor, false),
+        screenshotEnabled: readBool(overlayStorageKeys.screenshotEnabled, true),
+    };
+    let lastAiSubtitle = '';
+    let lastUserSubtitle = '';
+    let bubbleHideTimer = null;
+    let bubbleRaf = 0;
+
+    const applyOverlayVisibility = () => {
+        if (overlayAiSubtitle) {
+            overlayAiSubtitle.style.display = overlayState.aiSubtitle && lastAiSubtitle ? 'block' : 'none';
+        }
+        if (overlayUserSubtitle) {
+            overlayUserSubtitle.style.display = overlayState.userSubtitle && lastUserSubtitle ? 'block' : 'none';
+        }
+        if (overlayBubble && !overlayState.bubble) {
+            overlayBubble.classList.remove('show');
+            overlayBubble.style.opacity = '0';
+        }
+    };
+
+    function applyScreenshotState() {
+        const enabled = overlayState.screenshotEnabled !== false;
+        if (screenshotButton) {
+            screenshotButton.disabled = !enabled;
+        }
+        if (screenshotThumbnailContainer) {
+            if (!enabled || screenshotCounter === 0) {
+                screenshotThumbnailContainer.style.display = 'none';
+            } else {
+                screenshotThumbnailContainer.style.display = 'flex';
+            }
+        }
+        const floatingBtn = document.getElementById('live2d-btn-screenshot');
+        if (floatingBtn) {
+            floatingBtn.style.opacity = enabled ? '1' : '0.5';
+            floatingBtn.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+    }
+
+    const setOverlayState = (key, value) => {
+        if (!(key in overlayState)) return;
+        overlayState[key] = !!value;
+        const storageKey = overlayStorageKeys[key];
+        if (storageKey) {
+            writeBool(storageKey, overlayState[key]);
+        }
+        applyOverlayVisibility();
+        if (key === 'bubble' && !overlayState.bubble) {
+            if (bubbleHideTimer) {
+                clearTimeout(bubbleHideTimer);
+                bubbleHideTimer = null;
+            }
+            if (bubbleRaf) {
+                cancelAnimationFrame(bubbleRaf);
+                bubbleRaf = 0;
+            }
+        }
+        if (key === 'tts') {
+            window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !overlayState.tts;
+        }
+        if (key === 'screenshotEnabled') {
+            applyScreenshotState();
+        }
+    };
+
+    window.setLive2dOverlayState = (key, value) => setOverlayState(key, value);
+    window.getLive2dOverlayState = () => ({ ...overlayState });
+    applyOverlayVisibility();
+    applyScreenshotState();
+    window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !overlayState.tts;
+
+    const normalizeSubtitleText = (text) => {
+        if (!text) return '';
+        return text.replace(/\s+/g, ' ').trim();
+    };
+
+    const updateAiSubtitle = (text, isNewMessage) => {
+        const normalized = normalizeSubtitleText(text);
+        if (!normalized) return;
+        if (isNewMessage) {
+            lastAiSubtitle = normalized;
+        } else {
+            lastAiSubtitle = `${lastAiSubtitle}${normalized}`.trim();
+        }
+        if (overlayAiSubtitle && overlayState.aiSubtitle) {
+            overlayAiSubtitle.textContent = lastAiSubtitle;
+            overlayAiSubtitle.style.display = 'block';
+        }
+        updateSpeechBubble(lastAiSubtitle);
+    };
+
+    const updateUserSubtitle = (text, source) => {
+        const normalized = normalizeSubtitleText(text);
+        if (!normalized) return;
+        const prefix = source === 'voice_channel'
+            ? '语音频道'
+            : (source === 'text' ? '文本输入' : '麦克风');
+        lastUserSubtitle = `【${prefix}】 ${normalized}`;
+        if (overlayUserSubtitle && overlayState.userSubtitle) {
+            overlayUserSubtitle.textContent = lastUserSubtitle;
+            overlayUserSubtitle.style.display = 'block';
+        }
+    };
+
+    const updateSpeechBubblePosition = () => {
+        if (!overlayBubble || !overlayState.bubble || !overlayBubble.classList.contains('show')) {
+            if (bubbleRaf) {
+                cancelAnimationFrame(bubbleRaf);
+                bubbleRaf = 0;
+            }
+            return;
+        }
+        try {
+            const model = window.live2dManager && window.live2dManager.currentModel;
+            if (model && typeof model.getBounds === 'function') {
+                const bounds = model.getBounds();
+                const x = bounds.left + (bounds.right - bounds.left) * 0.5;
+                const y = Math.max(16, bounds.top - 12);
+                overlayBubble.style.left = `${x}px`;
+                overlayBubble.style.top = `${y}px`;
+            } else {
+                overlayBubble.style.left = '50%';
+                overlayBubble.style.top = '18%';
+            }
+        } catch (_) {
+            overlayBubble.style.left = '50%';
+            overlayBubble.style.top = '18%';
+        }
+        bubbleRaf = requestAnimationFrame(updateSpeechBubblePosition);
+    };
+
+    const updateSpeechBubble = (text) => {
+        if (!overlayBubble || !overlayState.bubble) return;
+        const normalized = normalizeSubtitleText(text);
+        if (!normalized) return;
+        overlayBubble.textContent = normalized;
+        overlayBubble.classList.add('show');
+        if (bubbleHideTimer) {
+            clearTimeout(bubbleHideTimer);
+        }
+        bubbleHideTimer = setTimeout(() => {
+            overlayBubble.classList.remove('show');
+        }, 6000);
+        if (!bubbleRaf) {
+            bubbleRaf = requestAnimationFrame(updateSpeechBubblePosition);
+        }
+    };
+
+    const setFocusModeEnabled = (flag) => {
+        focusModeEnabled = !!flag;
+        window.focusModeEnabled = focusModeEnabled;
+        writeBool('live2d.focusModeEnabled', focusModeEnabled);
+    };
+
+    const setFloatingButtonActive = (id, active) => {
+        const btn = document.getElementById(`live2d-btn-${id}`);
+        if (!btn) return;
+        btn.dataset.active = active ? 'true' : 'false';
+        btn.style.background = active ? 'rgba(79, 140, 255, 0.9)' : 'rgba(255, 255, 255, 0.9)';
+    };
+
+    setFloatingButtonActive('tts', overlayState.tts);
+    setFloatingButtonActive('voice', overlayState.voiceChannelMonitor);
+    if (textInputArea) {
+        setFloatingButtonActive('text', !textInputArea.classList.contains('hidden'));
+    }
+
+    const setLive2dTtsEnabled = (flag) => {
+        setOverlayState('tts', flag);
+        setFloatingButtonActive('tts', !!flag);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            try {
+                socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: !!flag }));
+            } catch (_) {}
+        }
+    };
+
+    const setVoiceChannelMonitorEnabled = async (flag) => {
+        setOverlayState('voiceChannelMonitor', flag);
+        setFloatingButtonActive('voice', !!flag);
+        try {
+            await fetch('/api/live2d/agent/voice_channel_monitor', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    channel_id: 'default',
+                    is_active: !!flag,
+                }),
+            });
+        } catch (_) {}
+    };
+
+    if (overlayState.voiceChannelMonitor) {
+        setVoiceChannelMonitorEnabled(true);
+    }
+
+    const setLive2dScreenshotEnabled = (flag, options = {}) => {
+        setOverlayState('screenshotEnabled', flag);
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (shouldBroadcast && socket && socket.readyState === WebSocket.OPEN) {
+            try {
+                socket.send(JSON.stringify({ action: 'set_screen_capture_enabled', enabled: !!flag }));
+            } catch (_) {}
+        }
+    };
+
+    const toggleTextInputPanel = () => {
+        if (!textInputArea) return;
+        textInputArea.classList.toggle('hidden');
+        setFloatingButtonActive('text', !textInputArea.classList.contains('hidden'));
+    };
+
+    window.setFocusModeEnabled = setFocusModeEnabled;
+    window.setLive2dTtsEnabled = setLive2dTtsEnabled;
+    window.setVoiceChannelMonitorEnabled = setVoiceChannelMonitorEnabled;
+    window.setLive2dScreenshotEnabled = setLive2dScreenshotEnabled;
+    window.toggleTextInputPanel = toggleTextInputPanel;
 
     function stopProactiveChatSchedule() {
         if (proactiveChatTimer) {
@@ -158,6 +418,16 @@ function init_app(){
     window.resetProactiveChatBackoff = resetProactiveChatBackoff;
     window.stopProactiveChatSchedule = stopProactiveChatSchedule;
     window.setProactiveChatEnabled = setProactiveChatEnabled;
+
+    const requestFlutterScreenCapture = () => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+        try {
+            socket.send(JSON.stringify({ action: 'request_screen_capture', source: 'live2d' }));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    };
     
     // WebSocket心跳保活
     let heartbeatInterval = null;
@@ -196,6 +466,12 @@ function init_app(){
             if (proactiveChatEnabled) {
                 resetProactiveChatBackoff();
             }
+
+            if (overlayState.tts !== undefined) {
+                try {
+                    socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: overlayState.tts }));
+                } catch (_) {}
+            }
         };
 
         socket.onmessage = (event) => {
@@ -225,6 +501,7 @@ function init_app(){
                     const isActive = !!response.is_active;
                     const stateText = isActive ? '开始监听' : '停止监听';
                     appendMessage(`语音频道 ${channelId} ${stateText}`, 'chat_normal', true);
+                    updateStatus(`语音频道 ${channelId} ${stateText}`, 'processing');
 
                 } else if (response.type === 'voice_channel_transcript') {
                     const channelId = response.channel_id || '';
@@ -232,6 +509,11 @@ function init_app(){
                     const text = response.text || '';
                     const prefix = speaker ? `【语音频道 ${channelId}】${speaker}: ` : `【语音频道 ${channelId}】`;
                     appendMessage(`${prefix}${text}`, 'chat_normal', true);
+                    updateUserSubtitle(`${speaker ? speaker + ': ' : ''}${text}`, 'voice_channel');
+                } else if (response.type === 'screen_capture_toggle') {
+                    const enabled = response.enabled !== false;
+                    setLive2dScreenshotEnabled(enabled, { broadcast: false });
+                    updateStatus(enabled ? '截图已开启' : '截图已关闭', 'normal');
 
                 } else if (response.type === 'chat_message') {
                     // Generic chat message (User, Chat, SC, Agent)
@@ -449,6 +731,43 @@ function init_app(){
     // 初始化连接
     connectWebSocket();
 
+    window.addEventListener('live2d-mic-toggle', () => {
+        if (typeof window.switchMicCapture === 'function') {
+            window.switchMicCapture();
+        }
+    });
+
+    window.addEventListener('live2d-screen-toggle', () => {
+        if (typeof window.switchScreenSharing === 'function') {
+            window.switchScreenSharing();
+        }
+    });
+
+    window.addEventListener('live2d-screenshot-click', () => {
+        if (!overlayState.screenshotEnabled) {
+            updateStatus('截图功能已关闭', 'normal');
+            return;
+        }
+        if (screenshotButton && !screenshotButton.disabled) {
+            screenshotButton.click();
+        }
+    });
+
+    window.addEventListener('live2d-text-click', () => {
+        toggleTextInputPanel();
+    });
+
+    window.addEventListener('live2d-tts-toggle', (event) => {
+        const active = event.detail && typeof event.detail.active === 'boolean' ? event.detail.active : overlayState.tts;
+        setLive2dTtsEnabled(active);
+    });
+
+    window.addEventListener('live2d-voice-toggle', (event) => {
+        const active = event.detail && typeof event.detail.active === 'boolean' ? event.detail.active : overlayState.voiceChannelMonitor;
+        setVoiceChannelMonitorEnabled(active);
+        setFloatingButtonActive('voice', active);
+    });
+
     async function startAudioWorklet(mediaStream) {
         if (!mediaStream) return;
         if (!audioContext) {
@@ -486,6 +805,7 @@ function init_app(){
         workletNode.port.onmessage = (event) => {
             if (!isRecording) return;
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (focusModeEnabled && window.LIVE2D_AUDIO_PLAYING) return;
             const pcm = event.data;
             if (!pcm || !pcm.buffer) return;
             try {
@@ -530,6 +850,12 @@ function init_app(){
 
     // 添加消息到聊天界面
     function appendMessage(text, sender, isNewMessage = true, reasoning = null, toolCalls = null) {
+        if (sender === 'gemini' || sender === 'ai' || sender === 'assistant') {
+            updateAiSubtitle(text, isNewMessage);
+        } else if (sender === 'user') {
+            updateUserSubtitle(text, 'mic');
+        }
+
         if (!chatContentWrapper) return;
 
         function getCurrentTimeString() {
@@ -972,6 +1298,7 @@ function init_app(){
             screenButton.disabled = true;
             stopButton.disabled = false;
             resetSessionButton.disabled = false;
+            setFloatingButtonActive('screen', true);
 
             // 当用户停止共享屏幕时
             screenCaptureStream.getVideoTracks()[0].onended = stopScreening;
@@ -1007,6 +1334,7 @@ function init_app(){
         resetSessionButton.disabled = false;
         screenCaptureStream = null;
         statusElement.textContent = '正在语音...';
+        setFloatingButtonActive('screen', false);
     }
 
     window.switchMicCapture = async () => {
@@ -1187,7 +1515,10 @@ function init_app(){
         
         // 隐藏文本输入区
         const textInputArea = document.getElementById('text-input-area');
-        textInputArea.classList.add('hidden');
+        if (textInputArea) {
+            textInputArea.classList.add('hidden');
+            setFloatingButtonActive('text', false);
+        }
         
         // 立即禁用所有语音按钮
         micButton.disabled = true;
@@ -1238,8 +1569,11 @@ function init_app(){
             micButton.disabled = false;
             
             // 恢复文本输入区
-            const textInputArea = document.getElementById('text-input-area');
+        const textInputArea = document.getElementById('text-input-area');
+        if (textInputArea) {
             textInputArea.classList.remove('hidden');
+            setFloatingButtonActive('text', true);
+        }
         }
     });
 
@@ -1305,6 +1639,7 @@ function init_app(){
                 
                 // Add to UI immediately
                 appendMessage(text, 'user', true);
+                updateUserSubtitle(text, 'text');
                 textInputBox.value = '';
                 
                 // Reset proactive chat timer
@@ -1324,6 +1659,11 @@ function init_app(){
     if (screenshotButton) {
         screenshotButton.addEventListener('click', async () => {
             try {
+                if (window.LIVE2D_SCREEN_CAPTURE_VIA_FLUTTER) {
+                    const requested = requestFlutterScreenCapture();
+                    updateStatus(requested ? '已请求 Flutter 截图' : '截图请求失败', requested ? 'processing' : 'normal');
+                    return;
+                }
                 // 如果已经在分享屏幕（录音模式下），直接使用当前流
                 if (isRecording && screenCaptureStream) {
                     takeScreenshot(screenCaptureStream);
@@ -1433,6 +1773,10 @@ function init_app(){
     function updateScreenshotCount() {
         if (screenshotCount) {
             screenshotCount.textContent = screenshotCounter > 0 ? `${screenshotCounter} images` : '';
+        }
+        if (!overlayState.screenshotEnabled) {
+            screenshotThumbnailContainer.style.display = 'none';
+            return;
         }
         if (screenshotCounter === 0) {
             screenshotThumbnailContainer.style.display = 'none';

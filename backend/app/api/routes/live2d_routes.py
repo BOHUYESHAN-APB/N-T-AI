@@ -429,6 +429,27 @@ async def live2d_websocket(websocket: WebSocket):
                     print(f"[Live2D WS] Global TTS Enabled set to: {enabled}")
                     continue
 
+                if action == "set_screen_capture_enabled":
+                    enabled = bool(message.get("enabled", True))
+                    await manager.broadcast(
+                        {
+                            "type": "screen_capture_toggle",
+                            "enabled": enabled,
+                        }
+                    )
+                    continue
+
+                if action == "request_screen_capture":
+                    source = (message.get("source") or "live2d").strip() or "live2d"
+                    await manager.broadcast(
+                        {
+                            "type": "screen_capture_request",
+                            "source": source,
+                            "target": "flutter",
+                        }
+                    )
+                    continue
+
                 if action == "voice_channel_transcript":
                     channel_id = (message.get("channel_id") or "").strip()
                     text = (message.get("text") or "").strip()

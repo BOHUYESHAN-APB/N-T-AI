@@ -43,6 +43,8 @@ class SettingsController extends ChangeNotifier {
   static const _kShowLive2DMiniWindow = 'settings.ui.live2dMiniWindow';
   static const _kEnableFloatingWindow = 'settings.ui.enableFloatingWindow';
   static const _kLive2dDebug = 'settings.ui.live2dDebug';
+  static const _kEnableAiSubtitleWindow = 'settings.ui.subtitleWindow.ai';
+  static const _kEnableUserSubtitleWindow = 'settings.ui.subtitleWindow.user';
   static const _kEnableVts = 'settings.vts.enabled';
   static const _kEnableScreenCapture = 'settings.vision.enableScreenCapture';
   static const _kScreenCaptureInterval = 'settings.vision.screenCaptureInterval';
@@ -188,6 +190,10 @@ class SettingsController extends ChangeNotifier {
     final enableFloatingWindow =
         _prefs.getBool(_kEnableFloatingWindow) ?? false;
     final live2dDebug = _prefs.getBool(_kLive2dDebug) ?? false;
+    final enableAiSubtitleWindow =
+        _prefs.getBool(_kEnableAiSubtitleWindow) ?? false;
+    final enableUserSubtitleWindow =
+        _prefs.getBool(_kEnableUserSubtitleWindow) ?? false;
     final enableVts = _prefs.getBool(_kEnableVts) ?? false;
     final enableScreenCapture = _prefs.getBool(_kEnableScreenCapture) ?? false;
     final screenCaptureInterval = _prefs.getInt(_kScreenCaptureInterval) ?? 300;
@@ -562,6 +568,8 @@ class SettingsController extends ChangeNotifier {
       showLive2DMiniWindow: showLive2DMiniWindow,
       enableFloatingWindow: enableFloatingWindow,
       live2dDebug: live2dDebug,
+      enableAiSubtitleWindow: enableAiSubtitleWindow,
+      enableUserSubtitleWindow: enableUserSubtitleWindow,
       enableVts: enableVts,
       enableScreenCapture: enableScreenCapture,
       screenCaptureInterval: screenCaptureInterval,
@@ -779,6 +787,20 @@ class SettingsController extends ChangeNotifier {
   Future<void> setLive2dDebug(bool v) async {
     _settings = _settings.copyWith(live2dDebug: v);
     await _prefs.setBool(_kLive2dDebug, v);
+    notifyListeners();
+  }
+
+  Future<void> setEnableAiSubtitleWindow(bool v) async {
+    _settings = _settings.copyWith(enableAiSubtitleWindow: v);
+    await _prefs.setBool(_kEnableAiSubtitleWindow, v);
+    debugPrint('[Settings] Enable AI Subtitle Window: $v');
+    notifyListeners();
+  }
+
+  Future<void> setEnableUserSubtitleWindow(bool v) async {
+    _settings = _settings.copyWith(enableUserSubtitleWindow: v);
+    await _prefs.setBool(_kEnableUserSubtitleWindow, v);
+    debugPrint('[Settings] Enable User Subtitle Window: $v');
     notifyListeners();
   }
 

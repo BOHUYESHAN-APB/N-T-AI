@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subtitle Window</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    #subtitle-wrap {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 18px 22px;
+      box-sizing: border-box;
+    }
+
+    #subtitle-card {
+      max-width: min(900px, 94vw);
+      padding: 12px 16px;
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #f8fafc;
+      font-size: 20px;
+      line-height: 1.4;
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(6px);
+      transition: opacity 0.2s ease;
+      opacity: 0;
+    }
+
+    #subtitle-card.show {
+      opacity: 1;
+    }
+
+    #subtitle-label {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      padding: 4px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      background: rgba(0, 0, 0, 0.4);
+      color: #f8fafc;
+    }
+
+    .mode-ai #subtitle-card {
+      border-left: 4px solid #7dd3fc;
+    }
+
+    .mode-user #subtitle-card {
+      border-left: 4px solid #f59e0b;
+    }
+  </style>
+</head>
+<body>
+  <div id="subtitle-wrap">
+    <div id="subtitle-label">SUBTITLE</div>
+    <div id="subtitle-card"></div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const mode = (params.get('mode') || 'ai').toLowerCase();
+    const subtitleWrap = document.getElementById('subtitle-wrap');
+    const subtitleCard = document.getElementById('subtitle-card');
+    const subtitleLabel = document.getElementById('subtitle-label');
+
+    subtitleWrap.classList.add(mode === 'user' ? 'mode-user' : 'mode-ai');
+    subtitleLabel.textContent = mode === 'user' ? 'USER / VOICE' : 'AI';
+
+    let currentText = '';
+    function normalizeText(text) {
+      if (!text) return '';
+      return String(text).replace(/\s+/g, ' ').trim();
+    }
+
+    function showText(text) {
+      const normalized = normalizeText(text);
+      if (!normalized) return;
+      subtitleCard.textContent = normalized;
+      subtitleCard.classList.add('show');
+    }
+
+    function updateAiSubtitle(text, isNew) {
+      const normalized = normalizeText(text);
+      if (!normalized) return;
+      if (isNew) {
+        currentText = normalized;
+      } else {
+        currentText = `${currentText}${normalized}`.trim();
+      }
+      showText(currentText);
+    }
+
+    function updateUserSubtitle(text, prefix) {
+      const normalized = normalizeText(text);
+      if (!normalized) return;
+      currentText = prefix ? `[${prefix}] ${normalized}` : normalized;
+      showText(currentText);
+    }
+
+    function handleMessage(message) {
+      if (!message || typeof message !== 'object') return;
+
+      if (mode === 'ai') {
+        if (message.type === 'gemini_response') {
+          const isNew = message.isNewMessage === undefined ? true : !!message.isNewMessage;
+          updateAiSubtitle(message.text || '', isNew);
+        } else if (message.type === 'chat_message') {
+          const sender = (message.sender || '').toString().toLowerCase();
+          if (sender === 'assistant' || sender === 'ai' || sender === 'gemini') {
+            updateAiSubtitle(message.text || '', true);
+          }
+        }
+        return;
+      }
+
+      if (message.type === 'user_transcript') {
+        updateUserSubtitle(message.text || '', 'MIC');
+        return;
+      }
+
+      if (message.type === 'voice_channel_transcript') {
+        const channelId = (message.channel_id || '').toString();
+        const speaker = (message.speaker || '').toString();
+        const prefixParts = ['VOICE'];
+        if (channelId) prefixParts.push(channelId);
+        if (speaker) prefixParts.push(speaker);
+        updateUserSubtitle(message.text || '', prefixParts.join(' '));
+      }
+    }
+
+    function connect() {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsUrl = `${protocol}://${window.location.host}/api/live2d/ws`;
+      const socket = new WebSocket(wsUrl);
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleMessage(data);
+        } catch (_) {}
+      };
+
+      socket.onclose = () => {
+        setTimeout(connect, 3000);
+      };
+
+      socket.onerror = () => {
+        socket.close();
+      };
+    }
+
+    connect();
+  </script>
+</body>
+</html>

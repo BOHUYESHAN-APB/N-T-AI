@@ -13,9 +13,12 @@ class BackendService {
   BackendService._internal();
 
   Process? _backendProcess;
+  String? _backendWorkDir;
+  int? _managedPid;
   bool _isConnected = false;
   String _backendUrl = 'http://localhost:23456';
   String get backendUrl => _backendUrl;
+  bool get isConnected => _isConnected;
   bool _enabled = false;
   Timer? _healthCheckTimer;
   Timer? _serverInfoPollTimer;
@@ -138,11 +141,168 @@ class BackendService {
     _startHealthCheck();
   }
 
-  /// Attempts to start the bundled Python backend on Windows.
-  Future<void> _startLocalBackend() async {
-    if (kDebugMode) {
+  Future<BackendActionResult> startLocalBackend({bool allowDebug = false}) async {
+    _enabled = true;
+    _updateStatus(BackendStatus.initializing);
+
+    if (!Platform.isWindows && !allowDebug) {
+      return const BackendActionResult(
+        false,
+        '当前平台不支持自动启动后端',
+      );
+    }
+
+    if (_isConnected) {
+      return const BackendActionResult(true, '后端已连接');
+    }
+
+    final started = await _startLocalBackend(allowDebug: allowDebug);
+    _startHealthCheck();
+
+    if (!started) {
+      return const BackendActionResult(false, '未找到可启动的后端程序');
+    }
+
+    return const BackendActionResult(true, '已发送启动请求');
+  }
+
+  Future<BackendActionResult> stopLocalBackend() async {
+    bool stopped = false;
+
+    if (_backendProcess != null) {
+      final pid = _backendProcess?.pid;
+      if (pid != null) {
+        stopped = await _terminatePid(pid);
+      } else {
+        stopped = _backendProcess!.kill();
+      }
+    }
+
+    if (!stopped && _managedPid != null) {
+      stopped = await _terminatePid(_managedPid!);
+    }
+
+    if (!stopped) {
+      final pid = await _readServerInfoPid();
+      if (pid != null) {
+        stopped = await _terminatePid(pid);
+      }
+    }
+
+    if (!stopped) {
+      return const BackendActionResult(false, '未找到可停止的后端进程');
+    }
+
+    _backendProcess = null;
+    _managedPid = null;
+    _isConnected = false;
+    _updateStatus(BackendStatus.disconnected);
+    return const BackendActionResult(true, '已发送停止请求');
+  }
+
+  Future<bool> _terminatePid(int pid) async {
+    try {
+      if (Platform.isWindows) {
+        final result = await Process.run(
+          'taskkill',
+          ['/PID', '$pid', '/T', '/F'],
+        );
+        return result.exitCode == 0;
+      }
+      return Process.killPid(pid);
+    } catch (e) {
+      debugPrint('[BackendService] Failed to kill PID $pid: $e');
+      return false;
+    }
+  }
+
+  Future<String?> _resolveBundledServerExe() async {
+    final appDir = p.dirname(Platform.resolvedExecutable);
+    final candidates = [
+      p.join(appDir, 'server.exe'),
+      p.join(appDir, 'server', 'server.exe'),
+    ];
+
+    for (final path in candidates) {
+      if (await File(path).exists()) {
+        return path;
+      }
+    }
+    return null;
+  }
+
+  Future<String?> _resolvePythonBackendEntry() async {
+    final candidates = [
+      p.join(Directory.current.path, 'backend', 'serve.py'),
+      p.join(Directory.current.path, '..', 'backend', 'serve.py'),
+      p.join(Directory.current.path, '..', '..', 'backend', 'serve.py'),
+    ];
+
+    for (final path in candidates) {
+      if (await File(path).exists()) {
+        return path;
+      }
+    }
+    return null;
+  }
+
+  Future<File?> _locateServerInfoFile() async {
+    final candidates = <String>[];
+    if (_backendWorkDir != null && _backendWorkDir!.isNotEmpty) {
+      candidates.add(p.join(_backendWorkDir!, 'server_info.json'));
+    }
+    candidates.addAll([
+      'server_info.json',
+      'server/server_info.json',
+      'backend/server_info.json',
+      'flutter_application/server/server_info.json',
+      '../backend/server_info.json',
+      '../server_info.json',
+      '../../backend/server_info.json',
+    ]);
+
+    for (final candidate in candidates) {
+      final file = File(candidate);
+      if (await file.exists()) {
+        return file;
+      }
+    }
+
+    final exePath = await _resolveBundledServerExe();
+    if (exePath != null) {
+      final file = File(p.join(p.dirname(exePath), 'server_info.json'));
+      if (await file.exists()) {
+        return file;
+      }
+    }
+
+    return null;
+  }
+
+  Future<int?> _readServerInfoPid() async {
+    try {
+      final file = await _locateServerInfoFile();
+      if (file == null) return null;
+      final content = await file.readAsString();
+      final info = jsonDecode(content);
+      if (info is Map) {
+        final rawPid = info['pid'];
+        if (rawPid is int) return rawPid;
+        if (rawPid is num) return rawPid.toInt();
+        if (rawPid is String) return int.tryParse(rawPid);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('[BackendService] Failed to read server_info.json PID: $e');
+      return null;
+    }
+  }
+
+  /// Attempts to start the bundled backend on Windows.
+  Future<bool> _startLocalBackend({bool allowDebug = false}) async {
+    if (kDebugMode && !allowDebug) {
       debugPrint('[BackendService] Debug mode: skipping bundled backend autostart.');
-      return;
+      return false;
     }
 
     // Dynamic Port Logic:
@@ -154,32 +314,23 @@ class BackendService {
     // 4. Watch for 'server_info.json' update or stdout to get the actual port.
 
     try {
-      final appDir = p.dirname(Platform.resolvedExecutable);
-      
-      // Locate 'server_info.json' - usually in the same dir as the executable or current dir
-      // Since we don't know exactly where the backend writes it (relative to CWD), we assume CWD of the backend.
-      // But we haven't started it yet.
-      // Let's first try to locate the executable to know the CWD.
-      
-      String exePath = p.join(appDir, 'server', 'server.exe');
-      if (!await File(exePath).exists()) {
-        // Fallbacks...
-        final curDir = Directory.current.path;
-        exePath = p.join(curDir, 'server', 'server.exe');
-      }
-      if (!await File(exePath).exists()) {
-         exePath = p.join(Directory.current.path, 'flutter_application', 'server', 'server.exe');
-         if (!await File(exePath).exists()) {
-             exePath = r'd:\-Users-\Documents\GitHub\N-T-AI\flutter_application\server\server.exe';
-         }
+      final usePython = kDebugMode || allowDebug;
+      final exePath = usePython ? null : await _resolveBundledServerExe();
+      final pythonEntry = usePython ? await _resolvePythonBackendEntry() : null;
+
+      if (usePython && pythonEntry == null) {
+        debugPrint('[BackendService] Debug mode: backend/serve.py not found. Assuming remote/manual backend.');
+        return false;
       }
 
-      if (!await File(exePath).exists()) {
-        debugPrint('[BackendService] Server executable not found at $exePath. Assuming remote/manual backend.');
-        return;
+      if (!usePython && exePath == null) {
+        debugPrint('[BackendService] Bundled server.exe not found. Assuming remote/manual backend.');
+        return false;
       }
-      
-      final backendWorkDir = p.dirname(exePath);
+
+      final backendWorkDir =
+          exePath != null ? p.dirname(exePath) : p.dirname(pythonEntry!);
+      _backendWorkDir = backendWorkDir;
       final serverInfoFile = File(p.join(backendWorkDir, 'server_info.json'));
 
       // Check if already running by reading server_info.json
@@ -192,7 +343,8 @@ class BackendService {
              debugPrint('[BackendService] Found existing active backend at $url');
              _updateUrlAndNotify(url);
              _updateStatus(BackendStatus.connected);
-             return;
+             _isConnected = true;
+             return true;
            } else {
              debugPrint('[BackendService] Stale or incompatible server_info.json found. Restarting...');
            }
@@ -201,15 +353,31 @@ class BackendService {
         }
       }
 
-      debugPrint('[BackendService] Starting local backend: $exePath');
+      if (exePath != null) {
+        debugPrint('[BackendService] Starting local backend (bundled): $exePath');
+      } else {
+        debugPrint('[BackendService] Starting local backend (python): python $pythonEntry');
+      }
       
       // 2. Start the process
-      _backendProcess = await Process.start(
-        exePath,
-        [],
-        mode: ProcessStartMode.normal, // Use normal mode to capture stdout/stderr
-        workingDirectory: backendWorkDir,
-      );
+      if (exePath != null) {
+        _backendProcess = await Process.start(
+          exePath,
+          [],
+          mode: ProcessStartMode.normal, // Use normal mode to capture stdout/stderr
+          workingDirectory: backendWorkDir,
+        );
+      } else {
+        _backendProcess = await Process.start(
+          'python',
+          [pythonEntry!],
+          mode: ProcessStartMode.normal,
+          workingDirectory: backendWorkDir,
+          runInShell: true,
+        );
+      }
+
+      _managedPid = _backendProcess?.pid;
       
       debugPrint('[BackendService] Backend process started with PID: ${_backendProcess?.pid}');
       
@@ -267,8 +435,10 @@ class BackendService {
         }
       });
 
+      return true;
     } catch (e) {
       debugPrint('[BackendService] Failed to start local backend: $e');
+      return false;
     }
   }
 
@@ -475,4 +645,11 @@ enum BackendStatus {
   connected,
   incompatible,
   disconnected,
+}
+
+class BackendActionResult {
+  final bool success;
+  final String message;
+
+  const BackendActionResult(this.success, this.message);
 }

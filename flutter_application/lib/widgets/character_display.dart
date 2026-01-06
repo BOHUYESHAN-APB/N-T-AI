@@ -118,6 +118,7 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
     params.add('debug=$debug'); 
     if (widget.floatingUi) params.add('floating=true');
     params.add('controls=${widget.showControls}');
+    if (Platform.isWindows) params.add('capture=flutter');
     final query = params.join('&');
     return '${widget.backendUrl}/static/live2d/index.html?$query';
   }

@@ -51,6 +51,10 @@ class ScreenCaptureService {
     logger.info('ScreenCaptureService stopped');
   }
 
+  Future<void> captureOnce(AppSettings settings) async {
+    await _captureAndAnalyze(settings, reschedule: false);
+  }
+
   void _scheduleNext(AppSettings settings) {
     if (!_enabled) return;
     final delaySeconds = _nextIntervalSeconds(settings);
@@ -107,7 +111,10 @@ class ScreenCaptureService {
     return '$base\n\n[直播解说要求]: 语气可幽默夸张，突出节目效果，保持简洁。\n$modeHint';
   }
 
-  Future<void> _captureAndAnalyze(AppSettings settings) async {
+  Future<void> _captureAndAnalyze(
+    AppSettings settings, {
+    bool reschedule = true,
+  }) async {
     if (_isProcessing) return;
     _isProcessing = true;
 
@@ -158,7 +165,9 @@ class ScreenCaptureService {
       logger.error('ScreenCaptureService error: $e');
     } finally {
       _isProcessing = false;
-      _scheduleNext(settings);
+      if (reschedule) {
+        _scheduleNext(settings);
+      }
     }
   }
 }

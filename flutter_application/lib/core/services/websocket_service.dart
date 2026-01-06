@@ -18,6 +18,18 @@ class WebSocketService {
   String? _lastUrl;
   bool _disposed = false;
 
+  bool send(Map<String, dynamic> message) {
+    if (_disposed) return false;
+    if (_webSocket == null || !_isConnected) return false;
+    try {
+      _webSocket!.add(jsonEncode(message));
+      return true;
+    } catch (e) {
+      debugPrint('[WebSocket] Send failed: $e');
+      return false;
+    }
+  }
+
   Future<void> disconnect() async {
     if (_disposed) return;
     final url = _lastUrl;

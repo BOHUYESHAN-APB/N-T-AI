@@ -53,6 +53,173 @@
         .log-warn { color: #ffaa00; }
         /* 浮窗模式优化 */
         body.locked #canvas-container { pointer-events: none; }
+
+        /* Live2D Overlay UI */
+        #live2d-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            pointer-events: none;
+            font-family: "Segoe UI", sans-serif;
+        }
+        #live2d-status-bar {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            max-width: min(60vw, 520px);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(10, 12, 14, 0.55);
+            color: #f5f7fa;
+            font-size: 12px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+            pointer-events: auto;
+        }
+        #process-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.4);
+            box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+        }
+        #process-indicator.thinking {
+            background: #fbbf24;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+        }
+        #process-indicator.processing {
+            background: #60a5fa;
+            box-shadow: 0 0 10px rgba(96, 165, 250, 0.6);
+        }
+        #status {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #live2d-subtitles {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: min(760px, 92vw);
+            pointer-events: none;
+        }
+        .live2d-subtitle {
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #f8fafc;
+            background: rgba(15, 18, 20, 0.68);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+            backdrop-filter: blur(6px);
+        }
+        .live2d-subtitle.ai {
+            border-left: 3px solid #7dd3fc;
+        }
+        .live2d-subtitle.user {
+            border-left: 3px solid #fbbf24;
+        }
+        #live2d-speech-bubble {
+            position: fixed;
+            max-width: min(320px, 70vw);
+            padding: 10px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #1f2933;
+            font-size: 14px;
+            line-height: 1.4;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+            transform: translate(-50%, -100%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        #live2d-speech-bubble.show {
+            opacity: 1;
+        }
+        #live2d-speech-bubble::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            bottom: -8px;
+            width: 16px;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            transform: translateX(-50%) rotate(45deg);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+        }
+        #text-input-area {
+            position: fixed;
+            left: 50%;
+            bottom: 92px;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            width: min(560px, 92vw);
+            padding: 10px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+            pointer-events: auto;
+        }
+        #text-input-area.hidden {
+            display: none;
+        }
+        #textInputBox {
+            flex: 1;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 14px;
+            outline: none;
+        }
+        #textSendButton {
+            border: none;
+            border-radius: 10px;
+            padding: 8px 14px;
+            background: #2563eb;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        #screenshot-thumbnail-container {
+            position: fixed;
+            left: 50%;
+            bottom: 150px;
+            transform: translateX(-50%);
+            display: none;
+            gap: 8px;
+            padding: 8px;
+            border-radius: 12px;
+            background: rgba(15, 18, 20, 0.6);
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+            pointer-events: auto;
+        }
+        #screenshots-list {
+            display: flex;
+            gap: 8px;
+            max-width: min(520px, 80vw);
+            overflow-x: auto;
+        }
+        .screenshot-item img {
+            width: 64px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .screenshot-remove {
+            cursor: pointer;
+            color: #f87171;
+            font-size: 14px;
+        }
     </style>
 
     <!-- Load Libraries -->
@@ -103,17 +270,31 @@
     <div id="debug-console"></div>
 
     <!-- Hidden controls for app.js compatibility -->
-    <div style="display:none;">
-        <button id="micButton"></button>
-        <button id="muteButton"></button>
-        <button id="screenButton"></button>
-        <button id="stopButton"></button>
-        <button id="resetSessionButton"></button>
-        <div id="screenshot-thumbnail-container"></div>
-        <div id="screenshots-list"></div>
-        <div id="screenshot-count"></div>
-        <button id="clear-all-screenshots"></button>
-        <button id="screenshotButton"></button>
+    <div id="live2d-overlay">
+        <div id="live2d-status-bar">
+            <span id="process-indicator"></span>
+            <span id="status">Live2D Ready</span>
+        </div>
+        <div id="live2d-subtitles">
+            <div id="live2d-subtitle-ai" class="live2d-subtitle ai" style="display:none;"></div>
+            <div id="live2d-subtitle-user" class="live2d-subtitle user" style="display:none;"></div>
+        </div>
+        <div id="live2d-speech-bubble"></div>
+        <div id="text-input-area" class="hidden">
+            <input id="textInputBox" type="text" placeholder="对话输入..." />
+            <button id="textSendButton" type="button">发送</button>
+        </div>
+        <div id="screenshot-thumbnail-container">
+            <div id="screenshots-list"></div>
+            <span id="screenshot-count"></span>
+            <button id="clear-all-screenshots" type="button">清空</button>
+        </div>
+        <button id="micButton" style="display:none;"></button>
+        <button id="muteButton" style="display:none;"></button>
+        <button id="screenButton" style="display:none;"></button>
+        <button id="stopButton" style="display:none;"></button>
+        <button id="resetSessionButton" style="display:none;"></button>
+        <button id="screenshotButton" style="display:none;"></button>
     </div>
 
     <div id="canvas-container">

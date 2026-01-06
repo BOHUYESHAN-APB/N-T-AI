@@ -147,6 +147,149 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
         ),
 
         const Divider(height: 32),
+        _buildSectionHeader(context, '视觉中枢 (Vision)'),
+        SwitchListTile(
+          title: const Text('启用定时屏幕截取'),
+          subtitle: const Text('每隔一段时间自动截取屏幕并让 AI 分析（环境感知）'),
+          value: settings.enableScreenCapture,
+          onChanged: (v) => controller.setEnableScreenCapture(v),
+          secondary: Icon(
+            Icons.screen_search_desktop_outlined,
+            color: settings.enableScreenCapture
+                ? Theme.of(context).colorScheme.primary
+                : Colors.grey,
+          ),
+        ),
+        if (settings.enableScreenCapture) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('截取间隔（秒）'),
+                    Text(
+                      settings.screenCaptureInterval > 0
+                          ? '当前: ${settings.screenCaptureInterval}s'
+                          : '随机 10–50 秒（偏左正态）',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.outline,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: TextEditingController(
+                    text: settings.screenCaptureInterval.toString(),
+                  ),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '输入截取间隔（0=随机）',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (v) {
+                    final parsed = int.tryParse(v.trim());
+                    if (parsed == null) return;
+                    controller.setScreenCaptureInterval(parsed);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('注入间隔（秒）'),
+                    Text(
+                      '当前: ${settings.screenCaptureInjectInterval}s',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.outline,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: TextEditingController(
+                    text: settings.screenCaptureInjectInterval.toString(),
+                  ),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '输入注入间隔（建议 30/60 秒）',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (v) {
+                    final parsed = int.tryParse(v.trim());
+                    if (parsed == null) return;
+                    controller.setScreenCaptureInjectInterval(parsed);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: TextEditingController(
+                text: settings.screenCaptureIdleSeconds.toString(),
+              ),
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '空闲注入阈值（秒，0=不限制）',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) {
+                final parsed = int.tryParse(v.trim());
+                if (parsed == null) return;
+                controller.setScreenCaptureIdleSeconds(parsed);
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: TextEditingController(
+                text: settings.screenAnalysisPrompt,
+              ),
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: '屏幕分析提示词',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => controller.setScreenAnalysisPrompt(v.trim()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: TextEditingController(
+                text: settings.screenInjectionPrompt,
+              ),
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: '消息注入提示词',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => controller.setScreenInjectionPrompt(v.trim()),
+            ),
+          ),
+        ],
+
+        const Divider(height: 32),
         _buildSectionHeader(context, '数据管理 (Data)'),
         ListTile(
           leading: const Icon(Icons.memory),

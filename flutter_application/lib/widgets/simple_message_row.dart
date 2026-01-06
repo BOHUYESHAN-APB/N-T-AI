@@ -13,12 +13,22 @@ class SimpleMessageRow extends StatelessWidget {
     final chat = theme.extension<ChatColors>();
     final isMine = message.isMine;
     final kind = message.kind;
-    final alignRight = isMine || kind == ChatMessageKind.sttHeard;
+    final source = message.source ?? '';
+    final isSttHeard = kind == ChatMessageKind.sttHeard;
+    final isVoiceChannel = source == 'voice_channel' || message.role == 'chat_voice_channel';
+    final alignRight = isMine || isSttHeard;
+    final sttRightPadding = isSttHeard ? (isVoiceChannel ? 32.0 : 8.0) : 8.0;
     final textColor = alignRight ? (chat?.mineText ?? theme.colorScheme.onSurface) : (chat?.otherText ?? theme.colorScheme.onSurface);
+    final sttBorderColor = isVoiceChannel
+        ? Colors.orange.withValues(alpha: 0.4)
+        : Colors.teal.withValues(alpha: 0.4);
+    final sttBgColor = isVoiceChannel
+        ? Colors.orange.withValues(alpha: 0.08)
+        : Colors.teal.withValues(alpha: 0.08);
     final borderColor = switch (kind) {
       ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.5),
       ChatMessageKind.user => Colors.blue.withValues(alpha: 0.5),
-      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.5),
+      ChatMessageKind.sttHeard => sttBorderColor,
       ChatMessageKind.pluginSummary => Colors.green.withValues(alpha: 0.45),
       ChatMessageKind.system => theme.colorScheme.outline.withValues(alpha: 0.3),
       _ => theme.colorScheme.outline.withValues(alpha: 0.2),
@@ -26,11 +36,11 @@ class SimpleMessageRow extends StatelessWidget {
     final bgColor = switch (kind) {
       ChatMessageKind.assistant => Colors.red.withValues(alpha: 0.06),
       ChatMessageKind.user => Colors.blue.withValues(alpha: 0.06),
-      ChatMessageKind.sttHeard => Colors.purple.withValues(alpha: 0.06),
+      ChatMessageKind.sttHeard => sttBgColor,
       ChatMessageKind.system => theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
       _ => theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
     };
-    final outerPadding = EdgeInsets.fromLTRB(8, 6, kind == ChatMessageKind.sttHeard ? 56 : 8, 6);
+    final outerPadding = EdgeInsets.fromLTRB(8, 6, sttRightPadding, 6);
 
     if (kind == ChatMessageKind.pluginSummary) {
       final enabled = globalPluginManager.enabledPlugins.any((p) => p.isDanmakuPlugin);

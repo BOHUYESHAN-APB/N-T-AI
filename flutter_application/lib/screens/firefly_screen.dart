@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
 import '../widgets/character_display.dart';
@@ -78,10 +79,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
   StreamSubscription? _historySubscription;
   StreamSubscription? _ttsSubscription;
   StreamSubscription? _wsSubscription;
+  StreamSubscription? _wsStatusSubscription;
   StreamSubscription? _initiativeSubscription;
 
   // Floating window service
   FloatingWindowService? _floatingWindowService;
+  Webview? _subtitleAiWindow;
+  Webview? _subtitleUserWindow;
+  bool? _lastScreenCaptureEnabled;
+  bool _screenCaptureUpdateFromWs = false;
+  bool _subtitleSupportWarned = false;
   bool _floatingWindowEnabled = false;
   bool _miniExpanded = false;
   // Mini-window control state
@@ -119,6 +126,14 @@ class _FireflyScreenState extends State<FireflyScreen> {
     });
 
     _wsSubscription = _wsService.messageStream.listen(_handleWebSocketMessage);
+    _wsStatusSubscription = _wsService.statusStream.listen((connected) {
+      if (!connected || !mounted) return;
+      final settings = SettingsScope.of(context).settings;
+      _wsService.send({
+        'action': 'set_screen_capture_enabled',
+        'enabled': settings.enableScreenCapture,
+      });
+    });
     
     _initiativeSubscription = _brain.initiativeStream.listen((response) {
       if (!mounted) return;
@@ -469,7 +484,8 @@ class _FireflyScreenState extends State<FireflyScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // logToFile("FireflyScreen.didChangeDependencies started");
-      final settings = SettingsScope.of(context).settings;
+    final settingsController = SettingsScope.of(context);
+    final settings = settingsController.settings;
     if (_lastEnableTts && !settings.enableTts) {
       _stopTtsPlayback();
     }
@@ -505,6 +521,9 @@ class _FireflyScreenState extends State<FireflyScreen> {
     } else {
       _wsService.disconnect();
     }
+
+    _syncScreenCaptureSetting(settings);
+    _updateSubtitleWindows(settings, settingsController);
     
     // Auto voice channel listening trigger
     if (settings.autoVoiceChannelListening && !_isLoopbackCapturing && !_isLoading) {
@@ -550,7 +569,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
           modelPath: modelPath,
           width: 400,
           height: 600,
-          showControls: false,
+          showControls: true,
         );
         await _floatingWindowService!.executeJavaScript(
           "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;",
@@ -566,6 +585,149 @@ class _FireflyScreenState extends State<FireflyScreen> {
         debugPrint('[FireflyScreen] Failed to close floating window: $e');
       }
     }
+  }
+
+  void _syncScreenCaptureSetting(AppSettings settings) {
+    final enabled = settings.enableScreenCapture;
+    if (_lastScreenCaptureEnabled == null) {
+      _lastScreenCaptureEnabled = enabled;
+      return;
+    }
+    if (_lastScreenCaptureEnabled != enabled) {
+      if (_screenCaptureUpdateFromWs) {
+        _screenCaptureUpdateFromWs = false;
+      } else {
+        _wsService.send({
+          'action': 'set_screen_capture_enabled',
+          'enabled': enabled,
+        });
+      }
+      _lastScreenCaptureEnabled = enabled;
+    }
+  }
+
+  Future<void> _updateSubtitleWindows(
+    AppSettings settings,
+    SettingsController settingsController,
+  ) async {
+    final wantAi = settings.enableAiSubtitleWindow;
+    final wantUser = settings.enableUserSubtitleWindow;
+
+    final supported = await _isSubtitleWindowSupported();
+    if (!supported) {
+      if ((wantAi || wantUser) && !_subtitleSupportWarned && mounted) {
+        _subtitleSupportWarned = true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Webview 环境不可用，无法打开字幕独立窗口'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      if (wantAi) {
+        settingsController.setEnableAiSubtitleWindow(false);
+      }
+      if (wantUser) {
+        settingsController.setEnableUserSubtitleWindow(false);
+      }
+      return;
+    }
+
+    if (wantAi && _subtitleAiWindow == null) {
+      final window = await _openSubtitleWindow(
+        backendUrl: settings.pythonBackendUrl,
+        mode: 'ai',
+        title: 'AI Subtitle',
+        settingsController: settingsController,
+      );
+      if (window == null) {
+        settingsController.setEnableAiSubtitleWindow(false);
+      } else {
+        _subtitleAiWindow = window;
+      }
+    } else if (!wantAi && _subtitleAiWindow != null) {
+      await _closeSubtitleWindow(_subtitleAiWindow);
+      _subtitleAiWindow = null;
+    }
+
+    if (wantUser && _subtitleUserWindow == null) {
+      final window = await _openSubtitleWindow(
+        backendUrl: settings.pythonBackendUrl,
+        mode: 'user',
+        title: 'User Subtitle',
+        settingsController: settingsController,
+      );
+      if (window == null) {
+        settingsController.setEnableUserSubtitleWindow(false);
+      } else {
+        _subtitleUserWindow = window;
+      }
+    } else if (!wantUser && _subtitleUserWindow != null) {
+      await _closeSubtitleWindow(_subtitleUserWindow);
+      _subtitleUserWindow = null;
+    }
+  }
+
+  Future<bool> _isSubtitleWindowSupported() async {
+    if (!Platform.isWindows) return false;
+    try {
+      return await WebviewWindow.isWebviewAvailable();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _buildSubtitleUrl(String backendUrl, String mode) {
+    final trimmed = backendUrl.trim();
+    final base = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+    return '$base/static/live2d/subtitle_window.html?mode=$mode';
+  }
+
+  Future<Webview?> _openSubtitleWindow({
+    required String backendUrl,
+    required String mode,
+    required String title,
+    required SettingsController settingsController,
+  }) async {
+    if (!Platform.isWindows) return null;
+    try {
+      final webview = await WebviewWindow.create(
+        configuration: CreateConfiguration(
+          windowWidth: 720,
+          windowHeight: 160,
+          title: title,
+          titleBarTopPadding: 0,
+        ),
+      );
+      webview.launch(_buildSubtitleUrl(backendUrl, mode));
+      webview.onClose.whenComplete(() {
+        if (!mounted) return;
+        if (mode == 'ai') {
+          _subtitleAiWindow = null;
+          if (settingsController.settings.enableAiSubtitleWindow) {
+            settingsController.setEnableAiSubtitleWindow(false);
+          }
+        }
+        if (mode == 'user') {
+          _subtitleUserWindow = null;
+          if (settingsController.settings.enableUserSubtitleWindow) {
+            settingsController.setEnableUserSubtitleWindow(false);
+          }
+        }
+      });
+      return webview;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _closeSubtitleWindow(Webview? window) async {
+    if (window == null) return;
+    try {
+      window.close();
+    } catch (_) {}
   }
 
   void _recordUserActivity() {
@@ -901,6 +1063,9 @@ ${capped.map((e) => '- $e').join('\n')}
     _screenCaptureService.stop();
     _brain.stopInitiativeLoop();
     _wsService.dispose();
+    _wsStatusSubscription?.cancel();
+    _closeSubtitleWindow(_subtitleAiWindow);
+    _closeSubtitleWindow(_subtitleUserWindow);
     _floatingWindowService?.dispose();
     _controller.dispose();
     _scrollController.dispose();
@@ -917,12 +1082,31 @@ ${capped.map((e) => '- $e').join('\n')}
     final settings = SettingsScope.of(context).settings;
     final type = msg['type'];
     final data = msg['data'];
-    
+
     String? role;
     String? content;
     String? minecraftRawContent;
     String? voiceChannelText;
     
+    if (type == 'screen_capture_toggle') {
+      final enabled = msg['enabled'] == true;
+      final controller = SettingsScope.of(context);
+      if (controller.settings.enableScreenCapture != enabled) {
+        _screenCaptureUpdateFromWs = true;
+        controller.setEnableScreenCapture(enabled);
+      }
+      return;
+    }
+    if (type == 'screen_capture_request') {
+      final target = msg['target']?.toString();
+      if (target == null || target == 'flutter') {
+        if (settings.enableScreenCapture) {
+          _screenCaptureService.captureOnce(settings);
+        }
+      }
+      return;
+    }
+
     // Handle different formats
     // Backend sends: type="chat_message", text="...", sender="chat_normal"/"chat_sc"
     if (type == 'chat_message') {
@@ -2268,6 +2452,58 @@ ${capped.map((e) => '- $e').join('\n')}
         ),
       );
     }
+
+    // Screen Capture Toggle
+    widgets.add(
+      Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () {
+              final newValue = !settings.enableScreenCapture;
+              settingsController.setEnableScreenCapture(newValue);
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(newValue ? '屏幕截取已开启' : '屏幕截取已关闭'),
+                  duration: const Duration(seconds: 1),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.screen_search_desktop_outlined,
+                    size: 20,
+                    color: settings.enableScreenCapture ? Colors.teal : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    "截屏",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: settings.enableScreenCapture ? Colors.teal : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
 
     // Mode Badge -> quick switcher
     widgets.add(
