@@ -45,7 +45,7 @@ class AiSettings {
   final String apiKey; // 对于 local 可留空
   final String model; // 例如 gpt-4o, llama3.1:8b 等
   final bool enableThinking;
-  final bool initiativeMode; // 搭话模式：AI 主动发起对话
+  final bool initiativeMode; // 搭话模式：由后端心跳触发主动对话
   final int danmakuBatchInterval; // 弹幕批处理间隔（秒）
   final bool allowEmojis;
 
@@ -402,6 +402,7 @@ class AppSettings {
   final bool enableNoteAccess; // 启用笔记读取权限
   final bool showAgentThoughts; // 显示 Agent 思考过程
   final bool suppressInnerMonologue; // 禁用“心里描写/旁白”输出
+  final bool strictNoMarkdown; // 拟人模式下强制禁用 Markdown
   final List<McpServerConfig> mcpServers; // MCP 服务器列表
   final List<AgentConfig> agents; // 独立 Agent 配置 (Standard Mode)
   final DeepResearchSettings deepResearch; // 深度研究模式配置
@@ -434,6 +435,7 @@ class AppSettings {
   final bool ttsViaBackendDevice; // 通过后端播放到指定输出设备
   final int? ttsBackendDeviceIndex; // 后端输出设备索引
   final bool sttViaBackendLoopback; // 通过后端回环采集系统声音
+  final String? sttMicDeviceId; // 前端麦克风设备 ID（为空表示系统默认）
   final int? sttLoopbackDeviceIndex; // 后端回环设备索引（通常为输出设备）
   final int sttLoopbackDurationSeconds; // 回环采集时长（秒）
   final String ttsMode; // TTS 响应模式
@@ -507,6 +509,7 @@ class AppSettings {
     this.enableNoteAccess = false,
     this.showAgentThoughts = false,
     this.suppressInnerMonologue = false,
+    this.strictNoMarkdown = false,
     this.mcpServers = const [],
     this.agents = const [],
     this.deepResearch = const DeepResearchSettings(),
@@ -533,6 +536,7 @@ class AppSettings {
     this.ttsBackendDeviceIndex,
     this.ttsMode = 'sentence', // 'sentence' (stable) or 'stream' (fast)
     this.sttViaBackendLoopback = false,
+    this.sttMicDeviceId,
     this.sttLoopbackDeviceIndex,
     this.sttLoopbackDurationSeconds = 5,
     this.autoMicListening = false,
@@ -597,6 +601,7 @@ class AppSettings {
     bool? enableNoteAccess,
     bool? showAgentThoughts,
     bool? suppressInnerMonologue,
+    bool? strictNoMarkdown,
     List<McpServerConfig>? mcpServers,
     List<AgentConfig>? agents,
     DeepResearchSettings? deepResearch,
@@ -622,6 +627,7 @@ class AppSettings {
     Object? ttsBackendDeviceIndex = _notSet,
     String? ttsMode,
     bool? sttViaBackendLoopback,
+    String? sttMicDeviceId,
     Object? sttLoopbackDeviceIndex = _notSet,
     int? sttLoopbackDurationSeconds,
     bool? autoMicListening,
@@ -698,6 +704,7 @@ class AppSettings {
     enableNoteAccess: enableNoteAccess ?? this.enableNoteAccess,
     showAgentThoughts: showAgentThoughts ?? this.showAgentThoughts,
     suppressInnerMonologue: suppressInnerMonologue ?? this.suppressInnerMonologue,
+    strictNoMarkdown: strictNoMarkdown ?? this.strictNoMarkdown,
     mcpServers: mcpServers ?? this.mcpServers,
     agents: agents ?? this.agents,
     deepResearch: deepResearch ?? this.deepResearch,
@@ -727,6 +734,7 @@ class AppSettings {
             : ttsBackendDeviceIndex as int?,
     ttsMode: ttsMode ?? this.ttsMode,
     sttViaBackendLoopback: sttViaBackendLoopback ?? this.sttViaBackendLoopback,
+    sttMicDeviceId: sttMicDeviceId ?? this.sttMicDeviceId,
     sttLoopbackDeviceIndex:
         identical(sttLoopbackDeviceIndex, _notSet)
             ? this.sttLoopbackDeviceIndex

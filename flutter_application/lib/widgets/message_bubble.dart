@@ -303,39 +303,39 @@ class MessageBubble extends StatelessWidget {
     final isSttHeard = kind == ChatMessageKind.sttHeard;
     final isVoiceChannel = source == 'voice_channel' || message.role == 'chat_voice_channel';
     final alignRight = isMine || isSttHeard;
-    final sttRightPadding = isSttHeard ? (isVoiceChannel ? 32.0 : 8.0) : 8.0;
+    final sttRightPadding = isSttHeard ? (isVoiceChannel ? 40.0 : 8.0) : 8.0;
     final maxW = MediaQuery.of(context).size.width;
     final bubbleMax = maxW > 1200 ? 560.0 : maxW * 0.75;
     final sttBorderColor = isVoiceChannel
         ? (isDark
-            ? const Color(0xFFF59E0B).withValues(alpha: 0.45)
-            : const Color(0xFFF59E0B).withValues(alpha: 0.35))
+            ? const Color(0xFF34D399).withValues(alpha: 0.45)
+            : const Color(0xFF10B981).withValues(alpha: 0.35))
         : (isDark
-            ? const Color(0xFF2DD4BF).withValues(alpha: 0.45)
-            : const Color(0xFF14B8A6).withValues(alpha: 0.35));
+            ? const Color(0xFF38BDF8).withValues(alpha: 0.45)
+            : const Color(0xFF0EA5E9).withValues(alpha: 0.35));
     final sttBubbleBg = isDark
         ? (isVoiceChannel
-            ? const Color(0xFF4E2A0C).withValues(alpha: 0.55)
-            : const Color(0xFF0F3B33).withValues(alpha: 0.55))
-        : (isVoiceChannel ? const Color(0xFFFFF3E0) : const Color(0xFFE6F7F4));
+            ? const Color(0xFF0F2F24).withValues(alpha: 0.6)
+            : const Color(0xFF0B2538).withValues(alpha: 0.6))
+        : (isVoiceChannel ? const Color(0xFFECFDF5) : const Color(0xFFE0F2FE));
     final sttBubbleTxt = isDark
-        ? (isVoiceChannel ? const Color(0xFFFDE68A) : const Color(0xFF99F6E4))
+        ? (isVoiceChannel ? const Color(0xFFA7F3D0) : const Color(0xFFBAE6FD))
         : theme.colorScheme.onSurface;
     final sttBadgeBg = isDark
         ? (isVoiceChannel
-            ? const Color(0xFF4E2A0C).withValues(alpha: 0.6)
-            : const Color(0xFF0F3B33).withValues(alpha: 0.6))
-        : (isVoiceChannel ? const Color(0xFFFFF3E0) : const Color(0xFFE6F7F4));
+            ? const Color(0xFF0F2F24).withValues(alpha: 0.7)
+            : const Color(0xFF0B2538).withValues(alpha: 0.7))
+        : (isVoiceChannel ? const Color(0xFFECFDF5) : const Color(0xFFE0F2FE));
     final sttBadgeBorder = isVoiceChannel
         ? (isDark
-            ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
-            : const Color(0xFFF59E0B).withValues(alpha: 0.25))
+            ? const Color(0xFF34D399).withValues(alpha: 0.4)
+            : const Color(0xFF10B981).withValues(alpha: 0.25))
         : (isDark
-            ? const Color(0xFF2DD4BF).withValues(alpha: 0.4)
-            : const Color(0xFF14B8A6).withValues(alpha: 0.25));
+            ? const Color(0xFF38BDF8).withValues(alpha: 0.4)
+            : const Color(0xFF0EA5E9).withValues(alpha: 0.25));
     final sttBadgeText = isVoiceChannel
-        ? (isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309))
-        : (isDark ? const Color(0xFF99F6E4) : const Color(0xFF0F766E));
+        ? (isDark ? const Color(0xFFA7F3D0) : const Color(0xFF047857))
+        : (isDark ? const Color(0xFFBAE6FD) : const Color(0xFF0369A1));
     final borderColor = switch (kind) {
       ChatMessageKind.assistant => Colors.red.withValues(alpha: isDark ? 0.3 : 0.45),
       ChatMessageKind.user => Colors.blue.withValues(alpha: isDark ? 0.3 : 0.45),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'home_shell.dart';
 import 'theme/app_theme.dart';
@@ -16,6 +17,10 @@ import 'services/android/expression_notification_service.dart';
 import 'services/diagnostics_service.dart';
 import 'core/services/backend_service.dart';
 import 'utils/http_overrides.dart';
+import 'windows/control_window_bridge.dart';
+import 'windows/window_args.dart';
+import 'windows/floating_window_entry.dart';
+import 'windows/control_window_entry.dart';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 
@@ -34,6 +39,58 @@ void logToFile(String message) {
   }
 }
 
+Future<WindowArgs> _resolveWindowArgs() async {
+  if (defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.macOS) {
+    try {
+      final controller = await WindowController.fromCurrentEngine();
+      return WindowArgs.fromString(controller.arguments);
+    } catch (_) {}
+  }
+  return const WindowArgs(type: WindowType.main, data: {});
+}
+
+void _runSecondaryWindow(WindowArgs windowArgs) {
+  try {
+    switch (windowArgs.type) {
+      case WindowType.live2d:
+        final backendUrl =
+            (windowArgs.data['backendUrl'] ?? 'http://127.0.0.1:23456')
+                .toString();
+        final showTitleBar = windowArgs.data['showTitleBar'] == true;
+        final showControls = windowArgs.data['showControls'] != false;
+        final width = (windowArgs.data['width'] as num?)?.toDouble();
+        final height = (windowArgs.data['height'] as num?)?.toDouble();
+        runApp(
+          FloatingWindowEntry(
+            backendUrl: backendUrl,
+            showTitleBar: showTitleBar,
+            showControls: showControls,
+            initialWidth: width,
+            initialHeight: height,
+          ),
+        );
+        return;
+      case WindowType.control:
+        final backendUrl =
+            (windowArgs.data['backendUrl'] ?? 'http://127.0.0.1:23456')
+                .toString();
+        runApp(
+          ControlWindowEntry(
+            backendUrl: backendUrl,
+          ),
+        );
+        return;
+      case WindowType.main:
+      default:
+        break;
+    }
+  } catch (e, stack) {
+    runApp(ErrorApp(error: e, stackTrace: stack));
+  }
+}
+
 Future<void> main(List<String> args) async {
   logToFile("Application Starting...");
 
@@ -45,6 +102,12 @@ Future<void> main(List<String> args) async {
   
   // Allow self-signed certificates for local development/usage
   HttpOverrides.global = SelfSignedHttpOverrides();
+
+  final windowArgs = await _resolveWindowArgs();
+  if (windowArgs.type != WindowType.main) {
+    _runSecondaryWindow(windowArgs);
+    return;
+  }
   
   logger.info("Starting N-T-AI Application...");
   logToFile("Logger initialized");
@@ -65,6 +128,9 @@ Future<void> main(List<String> args) async {
       logToFile("Settings loaded. Backend URL: ${controller.settings.pythonBackendUrl}");
 
       await LoggerService().init(maxErrors: controller.settings.logMaxErrors, backendUrl: controller.settings.pythonBackendUrl);
+      try {
+        await ControlWindowBridge.register(controller);
+      } catch (_) {}
       
       // Initialize Backend Service (Starts local backend on Windows, checks connection)
       try {

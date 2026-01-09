@@ -120,7 +120,6 @@ class LLMService {
     
     if (provider == null) throw Exception("No active AI provider configured");
 
-    final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
 
     String requestUrl;
@@ -139,28 +138,16 @@ class LLMService {
       }
     }
 
-    if (enablePythonBackend) {
-      requestUrl = '$backendUrl/v1/embeddings';
-      headers['X-Target-Api-Key'] = provider.apiKey;
-      headers['X-Target-Model'] = embeddingModel;
-      
-      var targetBaseUrl = provider.baseUrl;
-      if (targetBaseUrl.endsWith('/chat/completions')) {
-        targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
-      }
-      if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
-      headers['X-Target-Base-Url'] = targetBaseUrl;
-    } else {
-      var baseUrl = provider.baseUrl;
-      if (baseUrl.endsWith('/v1')) {
-        // Standard OpenAI style
-      } else if (baseUrl.endsWith('/chat/completions')) {
-        baseUrl = baseUrl.replaceAll('/chat/completions', '');
-      }
-      if (baseUrl.endsWith('/')) baseUrl = baseUrl.substring(0, baseUrl.length - 1);
-      requestUrl = '$baseUrl/embeddings';
-      headers['Authorization'] = 'Bearer ${provider.apiKey}';
+    requestUrl = '$backendUrl/v1/embeddings';
+    headers['X-Target-Api-Key'] = provider.apiKey;
+    headers['X-Target-Model'] = embeddingModel;
+
+    var targetBaseUrl = provider.baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
     }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
 
     try {
       final response = await http.post(
@@ -213,12 +200,13 @@ class LLMService {
 
     final prefs = await SharedPreferences.getInstance();
     final userNickname = prefs.getString('settings.user.nickname') ?? '';
-    final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
     final suppressInnerMonologue = prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
+    final strictNoMarkdown = prefs.getBool('settings.chat.strictNoMarkdown') ?? false;
     final systemPrompt = systemPromptOverride ?? (prefs.getString('settings.ai.systemPrompt') ?? '');
     final assistantName = assistantNameOverride ?? (prefs.getString('settings.ai.assistantName') ?? 'Firefly');
+    final proactiveChatEnabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
     final embeddingProviderId = prefs.getString('settings.agent.embeddingProviderId');
     AiProviderConfig? embeddingProvider;
     if (embeddingProviderId != null && embeddingProviderId.isNotEmpty) {
@@ -276,7 +264,7 @@ class LLMService {
     final enableDeepResearch = prefs.getBool('settings.backend.deepResearch') ?? false;
     
     // Debug logging
-    debugPrint('[LLM] enablePythonBackend: $enablePythonBackend');
+    debugPrint('[LLM] backend forced: true');
     debugPrint('[LLM] enableBrowser from prefs: $enableBrowser');
     debugPrint('[LLM] searchRegion: $searchRegion');
     debugPrint('[LLM] personaMode: $personaMode');
@@ -288,218 +276,212 @@ class LLMService {
       'Content-Type': 'application/json',
     };
 
-    if (enablePythonBackend) {
-      // Route through Python Backend
-      requestUrl = '$backendUrl/v1/chat/completions';
-      
-      // Pass the underlying provider's config to the backend
-      headers['X-Target-Api-Key'] = provider.apiKey;
-      if (userNickname.isNotEmpty) {
-        headers['X-User-Nickname'] = Uri.encodeComponent(userNickname);
-      }
-      
-      // Sanitize Base URL for backend (remove /chat/completions if present)
-      var targetBaseUrl = provider.baseUrl;
-      if (targetBaseUrl.endsWith('/chat/completions')) {
-        targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
-      }
-      if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
-      headers['X-Target-Base-Url'] = targetBaseUrl;
-      
-      headers['X-Target-Model'] = provider.model;
-      headers['X-Enable-Browser'] = enableBrowser.toString();
-      headers['X-Search-Region'] = searchRegion;
-      final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
-      headers['X-Enable-VTS'] = enableVts.toString();
-      headers['X-Usage-Type'] = usageType;
-      headers['X-Temperature'] = temperature.toString();
-      headers['X-Persona-Mode'] = personaMode;
-      headers['X-Chat-Mode'] = chatMode;
-      headers['X-Deep-Research'] = enableDeepResearch.toString();
-      headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
-      final scenarioContext =
-          (prefs.getString('settings.scenario.context') ?? '').trim();
-      final scenarioTasks = prefs.getStringList('settings.scenario.tasks') ?? [];
-      if (scenarioContext.isNotEmpty) {
-        headers['X-Scene-Context'] = Uri.encodeComponent(scenarioContext);
-      }
-      final cleanedTasks = scenarioTasks
-          .map((t) => t.trim())
-          .where((t) => t.isNotEmpty)
-          .toList();
-      if (cleanedTasks.isNotEmpty) {
-        headers['X-Scene-Tasks'] = Uri.encodeComponent(jsonEncode(cleanedTasks));
-      }
-      final learningProbability =
-          learningProbabilityOverride ??
-          prefs.getDouble('settings.user.learningProbability') ??
-          1.0;
-      headers['X-Learning-Probability'] = learningProbability.toString();
-      if (systemPrompt.trim().isNotEmpty) {
-        headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
-      }
-      if (assistantName.trim().isNotEmpty) {
-        headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
-      }
-      if (sessionId != null && sessionId.isNotEmpty) {
-        headers['X-Session-Id'] = sessionId;
-      }
-      if (embeddingProvider != null) {
-        if (embeddingProvider.apiKey.isNotEmpty) {
-          headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
-        }
-        if (embeddingProvider.baseUrl.isNotEmpty) {
-          var embeddingBaseUrl = embeddingProvider.baseUrl;
-          if (embeddingBaseUrl.endsWith('/chat/completions')) {
-            embeddingBaseUrl = embeddingBaseUrl.replaceAll('/chat/completions', '');
-          }
-          if (embeddingBaseUrl.endsWith('/')) {
-            embeddingBaseUrl = embeddingBaseUrl.substring(0, embeddingBaseUrl.length - 1);
-          }
-          headers['X-Embedding-Base-Url'] = embeddingBaseUrl;
-        }
-        if (embeddingProvider.model.isNotEmpty) {
-          headers['X-Embedding-Model'] = embeddingProvider.model;
-        }
-      } else {
-        headers['X-Disable-Memory'] = 'true';
-      }
+    // Route through Python Backend (forced)
+    requestUrl = '$backendUrl/v1/chat/completions';
 
-      // --- Specialized Agent Providers ---
-      final refinerId = prefs.getString('settings.agent.speechRefinerProviderId');
-      final toolCallerId = prefs.getString('settings.agent.toolCallingProviderId');
-      final deepResearcherId = prefs.getString('settings.agent.deepResearchProviderId');
-
-      if (refinerId != null && refinerId.isNotEmpty) {
-        final refiner = await getProviderById(refinerId);
-        if (refiner != null) {
-          headers['X-Refiner-Model'] = refiner.model;
-          headers['X-Refiner-Api-Key'] = refiner.apiKey;
-          var refinerUrl = refiner.baseUrl;
-          if (refinerUrl.endsWith('/chat/completions')) {
-            refinerUrl = refinerUrl.replaceAll('/chat/completions', '');
-          }
-          if (refinerUrl.endsWith('/')) {
-            refinerUrl = refinerUrl.substring(0, refinerUrl.length - 1);
-          }
-          headers['X-Refiner-Base-Url'] = refinerUrl;
-        }
-      }
-
-      if (toolCallerId != null && toolCallerId.isNotEmpty) {
-        final toolCaller = await getProviderById(toolCallerId);
-        if (toolCaller != null) {
-          headers['X-ToolCaller-Model'] = toolCaller.model;
-          headers['X-ToolCaller-Api-Key'] = toolCaller.apiKey;
-          var toolCallerUrl = toolCaller.baseUrl;
-          if (toolCallerUrl.endsWith('/chat/completions')) {
-            toolCallerUrl = toolCallerUrl.replaceAll('/chat/completions', '');
-          }
-          if (toolCallerUrl.endsWith('/')) {
-            toolCallerUrl = toolCallerUrl.substring(0, toolCallerUrl.length - 1);
-          }
-          headers['X-ToolCaller-Base-Url'] = toolCallerUrl;
-        }
-      }
-
-      if (deepResearcherId != null && deepResearcherId.isNotEmpty) {
-        final deepResearcher = await getProviderById(deepResearcherId);
-        if (deepResearcher != null) {
-          headers['X-Researcher-Model'] = deepResearcher.model;
-          headers['X-Researcher-Api-Key'] = deepResearcher.apiKey;
-          var deepResearcherUrl = deepResearcher.baseUrl;
-          if (deepResearcherUrl.endsWith('/chat/completions')) {
-            deepResearcherUrl = deepResearcherUrl.replaceAll('/chat/completions', '');
-          }
-          if (deepResearcherUrl.endsWith('/')) {
-            deepResearcherUrl = deepResearcherUrl.substring(0, deepResearcherUrl.length - 1);
-          }
-          headers['X-Researcher-Base-Url'] = deepResearcherUrl;
-        }
-      }
-
-      try {
-        final providersRaw = prefs.getString('settings.ai.providers');
-        if (providersRaw != null) {
-          final List data = jsonDecode(providersRaw) as List;
-          final List<Map<String, dynamic>> providers = data.cast<Map<String, dynamic>>();
-          Map<String, dynamic>? ttsProvider;
-          for (final p in providers) {
-            final category = p['category'] as String? ?? 'llm';
-            final enabled = p['enabled'] as bool? ?? true;
-            if (enabled && category == 'tts') { ttsProvider = p; break; }
-          }
-          if (ttsProvider != null) {
-            final ttsKey = ttsProvider['apiKey'] as String? ?? '';
-            var ttsUrl = ttsProvider['baseUrl'] as String? ?? '';
-            if (ttsKey.isNotEmpty) headers['X-SiliconFlow-Api-Key'] = ttsKey;
-            if (ttsUrl.isNotEmpty) {
-              if (ttsUrl.endsWith('/chat/completions')) {
-                ttsUrl = ttsUrl.replaceAll('/chat/completions', '');
-              }
-              if (ttsUrl.endsWith('/')) {
-                ttsUrl = ttsUrl.substring(0, ttsUrl.length - 1);
-              }
-              headers['X-SiliconFlow-Base-Url'] = ttsUrl;
-            }
-          }
-        }
-      } catch (_) {}
-      
-      // --- Vision Agent Configuration ---
-      // Only send vision headers when the current request actually uses image content.
-      bool hasImageTag = false;
-      for (final m in messages) {
-        final content = m['content'] ?? '';
-        if (content.contains('[IMAGE:')) {
-          hasImageTag = true;
-          break;
-        }
-      }
-      if (hasImageTag) {
-        final activeVisionId = prefs.getString('settings.ai.activeVisionId');
-        final visionFallbackAgent = prefs.getBool('settings.vision.fallbackAgent') ?? true;
-        final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
-        
-        if (activeVisionId != null && activeVisionId.isNotEmpty) {
-          final visionProvider = await getProviderById(activeVisionId);
-          if (visionProvider != null) {
-            headers['X-Vision-Api-Key'] = visionProvider.apiKey;
-            
-            var visionBaseUrl = visionProvider.baseUrl;
-            if (visionBaseUrl.endsWith('/chat/completions')) {
-              visionBaseUrl = visionBaseUrl.replaceAll('/chat/completions', '');
-            }
-            if (visionBaseUrl.endsWith('/')) visionBaseUrl = visionBaseUrl.substring(0, visionBaseUrl.length - 1);
-            headers['X-Vision-Base-Url'] = visionBaseUrl;
-            
-            headers['X-Vision-Model'] = visionProvider.model;
-            headers['X-Vision-Prompt'] = Uri.encodeComponent(visionPrompt);
-            headers['X-Vision-Fallback'] = visionFallbackAgent.toString();
-            debugPrint('[LLM] Sending Vision Agent Config: ${visionProvider.model}');
-          }
-        }
-      }
-      
-      debugPrint('[LLM] Sending X-Enable-Browser: ${enableBrowser.toString()}');
-      debugPrint('[LLM] Sending X-Search-Region: $searchRegion');
-
-      // Enable Thinking Mode (DeepSeek)
-      final enableThinking = prefs.getBool('settings.ai.enableThinking') ?? false;
-      headers['X-Enable-Thinking'] = enableThinking.toString();
-      debugPrint('[LLM] Sending X-Enable-Thinking: $enableThinking');
-      
-      // Note: We don't need Authorization header for the local backend unless it requires it.
-      // But we might want to pass it if the backend is secured. For now, assume local is open.
-    } else {
-      // Direct connection
-      requestUrl = provider.baseUrl;
-      if (provider.isRoot) {
-         if (requestUrl.endsWith('/')) requestUrl = requestUrl.substring(0, requestUrl.length - 1);
-         requestUrl = '$requestUrl/chat/completions';
-      }
-      headers['Authorization'] = 'Bearer ${provider.apiKey}';
+    // Pass the underlying provider's config to the backend
+    headers['X-Target-Api-Key'] = provider.apiKey;
+    if (userNickname.isNotEmpty) {
+      headers['X-User-Nickname'] = Uri.encodeComponent(userNickname);
     }
+
+    // Sanitize Base URL for backend (remove /chat/completions if present)
+    var targetBaseUrl = provider.baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
+
+    headers['X-Target-Model'] = provider.model;
+    headers['X-Enable-Browser'] = enableBrowser.toString();
+    headers['X-Search-Region'] = searchRegion;
+    headers['X-Proactive-Chat'] = proactiveChatEnabled.toString();
+    final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+    headers['X-Enable-VTS'] = enableVts.toString();
+    headers['X-Usage-Type'] = usageType;
+    headers['X-Temperature'] = temperature.toString();
+    headers['X-Persona-Mode'] = personaMode;
+    headers['X-Chat-Mode'] = chatMode;
+    headers['X-Deep-Research'] = enableDeepResearch.toString();
+    headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
+    if (chatMode == 'persona' && strictNoMarkdown) {
+      headers['X-Strict-No-Markdown'] = 'true';
+    }
+    final scenarioContext =
+        (prefs.getString('settings.scenario.context') ?? '').trim();
+    final scenarioTasks = prefs.getStringList('settings.scenario.tasks') ?? [];
+    if (scenarioContext.isNotEmpty) {
+      headers['X-Scene-Context'] = Uri.encodeComponent(scenarioContext);
+    }
+    final cleanedTasks = scenarioTasks
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (cleanedTasks.isNotEmpty) {
+      headers['X-Scene-Tasks'] = Uri.encodeComponent(jsonEncode(cleanedTasks));
+    }
+    final learningProbability =
+        learningProbabilityOverride ??
+        prefs.getDouble('settings.user.learningProbability') ??
+        1.0;
+    headers['X-Learning-Probability'] = learningProbability.toString();
+    if (systemPrompt.trim().isNotEmpty) {
+      headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+    }
+    if (assistantName.trim().isNotEmpty) {
+      headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
+    }
+    if (sessionId != null && sessionId.isNotEmpty) {
+      headers['X-Session-Id'] = sessionId;
+    }
+    if (embeddingProvider != null) {
+      if (embeddingProvider.apiKey.isNotEmpty) {
+        headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
+      }
+      if (embeddingProvider.baseUrl.isNotEmpty) {
+        var embeddingBaseUrl = embeddingProvider.baseUrl;
+        if (embeddingBaseUrl.endsWith('/chat/completions')) {
+          embeddingBaseUrl = embeddingBaseUrl.replaceAll('/chat/completions', '');
+        }
+        if (embeddingBaseUrl.endsWith('/')) {
+          embeddingBaseUrl = embeddingBaseUrl.substring(0, embeddingBaseUrl.length - 1);
+        }
+        headers['X-Embedding-Base-Url'] = embeddingBaseUrl;
+      }
+      if (embeddingProvider.model.isNotEmpty) {
+        headers['X-Embedding-Model'] = embeddingProvider.model;
+      }
+    } else {
+      headers['X-Disable-Memory'] = 'true';
+    }
+
+    // --- Specialized Agent Providers ---
+    final refinerId = prefs.getString('settings.agent.speechRefinerProviderId');
+    final toolCallerId = prefs.getString('settings.agent.toolCallingProviderId');
+    final deepResearcherId = prefs.getString('settings.agent.deepResearchProviderId');
+
+    if (refinerId != null && refinerId.isNotEmpty) {
+      final refiner = await getProviderById(refinerId);
+      if (refiner != null) {
+        headers['X-Refiner-Model'] = refiner.model;
+        headers['X-Refiner-Api-Key'] = refiner.apiKey;
+        var refinerUrl = refiner.baseUrl;
+        if (refinerUrl.endsWith('/chat/completions')) {
+          refinerUrl = refinerUrl.replaceAll('/chat/completions', '');
+        }
+        if (refinerUrl.endsWith('/')) {
+          refinerUrl = refinerUrl.substring(0, refinerUrl.length - 1);
+        }
+        headers['X-Refiner-Base-Url'] = refinerUrl;
+      }
+    }
+
+    if (toolCallerId != null && toolCallerId.isNotEmpty) {
+      final toolCaller = await getProviderById(toolCallerId);
+      if (toolCaller != null) {
+        headers['X-ToolCaller-Model'] = toolCaller.model;
+        headers['X-ToolCaller-Api-Key'] = toolCaller.apiKey;
+        var toolCallerUrl = toolCaller.baseUrl;
+        if (toolCallerUrl.endsWith('/chat/completions')) {
+          toolCallerUrl = toolCallerUrl.replaceAll('/chat/completions', '');
+        }
+        if (toolCallerUrl.endsWith('/')) {
+          toolCallerUrl = toolCallerUrl.substring(0, toolCallerUrl.length - 1);
+        }
+        headers['X-ToolCaller-Base-Url'] = toolCallerUrl;
+      }
+    }
+
+    if (deepResearcherId != null && deepResearcherId.isNotEmpty) {
+      final deepResearcher = await getProviderById(deepResearcherId);
+      if (deepResearcher != null) {
+        headers['X-Researcher-Model'] = deepResearcher.model;
+        headers['X-Researcher-Api-Key'] = deepResearcher.apiKey;
+        var deepResearcherUrl = deepResearcher.baseUrl;
+        if (deepResearcherUrl.endsWith('/chat/completions')) {
+          deepResearcherUrl = deepResearcherUrl.replaceAll('/chat/completions', '');
+        }
+        if (deepResearcherUrl.endsWith('/')) {
+          deepResearcherUrl = deepResearcherUrl.substring(0, deepResearcherUrl.length - 1);
+        }
+        headers['X-Researcher-Base-Url'] = deepResearcherUrl;
+      }
+    }
+
+    try {
+      final providersRaw = prefs.getString('settings.ai.providers');
+      if (providersRaw != null) {
+        final List data = jsonDecode(providersRaw) as List;
+        final List<Map<String, dynamic>> providers = data.cast<Map<String, dynamic>>();
+        Map<String, dynamic>? ttsProvider;
+        for (final p in providers) {
+          final category = p['category'] as String? ?? 'llm';
+          final enabled = p['enabled'] as bool? ?? true;
+          if (enabled && category == 'tts') { ttsProvider = p; break; }
+        }
+        if (ttsProvider != null) {
+          final ttsKey = ttsProvider['apiKey'] as String? ?? '';
+          var ttsUrl = ttsProvider['baseUrl'] as String? ?? '';
+          if (ttsKey.isNotEmpty) headers['X-SiliconFlow-Api-Key'] = ttsKey;
+          if (ttsUrl.isNotEmpty) {
+            if (ttsUrl.endsWith('/chat/completions')) {
+              ttsUrl = ttsUrl.replaceAll('/chat/completions', '');
+            }
+            if (ttsUrl.endsWith('/')) {
+              ttsUrl = ttsUrl.substring(0, ttsUrl.length - 1);
+            }
+            headers['X-SiliconFlow-Base-Url'] = ttsUrl;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // --- Vision Agent Configuration ---
+    // Only send vision headers when the current request actually uses image content.
+    bool hasImageTag = false;
+    for (final m in messages) {
+      final content = m['content'] ?? '';
+      if (content.contains('[IMAGE:')) {
+        hasImageTag = true;
+        break;
+      }
+    }
+    if (hasImageTag) {
+      final activeVisionId = prefs.getString('settings.ai.activeVisionId');
+      final visionFallbackAgent = prefs.getBool('settings.vision.fallbackAgent') ?? true;
+      final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
+
+      if (activeVisionId != null && activeVisionId.isNotEmpty) {
+        final visionProvider = await getProviderById(activeVisionId);
+        if (visionProvider != null) {
+          headers['X-Vision-Api-Key'] = visionProvider.apiKey;
+
+          var visionBaseUrl = visionProvider.baseUrl;
+          if (visionBaseUrl.endsWith('/chat/completions')) {
+            visionBaseUrl = visionBaseUrl.replaceAll('/chat/completions', '');
+          }
+          if (visionBaseUrl.endsWith('/')) visionBaseUrl = visionBaseUrl.substring(0, visionBaseUrl.length - 1);
+          headers['X-Vision-Base-Url'] = visionBaseUrl;
+
+          headers['X-Vision-Model'] = visionProvider.model;
+          headers['X-Vision-Prompt'] = Uri.encodeComponent(visionPrompt);
+          headers['X-Vision-Fallback'] = visionFallbackAgent.toString();
+          debugPrint('[LLM] Sending Vision Agent Config: ${visionProvider.model}');
+        }
+      }
+    }
+
+    debugPrint('[LLM] Sending X-Enable-Browser: ${enableBrowser.toString()}');
+    debugPrint('[LLM] Sending X-Search-Region: $searchRegion');
+
+    // Enable Thinking Mode (DeepSeek)
+    final enableThinking = prefs.getBool('settings.ai.enableThinking') ?? false;
+    headers['X-Enable-Thinking'] = enableThinking.toString();
+    debugPrint('[LLM] Sending X-Enable-Thinking: $enableThinking');
+
+    // Note: We don't need Authorization header for the local backend unless it requires it.
+    // But we might want to pass it if the backend is secured. For now, assume local is open.
 
     final model = provider.model.isNotEmpty ? provider.model : 'gpt-3.5-turbo';
     final supportsVision = _providerSupportsVision(provider);
@@ -618,10 +600,8 @@ class LLMService {
     var baseUrl = provider.baseUrl;
     final model = provider.model.isNotEmpty ? provider.model : 'gpt-3.5-turbo';
 
-    if (provider.isRoot) {
-      if (baseUrl.endsWith('/')) baseUrl = baseUrl.substring(0, baseUrl.length - 1);
-      baseUrl = '$baseUrl/chat/completions';
-    }
+    final prefs = await SharedPreferences.getInstance();
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
 
     final requestBody = jsonEncode({
       'model': model,
@@ -635,11 +615,22 @@ class LLMService {
     debugPrint('Body: ${requestBody.length > 1000 ? '${requestBody.substring(0, 1000)}...' : requestBody}');
     debugPrint('-----------------------------------------');
 
+    var targetBaseUrl = baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) {
+      targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    }
+
     final response = await http.post(
-      Uri.parse(baseUrl),
+      Uri.parse('$backendUrl/v1/chat/completions'),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
+        'X-Target-Api-Key': apiKey,
+        'X-Target-Base-Url': targetBaseUrl,
+        'X-Target-Model': model,
+        'X-Usage-Type': usageType,
       },
       body: requestBody,
     );
@@ -697,11 +688,11 @@ class LLMService {
     if (provider == null) throw Exception("No active AI provider configured");
 
     final prefs = await SharedPreferences.getInstance();
-    final enablePythonBackend = prefs.getBool('settings.backend.enabled') ?? false;
     final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
     final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
     final systemPrompt = prefs.getString('settings.ai.systemPrompt') ?? '';
     final assistantName = prefs.getString('settings.ai.assistantName') ?? 'Firefly';
+    final proactiveChatEnabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
 
     final apiKey = provider.apiKey;
     var baseUrl = provider.baseUrl;
@@ -716,37 +707,28 @@ class LLMService {
       'Content-Type': 'application/json',
     };
 
-    if (enablePythonBackend) {
-      // Route through Python Backend (allow override to be proxied)
-      requestUrl = '$backendUrl/v1/chat/completions';
-      headers['X-Target-Api-Key'] = apiKey;
-      
-      var targetBaseUrl = baseUrl;
-      if (targetBaseUrl.endsWith('/chat/completions')) {
-        targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
-      }
-      if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
-      headers['X-Target-Base-Url'] = targetBaseUrl;
-      
-      headers['X-Target-Model'] = model;
-      headers['X-Enable-Browser'] = enableBrowser.toString();
-      final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
-      headers['X-Enable-VTS'] = enableVts.toString();
-      headers['X-Usage-Type'] = usageType;
-      if (systemPrompt.trim().isNotEmpty) {
-        headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
-      }
-      if (assistantName.trim().isNotEmpty) {
-        headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
-      }
-    } else {
-      // Direct connection
-      requestUrl = baseUrl;
-      if (provider.isRoot) {
-        if (requestUrl.endsWith('/')) requestUrl = requestUrl.substring(0, requestUrl.length - 1);
-        requestUrl = '$requestUrl/chat/completions';
-      }
-      headers['Authorization'] = 'Bearer $apiKey';
+    // Route through Python Backend (forced)
+    requestUrl = '$backendUrl/v1/chat/completions';
+    headers['X-Target-Api-Key'] = apiKey;
+
+    var targetBaseUrl = baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
+
+    headers['X-Target-Model'] = model;
+    headers['X-Enable-Browser'] = enableBrowser.toString();
+    headers['X-Proactive-Chat'] = proactiveChatEnabled.toString();
+    final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+    headers['X-Enable-VTS'] = enableVts.toString();
+    headers['X-Usage-Type'] = usageType;
+    if (systemPrompt.trim().isNotEmpty) {
+      headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+    }
+    if (assistantName.trim().isNotEmpty) {
+      headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
     }
 
     final imageB64 = base64Encode(imageBytes);

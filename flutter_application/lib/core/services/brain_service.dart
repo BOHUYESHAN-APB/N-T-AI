@@ -642,6 +642,10 @@ class BrainService {
       await _playTtsBytes(bytes, source: source);
     } catch (e) {
       logger.error('TTS 失败', e);
+    } finally {
+      if (_ttsSessionId == sessionId) {
+        _isSpeaking = false;
+      }
     }
   }
 
@@ -979,61 +983,6 @@ exit 0
     ];
   }
 
-  // Initiative Mode Stream
-  final _initiativeController = StreamController<AiResponse>.broadcast();
-  Stream<AiResponse> get initiativeStream => _initiativeController.stream;
-
-  final List<String> _danmakuBuffer = [];
-  Timer? _initiativeTimer;
-  bool _isProcessing = false;
-  bool _initiativeLoopRequested = false;
-
-  void feedDanmaku(String content) {
-    _danmakuBuffer.add(content);
-    if (_danmakuBuffer.length > 50) {
-      _danmakuBuffer.removeAt(0);
-    }
-  }
-
-  void startInitiativeLoop() {
-    _initiativeLoopRequested = true;
-    _initiativeTimer?.cancel();
-    debugPrint("[BrainService] Starting Initiative Loop...");
-    
-    SharedPreferences.getInstance().then((prefs) {
-      final backendEnabled = prefs.getBool('settings.backend.enabled') ?? false;
-      if (backendEnabled) {
-        debugPrint("[BrainService] Initiative Loop disabled in backend mode.");
-        _initiativeLoopRequested = false;
-        _statusController.add("Backend 模式下由后端负责搭话/主动循环。");
-        return;
-      }
-      if (!_initiativeLoopRequested) return;
-      final interval = prefs.getInt('settings.ai.danmakuBatchInterval') ?? 20;
-      final safeInterval = interval < 5 ? 5 : interval;
-      
-      _initiativeTimer = Timer.periodic(Duration(seconds: safeInterval), (timer) async {
-        if (!_initiativeLoopRequested) return;
-        final prefs = await SharedPreferences.getInstance();
-        final enabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
-        
-        if (!enabled) return;
-        if (_isProcessing) return;
-        if (_danmakuBuffer.isEmpty) return;
-
-        // Simple rate limiting/cooldown could be added here
-        
-        await _runInitiativeCheck();
-      });
-    });
-  }
-
-  void stopInitiativeLoop() {
-    _initiativeLoopRequested = false;
-    _initiativeTimer?.cancel();
-    debugPrint("[BrainService] Stopping Initiative Loop...");
-  }
-
   String _stripEmojis(String text) {
     final cleaned = text.replaceAll(_emojiRegex, '');
     return cleaned
@@ -1044,15 +993,25 @@ exit 0
 
   String _stripInnerMonologue(String text) {
     var out = text.replaceAll(RegExp(r'（[^）]*）', dotAll: true), '');
-    out = out.replaceAllMapped(
-      RegExp(r'(?<!\])\(([^)]*)\)', dotAll: true),
-      (m) {
-        final inner = m.group(1) ?? '';
-        final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(inner);
-        if (hasCjk && inner.trim().length <= 40) return '';
-        return m.group(0) ?? '';
-      },
-    );
+    out = out.replaceAll(RegExp(r'\([^)]*\)', dotAll: true), '');
+    return out
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
+  }
+
+  String _stripMarkdown(String text) {
+    var out = text;
+    out = out.replaceAll(RegExp(r'```[\s\S]*?```'), '');
+    out = out.replaceAllMapped(RegExp(r'`([^`]*)`'), (m) => m.group(1) ?? '');
+    out = out.replaceAll(RegExp(r'^\s{0,3}#{1,6}\s*', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'^\s{0,3}>\s*', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'^\s*[-*+]\s+', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'^\s*\d+\.\s+', multiLine: true), '');
+    out = out.replaceAll(RegExp(r'!\[.*?\]\(.*?\)'), '');
+    out = out.replaceAllMapped(RegExp(r'\[(.*?)\]\((.*?)\)'), (m) => m.group(1) ?? '');
+    out = out.replaceAll(RegExp(r'(\*\*|__)(.*?)\1'), r'$2');
+    out = out.replaceAll(RegExp(r'(\*|_)(.*?)\1'), r'$2');
     return out
         .replaceAll(RegExp(r'[ \t]+\n'), '\n')
         .replaceAll(RegExp(r'\n{3,}'), '\n\n')
@@ -1089,79 +1048,6 @@ exit 0
     } catch (e) {
       debugPrint("[BRAIN] Refine error: $e");
       return rawMessage;
-    }
-  }
-
-  Future<void> _runInitiativeCheck() async {
-    _isProcessing = true;
-    try {
-      // Snapshot and clear buffer (or keep sliding window)
-      // We take last 10 messages for context
-      final recent = _danmakuBuffer.length > 15 
-          ? _danmakuBuffer.sublist(_danmakuBuffer.length - 15) 
-          : List<String>.from(_danmakuBuffer);
-      
-      // Don't clear buffer immediately to allow context continuity, 
-      // but maybe clear it if we speak to avoid repetition.
-      
-      final contextText = recent.join("\n");
-      final prompt = """
-[Initiative Mode]
-Here are the recent comments from the audience (Danmaku):
-$contextText
-
-Based on these comments, do you want to proactively say something to the audience?
-- If yes, provide a natural, engaging response (as the streamer/character).
-- If no (e.g., comments are boring or you just spoke), reply with exactly: NO_ACTION
-- Keep it short and conversational.
-""";
-
-      final messages = <Map<String, String>>[];
-
-      final prefs = await SharedPreferences.getInstance();
-      final allowEmojis = prefs.getBool('settings.ai.allowEmojis') ?? false;
-      if (!allowEmojis) {
-        messages.add({'role': 'system', 'content': '要求：回复中不要使用任何 emoji/表情符号/颜文字，只输出纯文本。'});
-      }
-      
-      // 1. Add context first (if available) to provide conversation history
-      if (_context.isNotEmpty) {
-        messages.addAll(_context.sublist(max(0, _context.length - 2)));
-      }
-
-      // 2. Add the initiative prompt as a USER message at the end
-      // This ensures the backend receives a valid user input to respond to.
-      messages.add({'role': 'user', 'content': prompt});
-
-      final response = await _llmService.chat(messages, usageType: 'initiative', temperature: 0.7);
-
-      var content = response.content;
-      if (!allowEmojis) {
-        content = _stripEmojis(content);
-      }
-
-      if (content.trim() != "NO_ACTION") {
-        debugPrint("[BrainService] Initiative Triggered: ${response.content}");
-        
-        // Add to local context
-        _context.add({'role': 'assistant', 'content': content});
-        
-        // Emit to UI
-        _initiativeController.add(AiResponse(
-          content: content,
-          emotion: response.emotion,
-          reasoningContent: response.reasoningContent,
-          toolCalls: response.toolCalls,
-        ));
-        
-        // Clear buffer after speaking to avoid reacting to same comments?
-        // Or just clear the ones we used.
-        _danmakuBuffer.clear(); 
-      }
-    } catch (e) {
-      debugPrint("[BrainService] Initiative Error: $e");
-    } finally {
-      _isProcessing = false;
     }
   }
 
@@ -1223,6 +1109,11 @@ Based on these comments, do you want to proactively say something to the audienc
     final scenarioTasks = prefs2.getStringList('settings.scenario.tasks') ?? [];
     final suppressInnerMonologue =
         prefs2.getBool('settings.chat.suppressInnerMonologue') ?? false;
+    final strictNoMarkdown =
+        prefs2.getBool('settings.chat.strictNoMarkdown') ?? false;
+    final chatModeIdx = prefs2.getInt('settings.ui.chatMode');
+    final isPersonaMode =
+        chatModeIdx == null || chatModeIdx == ChatModeOption.persona.index;
     final backendEnabled = prefs2.getBool('settings.backend.enabled') ?? false;
     final isServerMode = backendEnabled;
 
@@ -1302,6 +1193,9 @@ Based on these comments, do you want to proactively say something to the audienc
       }
       if (suppressInnerMonologue) {
         response = _stripInnerMonologue(response);
+      }
+      if (strictNoMarkdown && isPersonaMode) {
+        response = _stripMarkdown(response);
       }
 
       if (aiResponse.reasoningContent != null) {

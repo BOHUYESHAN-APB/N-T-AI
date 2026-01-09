@@ -76,7 +76,7 @@ class FloatingWindowAndroid implements FloatingWindowService {
         'modelPath': modelPath,
         'width': width,
         'height': height,
-        'showControls': showControls,
+        'showControls': false,
       });
       _isVisible = true;
     } catch (e) {

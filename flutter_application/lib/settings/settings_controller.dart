@@ -35,6 +35,7 @@ class SettingsController extends ChangeNotifier {
   static const _kEnableNoteAccess = 'settings.agent.enableNoteAccess';
   static const _kAgentShowThoughts = 'settings.agent.showThoughts';
   static const _kSuppressInnerMonologue = 'settings.chat.suppressInnerMonologue';
+  static const _kStrictNoMarkdown = 'settings.chat.strictNoMarkdown';
   static const _kAgentMcpServers = 'settings.agent.mcpServers';
   static const _kEnableExpressionAgent = 'settings.agent.expression.enabled';
   static const _kShowExpressionFace = 'settings.ui.showExpressionFace';
@@ -80,6 +81,7 @@ class SettingsController extends ChangeNotifier {
   static const _kTtsBackendDeviceIndex = 'settings.audio.ttsBackendDeviceIndex';
   static const _kTtsMode = 'settings.audio.ttsMode';
   static const _kSttViaBackendLoopback = 'settings.audio.sttViaBackendLoopback';
+  static const _kSttMicDeviceId = 'settings.audio.sttMicDeviceId';
   static const _kSttLoopbackDeviceIndex = 'settings.audio.sttLoopbackDeviceIndex';
   static const _kSttLoopbackDurationSeconds =
       'settings.audio.sttLoopbackDurationSeconds';
@@ -158,6 +160,7 @@ class SettingsController extends ChangeNotifier {
     final ttsViaBackendDevice = _prefs.getBool(_kTtsViaBackendDevice) ?? false;
     final ttsBackendDeviceIndex = _prefs.getInt(_kTtsBackendDeviceIndex);
     final sttViaBackendLoopback = _prefs.getBool(_kSttViaBackendLoopback) ?? false;
+    final sttMicDeviceId = _prefs.getString(_kSttMicDeviceId);
     final sttLoopbackDeviceIndex = _prefs.getInt(_kSttLoopbackDeviceIndex);
     final sttLoopbackDurationSeconds =
         _prefs.getInt(_kSttLoopbackDurationSeconds) ?? 5;
@@ -212,6 +215,7 @@ class SettingsController extends ChangeNotifier {
     final showAgentThoughts = _prefs.getBool(_kAgentShowThoughts) ?? false;
     final suppressInnerMonologue =
         _prefs.getBool(_kSuppressInnerMonologue) ?? false;
+    final strictNoMarkdown = _prefs.getBool(_kStrictNoMarkdown) ?? false;
     final userNickname = _prefs.getString(_kUserNickname) ?? '';
     final learningProbability = _prefs.getDouble(_kLearningProbability) ?? 1.0;
     List<String> quickActions = ['attach_image', 'compress', 'new_chat'];
@@ -223,8 +227,11 @@ class SettingsController extends ChangeNotifier {
     }
 
     final mcpServersRaw = _prefs.getString(_kAgentMcpServers);
-    final enablePythonBackend =
-        _prefs.getBool(_kEnablePythonBackend) ?? (kReleaseMode ? true : false);
+    final storedBackendEnabled = _prefs.getBool(_kEnablePythonBackend);
+    final enablePythonBackend = true;
+    if (storedBackendEnabled != true) {
+      await _prefs.setBool(_kEnablePythonBackend, true);
+    }
     final autoConnectBackend =
         _prefs.getBool(_kAutoConnectBackend) ?? false;
     final autoStartBackend = _prefs.getBool(_kAutoStartBackend) ?? false;
@@ -582,6 +589,7 @@ class SettingsController extends ChangeNotifier {
       enableNoteAccess: enableNoteAccess,
       showAgentThoughts: showAgentThoughts,
       suppressInnerMonologue: suppressInnerMonologue,
+      strictNoMarkdown: strictNoMarkdown,
       mcpServers: mcpServers,
       agents: agents,
       deepResearch: deepResearch,
@@ -617,6 +625,7 @@ class SettingsController extends ChangeNotifier {
       ttsBackendDeviceIndex: ttsBackendDeviceIndex,
       ttsMode: _prefs.getString(_kTtsMode) ?? 'sentence',
       sttViaBackendLoopback: sttViaBackendLoopback,
+      sttMicDeviceId: sttMicDeviceId,
       sttLoopbackDeviceIndex: sttLoopbackDeviceIndex,
       sttLoopbackDurationSeconds: sttLoopbackDurationSeconds,
       autoMicListening: _prefs.getBool(_kAutoMicListening) ?? false,
@@ -890,14 +899,29 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setAutoMicListening(bool v) async {
-    _settings = _settings.copyWith(autoMicListening: v);
+    final nextAutoVoice = v ? false : _settings.autoVoiceChannelListening;
+    _settings = _settings.copyWith(
+      autoMicListening: v,
+      autoVoiceChannelListening: nextAutoVoice,
+    );
     await _prefs.setBool(_kAutoMicListening, v);
+    if (v) {
+      await _prefs.setBool(_kAutoVoiceChannelListening, false);
+    }
     notifyListeners();
   }
 
   Future<void> setAutoVoiceChannelListening(bool v) async {
-    _settings = _settings.copyWith(autoVoiceChannelListening: v);
-    await _prefs.setBool(_kAutoVoiceChannelListening, v);
+    final enabled = v && _settings.sttViaBackendLoopback;
+    final nextAutoMic = enabled ? false : _settings.autoMicListening;
+    _settings = _settings.copyWith(
+      autoVoiceChannelListening: enabled,
+      autoMicListening: nextAutoMic,
+    );
+    await _prefs.setBool(_kAutoVoiceChannelListening, enabled);
+    if (enabled) {
+      await _prefs.setBool(_kAutoMicListening, false);
+    }
     notifyListeners();
   }
 
@@ -912,8 +936,26 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setSttViaBackendLoopback(bool v) async {
-    _settings = _settings.copyWith(sttViaBackendLoopback: v);
+    _settings = _settings.copyWith(
+      sttViaBackendLoopback: v,
+      autoVoiceChannelListening: v ? _settings.autoVoiceChannelListening : false,
+    );
     await _prefs.setBool(_kSttViaBackendLoopback, v);
+    if (!v) {
+      await _prefs.setBool(_kAutoVoiceChannelListening, false);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSttMicDeviceId(String? v) async {
+    final trimmed = v?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      _settings = _settings.copyWith(sttMicDeviceId: null);
+      await _prefs.remove(_kSttMicDeviceId);
+    } else {
+      _settings = _settings.copyWith(sttMicDeviceId: trimmed);
+      await _prefs.setString(_kSttMicDeviceId, trimmed);
+    }
     notifyListeners();
   }
 
@@ -1225,6 +1267,12 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setStrictNoMarkdown(bool enabled) async {
+    await _prefs.setBool(_kStrictNoMarkdown, enabled);
+    _settings = _settings.copyWith(strictNoMarkdown: enabled);
+    notifyListeners();
+  }
+
   Future<void> addMcpServer(McpServerConfig server) async {
     final list = List<McpServerConfig>.from(_settings.mcpServers)..add(server);
     _settings = _settings.copyWith(mcpServers: list);
@@ -1427,7 +1475,7 @@ class SettingsController extends ChangeNotifier {
     await _prefs.setBool(_kAiAllowEmojis, newSettings.allowEmojis);
     
     debugPrint('[Settings] Thinking Mode: ${newSettings.enableThinking}');
-    debugPrint('[Settings] Initiative Mode: ${newSettings.initiativeMode}');
+    debugPrint('[Settings] Proactive Chat (Backend): ${newSettings.initiativeMode}');
     debugPrint('[Settings] Allow Emojis: ${newSettings.allowEmojis}');
     
     // Update local state if necessary. 
@@ -1626,10 +1674,19 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> setEnablePythonBackend(bool v) async {
-    if (_settings.enablePythonBackend == v) return;
+    if (!v) {
+      if (!_settings.enablePythonBackend) {
+        _settings = _settings.copyWith(enablePythonBackend: true);
+        await _prefs.setBool(_kEnablePythonBackend, true);
+        notifyListeners();
+      }
+      debugPrint('[Settings] 后端模式已固定开启，无法关闭。');
+      return;
+    }
+    if (_settings.enablePythonBackend) return;
 
-    _settings = _settings.copyWith(enablePythonBackend: v);
-    await _prefs.setBool(_kEnablePythonBackend, v);
+    _settings = _settings.copyWith(enablePythonBackend: true);
+    await _prefs.setBool(_kEnablePythonBackend, true);
     try {
       await BackendService().init(
         _settings.pythonBackendUrl,

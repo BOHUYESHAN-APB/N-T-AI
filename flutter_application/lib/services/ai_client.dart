@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../settings/settings.dart';
 
 class AiMessage {
@@ -123,41 +124,35 @@ class AiClient {
     bool baseUrlIsRoot = true,
     String? userId,
   }) async {
-    final provider = ai.provider;
     final model = (modelOverride != null && modelOverride.isNotEmpty)
         ? modelOverride
         : (ai.model.isEmpty ? 'gpt-4o-mini' : ai.model);
 
-    Uri? url;
-    Map<String, String> headers = {'Content-Type': 'application/json'};
+    final prefs = await SharedPreferences.getInstance();
+    final backendUrl =
+        prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
 
-    if (provider == AiProvider.openai) {
-      if (ai.baseUrl.isNotEmpty) {
-        final base = ai.baseUrl;
-        final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-            ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
-            : base;
-        url = Uri.parse(full);
-      } else {
-        url = Uri.parse('https://api.openai.com/v1/chat/completions');
-      }
-      if (ai.apiKey.isEmpty) {
-        throw Exception('未配置 OpenAI API Key');
-      }
-      headers['Authorization'] = 'Bearer ${ai.apiKey}';
-    } else if (provider == AiProvider.custom || provider == AiProvider.local) {
-      if (ai.baseUrl.isEmpty) {
-        throw Exception('未配置 Base URL（自定义/本地）');
-      }
-      final base = ai.baseUrl;
-      final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-          ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
-          : base;
-      url = Uri.parse(full);
-      if (ai.apiKey.isNotEmpty) {
-        headers['Authorization'] = 'Bearer ${ai.apiKey}';
-      }
+    String base = ai.baseUrl;
+    if ((ai.provider == AiProvider.openai) && base.isEmpty) {
+      base = 'https://api.openai.com/v1';
     }
+    if (base.isEmpty) {
+      throw Exception('未配置 Base URL');
+    }
+    if (baseUrlIsRoot && base.endsWith('/chat/completions')) {
+      base = base.replaceAll('/chat/completions', '');
+    }
+    if (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'X-Target-Api-Key': ai.apiKey,
+      'X-Target-Base-Url': base,
+      'X-Target-Model': model,
+      'X-Usage-Type': 'direct',
+    };
 
     final body = jsonEncode({
       'model': model,
@@ -168,7 +163,8 @@ class AiClient {
     });
 
     final resp = await http
-        .post(url!, headers: headers, body: body)
+        .post(Uri.parse('$backendUrl/v1/chat/completions'),
+            headers: headers, body: body)
         .timeout(const Duration(seconds: 30));
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -196,97 +192,14 @@ class AiClient {
     bool baseUrlIsRoot = true,
     String? userId,
   }) async* {
-    final provider = ai.provider;
-    final model = (modelOverride != null && modelOverride.isNotEmpty)
-        ? modelOverride
-        : (ai.model.isEmpty ? 'gpt-4o-mini' : ai.model);
-
-    Uri? url;
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-    };
-
-    if (provider == AiProvider.openai) {
-      if (ai.baseUrl.isNotEmpty) {
-        final base = ai.baseUrl;
-        final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-            ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
-            : base;
-        url = Uri.parse(full);
-      } else {
-        url = Uri.parse('https://api.openai.com/v1/chat/completions');
-      }
-      if (ai.apiKey.isEmpty) {
-        throw Exception('未配置 OpenAI API Key');
-      }
-      headers['Authorization'] = 'Bearer ${ai.apiKey}';
-    } else if (provider == AiProvider.custom || provider == AiProvider.local) {
-      if (ai.baseUrl.isEmpty) {
-        throw Exception('未配置 Base URL（自定义/本地）');
-      }
-      final base = ai.baseUrl;
-      final full = baseUrlIsRoot && !base.endsWith('/chat/completions')
-          ? '${base.replaceAll(RegExp(r"/+$"), '')}/chat/completions'
-          : base;
-      url = Uri.parse(full);
-      if (ai.apiKey.isNotEmpty) {
-        headers['Authorization'] = 'Bearer ${ai.apiKey}';
-      }
-    }
-
-    final body = jsonEncode({
-      'model': model,
-      'messages': messages.map((m) => m.toJson()).toList(),
-      'stream': true,
-      'temperature': 0.7,
-      if (userId != null) 'user': userId,
-    });
-
-    final client = http.Client();
-    try {
-      final req = http.Request('POST', url!);
-      req.headers.addAll(headers);
-      req.body = body;
-      final resp = await client.send(req).timeout(const Duration(seconds: 60));
-      if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        final text = await resp.stream.bytesToString();
-        throw Exception('HTTP ${resp.statusCode}: $text');
-      }
-      // 解析 SSE，每行以 data: 开头
-      await for (final chunk in resp.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        final line = chunk.trim();
-        if (line.isEmpty) continue;
-        if (line.startsWith('data:')) {
-          final data = line.substring(5).trim();
-          if (data == '[DONE]') break;
-          try {
-            final obj = jsonDecode(data);
-            // OpenAI: choices[0].delta.content
-            final choices = obj['choices'];
-            if (choices is List && choices.isNotEmpty) {
-              final delta = choices[0]['delta'];
-              if (delta is Map) {
-                final content = delta['content'] as String?;
-                final reasoning = delta['reasoning_content'] as String?;
-                if (content != null || reasoning != null) {
-                  yield AiChunk(content: content, reasoning: reasoning);
-                }
-              }
-            } else if (obj['content'] is String) {
-              // 兼容：部分实现直接返回 content
-              yield AiChunk(content: obj['content'] as String);
-            }
-          } catch (_) {
-            // 忽略无法解析的片段
-          }
-        }
-      }
-    } finally {
-      client.close();
-    }
+    final response = await sendChat(
+      ai: ai,
+      messages: messages,
+      modelOverride: modelOverride,
+      baseUrlIsRoot: baseUrlIsRoot,
+      userId: userId,
+    );
+    yield AiChunk(content: response);
   }
 
   // 兼容旧版：只返回文本内容

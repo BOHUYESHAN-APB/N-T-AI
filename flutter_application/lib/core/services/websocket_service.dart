@@ -17,10 +17,19 @@ class WebSocketService {
   Timer? _reconnectTimer;
   String? _lastUrl;
   bool _disposed = false;
+  final List<Map<String, dynamic>> _pendingMessages = [];
+  static const int _maxPendingMessages = 20;
 
   bool send(Map<String, dynamic> message) {
     if (_disposed) return false;
-    if (_webSocket == null || !_isConnected) return false;
+    if (_webSocket == null || !_isConnected) {
+      // Queue message for later flush
+      _pendingMessages.add(message);
+      if (_pendingMessages.length > _maxPendingMessages) {
+        _pendingMessages.removeAt(0);
+      }
+      return false;
+    }
     try {
       _webSocket!.add(jsonEncode(message));
       return true;
@@ -97,6 +106,14 @@ class WebSocketService {
       _isConnected = true;
       _notifyStatus();
       debugPrint('[WebSocket] Connected');
+      // Flush any pending messages
+      if (_pendingMessages.isNotEmpty) {
+        final toSend = List<Map<String, dynamic>>.from(_pendingMessages);
+        _pendingMessages.clear();
+        for (final msg in toSend) {
+          send(msg);
+        }
+      }
       
       _webSocket!.listen(
         (data) {

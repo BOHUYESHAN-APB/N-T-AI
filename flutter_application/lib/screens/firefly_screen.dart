@@ -10,6 +10,7 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:desktop_webview_window/desktop_webview_window.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import '../core/services/brain_service.dart';
 import '../widgets/character_display.dart';
@@ -32,6 +33,7 @@ import '../core/services/websocket_service.dart'; // Import WebSocketService
 import '../core/services/screen_capture_service.dart'; // Import ScreenCaptureService
 import '../plugins/plugin_manager.dart'; // Import PluginManager
 import '../services/logger_service.dart';
+import '../windows/window_args.dart';
 
 class FireflyScreen extends StatefulWidget {
   const FireflyScreen({super.key});
@@ -80,14 +82,23 @@ class _FireflyScreenState extends State<FireflyScreen> {
   StreamSubscription? _ttsSubscription;
   StreamSubscription? _wsSubscription;
   StreamSubscription? _wsStatusSubscription;
-  StreamSubscription? _initiativeSubscription;
+  StreamSubscription? _windowsChangedSubscription;
 
   // Floating window service
   FloatingWindowService? _floatingWindowService;
   Webview? _subtitleAiWindow;
   Webview? _subtitleUserWindow;
+  WindowController? _controlWindowController;
   bool? _lastScreenCaptureEnabled;
+  bool? _lastTtsEnabled;
+  bool? _lastVoiceChannelEnabled;
   bool _screenCaptureUpdateFromWs = false;
+  bool _ttsUpdateFromWs = false;
+  bool _voiceChannelUpdateFromWs = false;
+  bool? _lastProactiveChatEnabled;
+  bool? _lastSyncedScreenCapture;
+  bool? _lastSyncedTts;
+  bool? _lastSyncedInitiative;
   bool _subtitleSupportWarned = false;
   bool _floatingWindowEnabled = false;
   bool _miniExpanded = false;
@@ -96,7 +107,6 @@ class _FireflyScreenState extends State<FireflyScreen> {
   bool _floatingControlsVisible = false;
   final Live2DController _live2dController = Live2DController();
   bool _lastEnableTts = false;
-  bool _initiativeLoopActive = false;
   bool _autoMicListeningActive = false; // 是否处于自动麦克风监听状态
   final AudioRecorder _autoMicRecorder = AudioRecorder(); // 专用于自动监听的录制器
 
@@ -120,7 +130,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
         _queueAwareness(description);
       }
     };
-
+    
     _ttsSubscription = _brain.ttsStream.listen((bytes) {
       _handleTtsForLive2D(bytes);
     });
@@ -129,41 +139,20 @@ class _FireflyScreenState extends State<FireflyScreen> {
     _wsStatusSubscription = _wsService.statusStream.listen((connected) {
       if (!connected || !mounted) return;
       final settings = SettingsScope.of(context).settings;
-      _wsService.send({
-        'action': 'set_screen_capture_enabled',
-        'enabled': settings.enableScreenCapture,
-      });
-    });
-    
-    _initiativeSubscription = _brain.initiativeStream.listen((response) {
-      if (!mounted) return;
-      
-      // Add initiative response to chat
-      setState(() {
-        _messages.add({
-          'role': 'assistant',
-          'content': response.content,
-          'created_at': DateTime.now(),
-          'source': 'assistant',
-        });
-        _trimMessageBuffer();
-      });
-      _scrollToBottom();
-      
-      // Trigger TTS
-      try {
-        final rootSettings = SettingsScope.of(context).settings;
-        if (!rootSettings.enableTts) {
-          return;
-        }
-        final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
-        if (ttsProvider != null) {
-          _brain.speak(response.content, ttsProvider, source: 'assistant_action');
-        }
-      } catch (e) {
-        debugPrint("[Initiative] TTS Error: $e");
+      _syncBackendSwitches(settings, force: true);
+      if (settings.enablePythonBackend) {
+        unawaited(_postVoiceChannelMonitor(
+          settings.pythonBackendUrl,
+          settings.autoVoiceChannelListening,
+        ));
       }
     });
+
+    if (Platform.isWindows) {
+      _windowsChangedSubscription = onWindowsChanged.listen((_) {
+        _syncControlWindowState();
+      });
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // logToFile("FireflyScreen.postFrameCallback: checking first run");
@@ -361,7 +350,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
         if (settings.enableTts) {
           final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
           if (ttsProvider != null) {
-            _brain.speak(displayContent, ttsProvider, source: 'assistant');
+            _speakWithMode(
+              displayContent,
+              ttsProvider,
+              settings,
+              source: 'assistant',
+            );
           }
         }
       } else {
@@ -407,7 +401,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
         if (settings.enableTts) {
           final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
           if (ttsProvider != null) {
-            _brain.speakChunks(parts, ttsProvider, source: 'assistant');
+            _speakWithModeParts(
+              parts,
+              ttsProvider,
+              settings,
+              source: 'assistant',
+            );
           }
         }
       }
@@ -486,25 +485,20 @@ class _FireflyScreenState extends State<FireflyScreen> {
     // logToFile("FireflyScreen.didChangeDependencies started");
     final settingsController = SettingsScope.of(context);
     final settings = settingsController.settings;
+    if (!settings.sttViaBackendLoopback && settings.autoVoiceChannelListening) {
+      settingsController.setAutoVoiceChannelListening(false);
+    }
+    if (settings.autoVoiceChannelListening && settings.autoMicListening) {
+      settingsController.setAutoMicListening(false);
+      if (_autoMicListeningActive) {
+        _stopAutoMicListening();
+      }
+    }
     if (_lastEnableTts && !settings.enableTts) {
       _stopTtsPlayback();
     }
     _lastEnableTts = settings.enableTts;
-
-    final initiativeMode = settings.ai.initiativeMode;
-    final backendEnabled = settings.enablePythonBackend;
-    if (backendEnabled) {
-      if (_initiativeLoopActive) {
-        _initiativeLoopActive = false;
-        _brain.stopInitiativeLoop();
-      }
-    } else if (initiativeMode && !_initiativeLoopActive) {
-      _initiativeLoopActive = true;
-      _brain.startInitiativeLoop();
-    } else if (!initiativeMode && _initiativeLoopActive) {
-      _initiativeLoopActive = false;
-      _brain.stopInitiativeLoop();
-    }
+    _syncProactiveChatSetting(settings);
     // Check floating window setting and update accordingly
     // logToFile("FireflyScreen.didChangeDependencies: updating floating window");
     _updateFloatingWindow(settings.enableFloatingWindow, settings.pythonBackendUrl);
@@ -516,13 +510,16 @@ class _FireflyScreenState extends State<FireflyScreen> {
                       settings.showLive2DMiniWindow;
     _brain.expressionAgent.setBroadcastEnabled(anyLive2D);
 
-    if (settings.enablePythonBackend && settings.autoConnectBackend && anyLive2D) {
+    if (settings.enablePythonBackend && settings.autoConnectBackend) {
       _wsService.connect(settings.pythonBackendUrl);
     } else {
       _wsService.disconnect();
     }
+    _syncBackendSwitches(settings, force: true);
 
     _syncScreenCaptureSetting(settings);
+    _syncTtsSetting(settings);
+    _syncVoiceChannelSetting(settings);
     _updateSubtitleWindows(settings, settingsController);
     
     // Auto voice channel listening trigger
@@ -547,16 +544,15 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
 
     if (enabled == _floatingWindowEnabled) return;
-    _floatingWindowEnabled = enabled;
 
     // 启用/禁用广播（让悬浮窗通过 WebSocket 接收表情/动作指令）
     _brain.expressionAgent.setBroadcastEnabled(enabled);
 
     if (!FloatingWindowServiceFactory.isSupported()) return;
 
-    if (enabled) {
-      // Create floating window
-      try {
+      if (enabled) {
+        // Create floating window
+        try {
         // 获取当前选择的 Live2D 模型路径
         final prefs = await SharedPreferences.getInstance();
         final modelPath = prefs.getString('settings.character.modelPath') ?? '';
@@ -565,32 +561,41 @@ class _FireflyScreenState extends State<FireflyScreen> {
           backendUrl: backendUrl,
         );
         await _floatingWindowService!.initialize();
-        await _floatingWindowService!.createFloatingWindow(
-          modelPath: modelPath,
-          width: 400,
-          height: 600,
-          showControls: true,
-        );
-        await _floatingWindowService!.executeJavaScript(
-          "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;",
-        );
-      } catch (e) {
-        debugPrint('[FireflyScreen] Failed to create floating window: $e');
+          await _floatingWindowService!.createFloatingWindow(
+            modelPath: modelPath,
+            width: 400,
+            height: 600,
+            showControls: true,
+          );
+          await _floatingWindowService!.executeJavaScript(
+            "window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;",
+          );
+          await _openControlWindow(backendUrl);
+          _floatingWindowEnabled = true;
+        } catch (e) {
+          debugPrint('[FireflyScreen] Failed to create floating window: $e');
+          _floatingWindowEnabled = false;
+        }
+      } else {
+        // Close floating window
+        try {
+          await _floatingWindowService?.closeFloatingWindow();
+          await _closeControlWindow();
+        } catch (e) {
+          debugPrint('[FireflyScreen] Failed to close floating window: $e');
+        }
+        _floatingWindowEnabled = false;
       }
-    } else {
-      // Close floating window
-      try {
-        await _floatingWindowService?.closeFloatingWindow();
-      } catch (e) {
-        debugPrint('[FireflyScreen] Failed to close floating window: $e');
-      }
-    }
   }
 
   void _syncScreenCaptureSetting(AppSettings settings) {
     final enabled = settings.enableScreenCapture;
     if (_lastScreenCaptureEnabled == null) {
       _lastScreenCaptureEnabled = enabled;
+      _wsService.send({
+        'action': 'set_screen_capture_enabled',
+        'enabled': enabled,
+      });
       return;
     }
     if (_lastScreenCaptureEnabled != enabled) {
@@ -606,12 +611,134 @@ class _FireflyScreenState extends State<FireflyScreen> {
     }
   }
 
+  void _syncTtsSetting(AppSettings settings) {
+    final enabled = settings.enableTts;
+    if (_lastTtsEnabled == null) {
+      _lastTtsEnabled = enabled;
+      _wsService.send({
+        'action': 'set_tts_enabled',
+        'enabled': enabled,
+      });
+      return;
+    }
+    if (_lastTtsEnabled != enabled) {
+      if (_ttsUpdateFromWs) {
+        _ttsUpdateFromWs = false;
+      } else {
+        _wsService.send({
+          'action': 'set_tts_enabled',
+          'enabled': enabled,
+        });
+      }
+      _lastTtsEnabled = enabled;
+    }
+  }
+
+  Future<void> _postProactiveChat(String backendUrl, bool enabled) async {
+    if (backendUrl.trim().isEmpty) return;
+    final base = backendUrl.replaceAll(RegExp(r'/$'), '');
+    try {
+      await http.post(
+        Uri.parse('$base/api/live2d/agent/proactive_chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'enabled': enabled}),
+      );
+    } catch (e) {
+      debugPrint('[FireflyScreen] 主动搭话切换失败: $e');
+    }
+  }
+
+  void _syncProactiveChatSetting(AppSettings settings) {
+    final enabled = settings.ai.initiativeMode;
+    if (_lastProactiveChatEnabled == null) {
+      _lastProactiveChatEnabled = enabled;
+      if (settings.enablePythonBackend) {
+        unawaited(_postProactiveChat(settings.pythonBackendUrl, enabled));
+      }
+      return;
+    }
+    if (_lastProactiveChatEnabled != enabled) {
+      if (settings.enablePythonBackend) {
+        unawaited(_postProactiveChat(settings.pythonBackendUrl, enabled));
+      }
+      _lastProactiveChatEnabled = enabled;
+    }
+  }
+
+  void _syncBackendSwitches(AppSettings settings, {bool force = false}) {
+    final scEnabled = settings.enableScreenCapture;
+    if (force || _lastSyncedScreenCapture != scEnabled) {
+      _wsService.send({
+        'action': 'set_screen_capture_enabled',
+        'enabled': scEnabled,
+      });
+      _lastSyncedScreenCapture = scEnabled;
+    }
+
+    final ttsEnabled = settings.enableTts;
+    if (force || _lastSyncedTts != ttsEnabled) {
+      _wsService.send({
+        'action': 'set_tts_enabled',
+        'enabled': ttsEnabled,
+      });
+      _lastSyncedTts = ttsEnabled;
+    }
+
+    final initiative = settings.ai.initiativeMode;
+    if (force || _lastSyncedInitiative != initiative) {
+      if (initiative) {
+        _wsService.send({'action': 'proactive_chat'});
+      }
+      if (settings.enablePythonBackend) {
+        unawaited(_postProactiveChat(settings.pythonBackendUrl, initiative));
+      }
+      _lastSyncedInitiative = initiative;
+    }
+  }
+
+  Future<void> _postVoiceChannelMonitor(String backendUrl, bool enabled) async {
+    if (backendUrl.trim().isEmpty) return;
+    final base = backendUrl.replaceAll(RegExp(r'/$'), '');
+    try {
+      await http.post(
+        Uri.parse('$base/api/live2d/agent/voice_channel_monitor'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'channel_id': 'default',
+          'is_active': enabled,
+        }),
+      );
+    } catch (e) {
+      debugPrint('[FireflyScreen] Voice channel toggle failed: $e');
+    }
+  }
+
+  void _syncVoiceChannelSetting(AppSettings settings) {
+    final enabled = settings.autoVoiceChannelListening;
+    if (_lastVoiceChannelEnabled == null) {
+      _lastVoiceChannelEnabled = enabled;
+      return;
+    }
+    if (_lastVoiceChannelEnabled != enabled) {
+      if (_voiceChannelUpdateFromWs) {
+        _voiceChannelUpdateFromWs = false;
+      } else if (settings.enablePythonBackend) {
+        unawaited(_postVoiceChannelMonitor(settings.pythonBackendUrl, enabled));
+      }
+      _lastVoiceChannelEnabled = enabled;
+    }
+  }
+
   Future<void> _updateSubtitleWindows(
     AppSettings settings,
     SettingsController settingsController,
   ) async {
-    final wantAi = settings.enableAiSubtitleWindow;
     final wantUser = settings.enableUserSubtitleWindow;
+    final wantAi = false;
+
+    if (settings.enableAiSubtitleWindow) {
+      settingsController.setEnableAiSubtitleWindow(false);
+    }
 
     final supported = await _isSubtitleWindowSupported();
     if (!supported) {
@@ -633,19 +760,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       return;
     }
 
-    if (wantAi && _subtitleAiWindow == null) {
-      final window = await _openSubtitleWindow(
-        backendUrl: settings.pythonBackendUrl,
-        mode: 'ai',
-        title: 'AI Subtitle',
-        settingsController: settingsController,
-      );
-      if (window == null) {
-        settingsController.setEnableAiSubtitleWindow(false);
-      } else {
-        _subtitleAiWindow = window;
-      }
-    } else if (!wantAi && _subtitleAiWindow != null) {
+    if (_subtitleAiWindow != null) {
       await _closeSubtitleWindow(_subtitleAiWindow);
       _subtitleAiWindow = null;
     }
@@ -654,7 +769,7 @@ class _FireflyScreenState extends State<FireflyScreen> {
       final window = await _openSubtitleWindow(
         backendUrl: settings.pythonBackendUrl,
         mode: 'user',
-        title: 'User Subtitle',
+        title: '用户/语音 字幕',
         settingsController: settingsController,
       );
       if (window == null) {
@@ -886,7 +1001,12 @@ class _FireflyScreenState extends State<FireflyScreen> {
     if (settings.enableTts) {
       final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
       if (ttsProvider != null) {
-        _brain.speak(content, ttsProvider, source: 'screen_awareness');
+        _speakWithMode(
+          content,
+          ttsProvider,
+          settings,
+          source: 'screen_awareness',
+        );
       }
     }
 
@@ -898,6 +1018,51 @@ class _FireflyScreenState extends State<FireflyScreen> {
         _brain.expressionAgent.requestMotion('屏幕感知', content);
       }
     }
+  }
+
+  Future<void> _openControlWindow(String backendUrl) async {
+    if (!Platform.isWindows) return;
+    if (_controlWindowController != null) {
+      try {
+        await _controlWindowController!.show();
+        return;
+      } catch (_) {
+        _controlWindowController = null;
+      }
+    }
+    try {
+      final args = WindowArgs.encode(
+        WindowType.control,
+        {'backendUrl': backendUrl},
+      );
+      final controller = await WindowController.create(
+        WindowConfiguration(arguments: args, hiddenAtLaunch: true),
+      );
+      _controlWindowController = controller;
+      await controller.show();
+    } catch (e) {
+      debugPrint('[FireflyScreen] Failed to create control window: $e');
+    }
+  }
+
+  Future<void> _closeControlWindow() async {
+    if (_controlWindowController == null) return;
+    try {
+      await _controlWindowController!.hide();
+    } catch (_) {}
+  }
+
+  Future<void> _syncControlWindowState() async {
+    if (_controlWindowController == null) return;
+    try {
+      final controllers = await WindowController.getAll();
+      final exists = controllers.any(
+        (c) => c.windowId == _controlWindowController!.windowId,
+      );
+      if (!exists) {
+        _controlWindowController = null;
+      }
+    } catch (_) {}
   }
 
   Future<void> _interruptGeneration() async {
@@ -1025,7 +1190,12 @@ ${capped.map((e) => '- $e').join('\n')}
       if (settings.enableTts) {
         final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
         if (ttsProvider != null) {
-          _brain.speak(summary, ttsProvider, source: 'assistant');
+          _speakWithMode(
+            summary,
+            ttsProvider,
+            settings,
+            source: 'assistant',
+          );
         }
       }
     } catch (e) {
@@ -1059,14 +1229,14 @@ ${capped.map((e) => '- $e').join('\n')}
     _historySubscription?.cancel();
     _ttsSubscription?.cancel();
     _wsSubscription?.cancel();
-    _initiativeSubscription?.cancel();
     _screenCaptureService.stop();
-    _brain.stopInitiativeLoop();
     _wsService.dispose();
     _wsStatusSubscription?.cancel();
+    _windowsChangedSubscription?.cancel();
     _closeSubtitleWindow(_subtitleAiWindow);
     _closeSubtitleWindow(_subtitleUserWindow);
     _floatingWindowService?.dispose();
+    unawaited(_closeControlWindow());
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
@@ -1094,6 +1264,24 @@ ${capped.map((e) => '- $e').join('\n')}
       if (controller.settings.enableScreenCapture != enabled) {
         _screenCaptureUpdateFromWs = true;
         controller.setEnableScreenCapture(enabled);
+      }
+      return;
+    }
+    if (type == 'tts_toggle') {
+      final enabled = msg['enabled'] == true;
+      final controller = SettingsScope.of(context);
+      if (controller.settings.enableTts != enabled) {
+        _ttsUpdateFromWs = true;
+        controller.setEnableTts(enabled);
+      }
+      return;
+    }
+    if (type == 'voice_channel_update') {
+      final enabled = msg['is_active'] == true;
+      final controller = SettingsScope.of(context);
+      if (controller.settings.autoVoiceChannelListening != enabled) {
+        _voiceChannelUpdateFromWs = true;
+        controller.setAutoVoiceChannelListening(enabled);
       }
       return;
     }
@@ -1145,16 +1333,13 @@ ${capped.map((e) => '- $e').join('\n')}
     }
     
     if (role != null && content != null && content.isNotEmpty) {
-            // Filter out raw Danmaku (chat_normal) from the main chat interface
-            // unless it's explicitly marked as a summary or important.
-            // User requested to show only summaries here.
-            if (role == 'chat_normal') {
-              if (!_blockExternalInputs(settings)) {
-                _brain.feedDanmaku(content); // Feed raw danmaku to brain for initiative mode
+              // Filter out raw Danmaku (chat_normal) from the main chat interface
+              // unless it's explicitly marked as a summary or important.
+              // User requested to show only summaries here.
+              if (role == 'chat_normal') {
+                // debugPrint('[Danmaku] Ignored in main chat: $content');
+                return; 
               }
-              // debugPrint('[Danmaku] Ignored in main chat: $content');
-              return; 
-            }
 
             if (role == 'chat_summary') {
               setState(() {
@@ -1620,6 +1805,23 @@ ${capped.map((e) => '- $e').join('\n')}
   }
 
   // 开始自动麦克风监听
+  Future<InputDevice?> _resolveSttMicDevice(
+    AudioRecorder recorder,
+    String? deviceId,
+  ) async {
+    final trimmed = deviceId?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    try {
+      final devices = await recorder.listInputDevices();
+      for (final device in devices) {
+        if (device.id == trimmed) return device;
+      }
+    } catch (e) {
+      logger.warning('获取前端麦克风设备失败，将回退到默认设备: $e');
+    }
+    return InputDevice(id: trimmed, label: trimmed);
+  }
+
   Future<void> _startAutoMicListening() async {
     if (!mounted || _autoMicListeningActive || _isLoading) return;
 
@@ -1636,8 +1838,11 @@ ${capped.map((e) => '- $e').join('\n')}
         final path =
             '${tempDir.path}/auto_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
         
+        final settings = SettingsScope.of(context).settings;
+        final device =
+            await _resolveSttMicDevice(_autoMicRecorder, settings.sttMicDeviceId);
         await _autoMicRecorder.start(
-          const RecordConfig(encoder: AudioEncoder.wav),
+          RecordConfig(encoder: AudioEncoder.wav, device: device),
           path: path,
         );
         
@@ -1976,7 +2181,12 @@ ${capped.map((e) => '- $e').join('\n')}
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speak(displayContent, ttsProvider, source: 'assistant');
+              _speakWithMode(
+                displayContent,
+                ttsProvider,
+                settings,
+                source: 'assistant',
+              );
             }
           }
 
@@ -2033,7 +2243,12 @@ ${capped.map((e) => '- $e').join('\n')}
           if (settings.enableTts) {
             final ttsProvider = _resolveAudioProvider(AiProviderCategory.tts);
             if (ttsProvider != null) {
-              _brain.speakChunks(parts, ttsProvider, source: 'assistant');
+              _speakWithModeParts(
+                parts,
+                ttsProvider,
+                settings,
+                source: 'assistant',
+              );
             }
           }
 
@@ -2114,6 +2329,144 @@ ${capped.map((e) => '- $e').join('\n')}
       }
     }
     return result;
+  }
+
+  static final RegExp _ttsSentenceDelimiter = RegExp(r'[。！？!?\.;；…]');
+  static final RegExp _ttsTokenPattern =
+      RegExp(r'[\u4e00-\u9fff]|[A-Za-z0-9]+|[^\s]');
+  static final RegExp _ttsCjkPattern = RegExp(r'[\u4e00-\u9fff]');
+  static final RegExp _ttsPunctuation =
+      RegExp(r'^[,.;:!?，。！？；：…、]$');
+
+  List<String> _splitTtsSentence(String text) {
+    final normalized = text.replaceAll('\r\n', '\n').trim();
+    if (normalized.isEmpty) return [];
+    final result = <String>[];
+    final buffer = StringBuffer();
+
+    void flush() {
+      final segment =
+          buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (segment.isNotEmpty) {
+        result.add(segment);
+      }
+      buffer.clear();
+    }
+
+    for (var i = 0; i < normalized.length; i++) {
+      final ch = normalized[i];
+      if (ch == '\n') {
+        flush();
+        continue;
+      }
+      buffer.write(ch);
+      if (_ttsSentenceDelimiter.hasMatch(ch)) {
+        flush();
+      }
+    }
+    flush();
+    return result;
+  }
+
+  bool _isCjkToken(String token) {
+    return token.length == 1 && _ttsCjkPattern.hasMatch(token);
+  }
+
+  List<String> _splitTtsStream(String text) {
+    final normalized = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.isEmpty) return [];
+    final result = <String>[];
+    final buffer = StringBuffer();
+    var previousLatin = false;
+
+    void flush() {
+      final segment = buffer.toString().trim();
+      if (segment.isNotEmpty) {
+        result.add(segment);
+      }
+      buffer.clear();
+      previousLatin = false;
+    }
+
+    for (final match in _ttsTokenPattern.allMatches(normalized)) {
+      final token = match.group(0) ?? '';
+      if (token.isEmpty) continue;
+
+      if (_isCjkToken(token)) {
+        flush();
+        result.add(token);
+        continue;
+      }
+
+      if (_ttsPunctuation.hasMatch(token)) {
+        if (buffer.isEmpty && result.isNotEmpty) {
+          result[result.length - 1] = '${result.last}$token';
+        } else {
+          buffer.write(token);
+          flush();
+        }
+        continue;
+      }
+
+      if (buffer.isNotEmpty && previousLatin) {
+        buffer.write(' ');
+      }
+      buffer.write(token);
+      previousLatin = true;
+
+      if (buffer.length >= 8) {
+        flush();
+      }
+    }
+    flush();
+    return result;
+  }
+
+  List<String> _splitTtsForMode(String text, String mode) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return [];
+    if (mode == 'stream') {
+      return _splitTtsStream(trimmed);
+    }
+    return _splitTtsSentence(trimmed);
+  }
+
+  List<String> _expandTtsParts(List<String> parts, String mode) {
+    final result = <String>[];
+    for (final part in parts) {
+      result.addAll(_splitTtsForMode(part, mode));
+    }
+    return result;
+  }
+
+  void _speakWithMode(
+    String text,
+    AiProviderConfig ttsProvider,
+    AppSettings settings, {
+    String? source,
+  }) {
+    final parts = _splitTtsForMode(text, settings.ttsMode);
+    if (parts.isEmpty) return;
+    if (parts.length == 1) {
+      _brain.speak(parts.first, ttsProvider, source: source);
+    } else {
+      _brain.speakChunks(parts, ttsProvider, source: source);
+    }
+  }
+
+  void _speakWithModeParts(
+    List<String> parts,
+    AiProviderConfig ttsProvider,
+    AppSettings settings, {
+    String? source,
+  }) {
+    final segments = _expandTtsParts(parts, settings.ttsMode);
+    if (segments.isEmpty) return;
+    if (segments.length == 1) {
+      _brain.speak(segments.first, ttsProvider, source: source);
+    } else {
+      _brain.speakChunks(segments, ttsProvider, source: source);
+    }
   }
 
   Future<void> _attachImage() async {
@@ -2298,7 +2651,7 @@ ${capped.map((e) => '- $e').join('\n')}
               expressionAgent: _brain.expressionAgent,
               controller: _live2dController,
               floatingUi: true,
-              showControls: true,
+              showControls: false,
             ),
           ),
       ],
@@ -2384,9 +2737,8 @@ ${capped.map((e) => '- $e').join('\n')}
       );
     }
 
-    // Initiative Mode Toggle (搭话模式)
+    // Proactive Chat Toggle (后端搭话)
     if (settings.agentEnabled) {
-      final initiativeDisabled = settings.enablePythonBackend;
       widgets.add(
         Container(
           decoration: BoxDecoration(
@@ -2396,54 +2748,46 @@ ${capped.map((e) => '- $e').join('\n')}
               BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: initiativeDisabled
-                  ? () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('后端模式下由后端负责搭话/主动循环'),
-                          duration: Duration(seconds: 1),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }
-                  : () {
-                final newValue = !settings.ai.initiativeMode;
-                settingsController.updateAiSettings(settings.ai.copyWith(initiativeMode: newValue));
-                
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(newValue ? '搭话模式已开启' : '搭话模式已关闭'),
-                    duration: const Duration(seconds: 1),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.record_voice_over, 
-                      size: 20, 
-                      color: initiativeDisabled
-                          ? Colors.grey
-                          : (settings.ai.initiativeMode ? Colors.green : Colors.grey)
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    "搭话",
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: initiativeDisabled
-                            ? Colors.grey
-                            : (settings.ai.initiativeMode ? Colors.green : Colors.grey),
-                      ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () {
+                  final newValue = !settings.ai.initiativeMode;
+                  settingsController.updateAiSettings(
+                    settings.ai.copyWith(initiativeMode: newValue),
+                  );
+                  if (newValue) {
+                    // 立即请求一次主动搭话（无需等待后端心跳）
+                    _wsService.send({'action': 'proactive_chat'});
+                  }
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(newValue ? '搭话模式已开启' : '搭话模式已关闭'),
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
                     ),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.record_voice_over, 
+                        size: 20, 
+                        color: settings.ai.initiativeMode ? Colors.green : Colors.grey
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      "搭话",
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: settings.ai.initiativeMode ? Colors.green : Colors.grey,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -3068,6 +3412,7 @@ ${capped.map((e) => '- $e').join('\n')}
             child: CharacterDisplay(
               backendUrl: settings.pythonBackendUrl,
               expressionAgent: _brain.expressionAgent,
+              showControls: false,
             ),
           ),
 
@@ -3935,8 +4280,23 @@ class _VoiceInputButtonState extends State<_VoiceInputButton> {
         final tempDir = await getTemporaryDirectory();
         final path =
             '${tempDir.path}/voice_input_${DateTime.now().millisecondsSinceEpoch}.wav';
+        final settings = SettingsScope.of(context).settings;
+        InputDevice? device;
+        final deviceId = settings.sttMicDeviceId?.trim() ?? '';
+        if (deviceId.isNotEmpty) {
+          try {
+            final devices = await _recorder.listInputDevices();
+            device = devices.firstWhere(
+              (d) => d.id == deviceId,
+              orElse: () => InputDevice(id: deviceId, label: deviceId),
+            );
+          } catch (e) {
+            logger.warning('获取前端麦克风设备失败，将回退到默认设备: $e');
+            device = InputDevice(id: deviceId, label: deviceId);
+          }
+        }
         await _recorder.start(
-          const RecordConfig(encoder: AudioEncoder.wav),
+          RecordConfig(encoder: AudioEncoder.wav, device: device),
           path: path,
         );
         setState(() => _isRecording = true);

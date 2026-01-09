@@ -33,29 +33,58 @@ function init_app(){
 
     // Helper to safely get element
     const getEl = (id) => document.getElementById(id);
+    const createStubClassList = () => ({
+        add: () => {},
+        remove: () => {},
+        toggle: () => false,
+        contains: () => false,
+    });
+    const createStubElement = () => ({
+        style: {},
+        classList: createStubClassList(),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        setAttribute: () => {},
+        removeAttribute: () => {},
+        appendChild: () => {},
+        remove: () => {},
+        querySelector: () => null,
+        focus: () => {},
+        blur: () => {},
+        textContent: '',
+        innerHTML: '',
+        value: '',
+        disabled: false,
+        scrollTop: 0,
+        scrollHeight: 0,
+    });
+    const ensureEl = (el) => el || createStubElement();
 
-    const micButton = getEl('micButton');
-    const muteButton = getEl('muteButton');
-    const screenButton = getEl('screenButton');
-    const stopButton = getEl('stopButton');
-    const resetSessionButton = getEl('resetSessionButton');
+    const micButton = ensureEl(getEl('micButton'));
+    const muteButton = ensureEl(getEl('muteButton'));
+    const screenButton = ensureEl(getEl('screenButton'));
+    const stopButton = ensureEl(getEl('stopButton'));
+    const resetSessionButton = ensureEl(getEl('resetSessionButton'));
     const statusElement = getEl('status') || { textContent: '' };
     const chatContainer = getEl('chat-container');
     const chatContentWrapper = getEl('chat-content-wrapper');
-    const textInputBox = getEl('textInputBox');
-    const textSendButton = getEl('textSendButton');
-    const screenshotButton = getEl('screenshotButton');
-    const screenshotThumbnailContainer = getEl('screenshot-thumbnail-container');
-    const screenshotsList = getEl('screenshots-list');
-    const screenshotCount = getEl('screenshot-count');
-    const clearAllScreenshots = getEl('clear-all-screenshots');
+    const textInputBox = ensureEl(getEl('textInputBox'));
+    const textSendButton = ensureEl(getEl('textSendButton'));
+    const screenshotButton = ensureEl(getEl('screenshotButton'));
+    const screenshotThumbnailContainer = ensureEl(getEl('screenshot-thumbnail-container'));
+    const screenshotsList = ensureEl(getEl('screenshots-list'));
+    const screenshotCount = ensureEl(getEl('screenshot-count'));
+    const clearAllScreenshots = ensureEl(getEl('clear-all-screenshots'));
     const overlayAiSubtitle = getEl('live2d-subtitle-ai');
-    const overlayUserSubtitle = getEl('live2d-subtitle-user');
     const overlayBubble = getEl('live2d-speech-bubble');
-    const textInputArea = getEl('text-input-area');
+    const liteToggleBubble = getEl('live2d-lite-toggle-bubble');
+    const liteToggleSubtitle = getEl('live2d-lite-toggle-subtitle');
+    const liteRefresh = getEl('live2d-lite-refresh');
+    const textInputArea = ensureEl(getEl('text-input-area'));
     const isLiteMode = !chatContainer;
     window.live2dLiteMode = isLiteMode;
     const urlParams = new URLSearchParams(window.location.search);
+    const liteControlsEnabled = urlParams.get('controls') === 'true';
     if (urlParams.get('capture') === 'flutter') {
         window.LIVE2D_SCREEN_CAPTURE_VIA_FLUTTER = true;
     }
@@ -100,17 +129,10 @@ function init_app(){
     let isSwitchingMode = false; // 新增：模式切换标志
     let sessionStartedResolver = null; // 用于等待 session_started 消息
     
-    // 主动搭话功能相关
-    let proactiveChatEnabled = false;
-    let proactiveChatTimer = null;
-    let proactiveChatBackoffLevel = 0; // 退避级别：0=30s, 1=1min, 2=2min, 3=4min, etc.
-    const PROACTIVE_CHAT_BASE_DELAY = 30000; // 30秒基础延迟
-    
     // Focus模式相关（兼容原有的focus_mode）
     let focusModeEnabled = (typeof focus_mode !== 'undefined' && focus_mode === true) ? true : false;
     
     // 暴露到全局作用域，供 live2d.js 等其他模块访问
-    window.proactiveChatEnabled = proactiveChatEnabled;
     window.focusModeEnabled = focusModeEnabled;
 
     const readBool = (key, fallback) => {
@@ -130,17 +152,8 @@ function init_app(){
     focusModeEnabled = readBool('live2d.focusModeEnabled', focusModeEnabled);
     window.focusModeEnabled = focusModeEnabled;
 
-    try {
-        const raw = localStorage.getItem('proactiveChatEnabled');
-        if (raw === 'true' || raw === 'false') {
-            proactiveChatEnabled = raw === 'true';
-            window.proactiveChatEnabled = proactiveChatEnabled;
-        }
-    } catch (_) {}
-
     const overlayStorageKeys = {
         aiSubtitle: 'live2d.subtitle.ai',
-        userSubtitle: 'live2d.subtitle.user',
         bubble: 'live2d.bubble',
         tts: 'live2d.tts.enabled',
         voiceChannelMonitor: 'live2d.voiceChannelMonitor',
@@ -149,23 +162,18 @@ function init_app(){
 
     const overlayState = {
         aiSubtitle: readBool(overlayStorageKeys.aiSubtitle, true),
-        userSubtitle: readBool(overlayStorageKeys.userSubtitle, true),
         bubble: readBool(overlayStorageKeys.bubble, true),
         tts: readBool(overlayStorageKeys.tts, true),
         voiceChannelMonitor: readBool(overlayStorageKeys.voiceChannelMonitor, false),
         screenshotEnabled: readBool(overlayStorageKeys.screenshotEnabled, true),
     };
     let lastAiSubtitle = '';
-    let lastUserSubtitle = '';
     let bubbleHideTimer = null;
     let bubbleRaf = 0;
 
     const applyOverlayVisibility = () => {
         if (overlayAiSubtitle) {
             overlayAiSubtitle.style.display = overlayState.aiSubtitle && lastAiSubtitle ? 'block' : 'none';
-        }
-        if (overlayUserSubtitle) {
-            overlayUserSubtitle.style.display = overlayState.userSubtitle && lastUserSubtitle ? 'block' : 'none';
         }
         if (overlayBubble && !overlayState.bubble) {
             overlayBubble.classList.remove('show');
@@ -189,6 +197,38 @@ function init_app(){
         if (floatingBtn) {
             floatingBtn.style.opacity = enabled ? '1' : '0.5';
             floatingBtn.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+    }
+
+    const setLiteButtonActive = (btn, active, labelOn, labelOff) => {
+        if (!btn) return;
+        btn.dataset.active = active ? 'true' : 'false';
+        if (labelOn && labelOff) {
+            btn.textContent = active ? labelOn : labelOff;
+        }
+    };
+
+    const syncLiteControls = () => {
+        if (!liteControlsEnabled) return;
+        setLiteButtonActive(liteToggleBubble, overlayState.bubble, '气泡:开', '气泡:关');
+        setLiteButtonActive(liteToggleSubtitle, overlayState.aiSubtitle, '字幕:开', '字幕:关');
+    };
+
+    if (liteControlsEnabled) {
+        if (liteToggleBubble) {
+            liteToggleBubble.addEventListener('click', () => {
+                setOverlayState('bubble', !overlayState.bubble);
+            });
+        }
+        if (liteToggleSubtitle) {
+            liteToggleSubtitle.addEventListener('click', () => {
+                setOverlayState('aiSubtitle', !overlayState.aiSubtitle);
+            });
+        }
+        if (liteRefresh) {
+            liteRefresh.addEventListener('click', () => {
+                window.location.reload();
+            });
         }
     }
 
@@ -216,6 +256,7 @@ function init_app(){
         if (key === 'screenshotEnabled') {
             applyScreenshotState();
         }
+        syncLiteControls();
     };
 
     window.setLive2dOverlayState = (key, value) => setOverlayState(key, value);
@@ -223,14 +264,40 @@ function init_app(){
     applyOverlayVisibility();
     applyScreenshotState();
     window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !overlayState.tts;
+    syncLiteControls();
 
     const normalizeSubtitleText = (text) => {
         if (!text) return '';
         return text.replace(/\s+/g, ' ').trim();
     };
 
+    const sanitizeSubtitleText = (text) => {
+        let cleaned = normalizeSubtitleText(text);
+        if (!cleaned) return '';
+        cleaned = cleaned.replace(/\[SPLIT\]/g, ' ');
+        cleaned = cleaned.replace(/\[END_OF_SPEECH\]/g, ' ');
+        cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+        cleaned = cleaned.replace(/`([^`]*)`/g, '$1');
+        cleaned = cleaned.replace(/[>*#_`]/g, ' ');
+        cleaned = cleaned.replace(/\(.*?\)/g, ' ');
+        cleaned = cleaned.replace(/（.*?）/g, ' ');
+        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+        return cleaned;
+    };
+
+    const shouldIgnoreSubtitleText = (text) => {
+        const raw = (text || '').toString();
+        if (!raw.trim()) return true;
+        const lowered = raw.toLowerCase();
+        if (lowered.includes('[system') || lowered.includes('system notification')) return true;
+        if (lowered.includes('[tool') || lowered.includes('tool output') || lowered.includes('tool result')) return true;
+        if (raw.includes('【环境感知更新】') || raw.includes('心跳')) return true;
+        return false;
+    };
+
     const updateAiSubtitle = (text, isNewMessage) => {
-        const normalized = normalizeSubtitleText(text);
+        if (shouldIgnoreSubtitleText(text)) return;
+        const normalized = sanitizeSubtitleText(text);
         if (!normalized) return;
         if (isNewMessage) {
             lastAiSubtitle = normalized;
@@ -242,19 +309,6 @@ function init_app(){
             overlayAiSubtitle.style.display = 'block';
         }
         updateSpeechBubble(lastAiSubtitle);
-    };
-
-    const updateUserSubtitle = (text, source) => {
-        const normalized = normalizeSubtitleText(text);
-        if (!normalized) return;
-        const prefix = source === 'voice_channel'
-            ? '语音频道'
-            : (source === 'text' ? '文本输入' : '麦克风');
-        lastUserSubtitle = `【${prefix}】 ${normalized}`;
-        if (overlayUserSubtitle && overlayState.userSubtitle) {
-            overlayUserSubtitle.textContent = lastUserSubtitle;
-            overlayUserSubtitle.style.display = 'block';
-        }
     };
 
     const updateSpeechBubblePosition = () => {
@@ -286,7 +340,8 @@ function init_app(){
 
     const updateSpeechBubble = (text) => {
         if (!overlayBubble || !overlayState.bubble) return;
-        const normalized = normalizeSubtitleText(text);
+        if (shouldIgnoreSubtitleText(text)) return;
+        const normalized = sanitizeSubtitleText(text);
         if (!normalized) return;
         overlayBubble.textContent = normalized;
         overlayBubble.classList.add('show');
@@ -320,19 +375,30 @@ function init_app(){
         setFloatingButtonActive('text', !textInputArea.classList.contains('hidden'));
     }
 
-    const setLive2dTtsEnabled = (flag) => {
+    const setLive2dTtsEnabled = (flag, options = {}) => {
         setOverlayState('tts', flag);
         setFloatingButtonActive('tts', !!flag);
-        if (socket && socket.readyState === WebSocket.OPEN) {
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (shouldBroadcast && socket && socket.readyState === WebSocket.OPEN) {
             try {
                 socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: !!flag }));
             } catch (_) {}
         }
     };
 
-    const setVoiceChannelMonitorEnabled = async (flag) => {
+    const applyVoiceChannelState = (flag) => {
         setOverlayState('voiceChannelMonitor', flag);
         setFloatingButtonActive('voice', !!flag);
+    };
+
+    const setVoiceChannelMonitorEnabled = async (flag, options = {}) => {
+        applyVoiceChannelState(flag);
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (!shouldBroadcast) return;
         try {
             await fetch('/api/live2d/agent/voice_channel_monitor', {
                 method: 'POST',
@@ -372,52 +438,6 @@ function init_app(){
     window.setVoiceChannelMonitorEnabled = setVoiceChannelMonitorEnabled;
     window.setLive2dScreenshotEnabled = setLive2dScreenshotEnabled;
     window.toggleTextInputPanel = toggleTextInputPanel;
-
-    function stopProactiveChatSchedule() {
-        if (proactiveChatTimer) {
-            clearTimeout(proactiveChatTimer);
-            proactiveChatTimer = null;
-        }
-    }
-
-    function scheduleProactiveChat() {
-        stopProactiveChatSchedule();
-        if (!proactiveChatEnabled) return;
-        if (isRecording) return;
-        const delay = Math.min(PROACTIVE_CHAT_BASE_DELAY * Math.pow(2, proactiveChatBackoffLevel), 8 * 60 * 1000);
-        proactiveChatTimer = setTimeout(() => {
-            if (!proactiveChatEnabled) return;
-            if (isRecording) return;
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            try {
-                socket.send(JSON.stringify({ action: 'proactive_chat' }));
-            } catch (_) {}
-            proactiveChatBackoffLevel = Math.min(proactiveChatBackoffLevel + 1, 6);
-            scheduleProactiveChat();
-        }, delay);
-    }
-
-    function resetProactiveChatBackoff() {
-        proactiveChatBackoffLevel = 0;
-        scheduleProactiveChat();
-    }
-
-    function setProactiveChatEnabled(flag) {
-        proactiveChatEnabled = !!flag;
-        window.proactiveChatEnabled = proactiveChatEnabled;
-        try {
-            localStorage.setItem('proactiveChatEnabled', proactiveChatEnabled ? 'true' : 'false');
-        } catch (_) {}
-        if (proactiveChatEnabled) {
-            resetProactiveChatBackoff();
-        } else {
-            stopProactiveChatSchedule();
-        }
-    }
-
-    window.resetProactiveChatBackoff = resetProactiveChatBackoff;
-    window.stopProactiveChatSchedule = stopProactiveChatSchedule;
-    window.setProactiveChatEnabled = setProactiveChatEnabled;
 
     const requestFlutterScreenCapture = () => {
         if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -463,10 +483,6 @@ function init_app(){
             }, HEARTBEAT_INTERVAL);
             console.log('心跳保活机制已启动');
 
-            if (proactiveChatEnabled) {
-                resetProactiveChatBackoff();
-            }
-
             if (overlayState.tts !== undefined) {
                 try {
                     socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: overlayState.tts }));
@@ -488,10 +504,11 @@ function init_app(){
 
                 if (response.type === 'gemini_response') {
                     // 检查是否是新消息的开始
-                    const isNewMessage = response.isNewMessage || false;
+                    const isNewMessage = response.isNewMessage === undefined ? true : !!response.isNewMessage;
                     const reasoning = response.reasoning_content || null;
                     const toolCalls = response.tool_calls || null;
                     appendMessage(response.text || '', 'gemini', isNewMessage, reasoning, toolCalls);
+                    updateAiSubtitle(response.text || '', isNewMessage);
                     
                     // Reverted client-side TTS trigger
                     // Backend will broadcast 'audio' events
@@ -502,6 +519,7 @@ function init_app(){
                     const stateText = isActive ? '开始监听' : '停止监听';
                     appendMessage(`语音频道 ${channelId} ${stateText}`, 'chat_normal', true);
                     updateStatus(`语音频道 ${channelId} ${stateText}`, 'processing');
+                    setVoiceChannelMonitorEnabled(isActive, { broadcast: false });
 
                 } else if (response.type === 'voice_channel_transcript') {
                     const channelId = response.channel_id || '';
@@ -509,15 +527,22 @@ function init_app(){
                     const text = response.text || '';
                     const prefix = speaker ? `【语音频道 ${channelId}】${speaker}: ` : `【语音频道 ${channelId}】`;
                     appendMessage(`${prefix}${text}`, 'chat_normal', true);
-                    updateUserSubtitle(`${speaker ? speaker + ': ' : ''}${text}`, 'voice_channel');
                 } else if (response.type === 'screen_capture_toggle') {
                     const enabled = response.enabled !== false;
                     setLive2dScreenshotEnabled(enabled, { broadcast: false });
                     updateStatus(enabled ? '截图已开启' : '截图已关闭', 'normal');
+                } else if (response.type === 'tts_toggle') {
+                    const enabled = response.enabled !== false;
+                    setLive2dTtsEnabled(enabled, { broadcast: false });
+                    updateStatus(enabled ? 'TTS 已开启' : 'TTS 已关闭', 'normal');
 
                 } else if (response.type === 'chat_message') {
                     // Generic chat message (User, Chat, SC, Agent)
                     appendMessage(response.text, response.sender || 'chat_normal', true);
+                    const sender = (response.sender || '').toString().toLowerCase();
+                    if (sender === 'assistant' || sender === 'ai' || sender === 'gemini') {
+                        updateAiSubtitle(response.text || '', true);
+                    }
 
                 } else if (response.type === 'user_transcript') {
                     // 处理用户语音转录，显示在聊天界面
@@ -651,10 +676,6 @@ function init_app(){
                         }, 100);
                     }
                     
-                    // AI回复完成后，重置主动搭话计时器（如果已开启且在文本模式）
-                    if (proactiveChatEnabled && !isRecording) {
-                        resetProactiveChatBackoff();
-                    }
                 } else if (response.type === 'session_started') {
                     console.log('收到session_started事件，模式:', response.input_mode);
                     // 解析 session_started Promise
@@ -1160,8 +1181,6 @@ function init_app(){
             resetSessionButton.disabled = false;
             statusElement.textContent = '正在语音...';
             
-            // 开始录音时，停止主动搭话定时器
-            stopProactiveChatSchedule();
         } catch (err) {
             console.error('获取麦克风权限失败:', err);
             statusElement.textContent = '无法访问麦克风';
@@ -1204,14 +1223,11 @@ function init_app(){
         stopButton.disabled = true;
         resetSessionButton.disabled = false;
         
-        // 停止录音后，重置主动搭话退避级别并开始定时
-        if (proactiveChatEnabled) {
-            resetProactiveChatBackoff();
-        }
-        
         // 显示文本输入区
         const textInputArea = document.getElementById('text-input-area');
-        textInputArea.classList.remove('hidden');
+        if (textInputArea) {
+            textInputArea.classList.remove('hidden');
+        }
         
         // 如果是从语音模式切换回来，显示待机状态
         // [Refactor] Use 'Firefly' as default name
@@ -1251,6 +1267,30 @@ function init_app(){
           return err;
         }
       }
+    }
+
+    let screenShareMode = null;
+    let screenShareTimer = null;
+
+    function startScreenVideoStreaming(stream, source) {
+        if (!stream) return;
+        screenShareMode = source || 'screen';
+        if (screenShareTimer) {
+            clearInterval(screenShareTimer);
+            screenShareTimer = null;
+        }
+    }
+
+    function stopScreening() {
+        if (screenShareTimer) {
+            clearInterval(screenShareTimer);
+            screenShareTimer = null;
+        }
+        screenShareMode = null;
+        if (screenCaptureStream) {
+            screenCaptureStream.getTracks().forEach(track => track.stop());
+            screenCaptureStream = null;
+        }
     }
 
     async function startScreenSharing(){ // 分享屏幕，按钮on click
@@ -1301,7 +1341,7 @@ function init_app(){
             setFloatingButtonActive('screen', true);
 
             // 当用户停止共享屏幕时
-            screenCaptureStream.getVideoTracks()[0].onended = stopScreening;
+            screenCaptureStream.getVideoTracks()[0].onended = stopScreenSharing;
 
             // 获取麦克风流
             if (!isRecording) statusElement.textContent = '没开麦啊喂！';
@@ -1642,10 +1682,6 @@ function init_app(){
                 updateUserSubtitle(text, 'text');
                 textInputBox.value = '';
                 
-                // Reset proactive chat timer
-                if (proactiveChatEnabled) {
-                    resetProactiveChatBackoff();
-                }
             }
         };
         

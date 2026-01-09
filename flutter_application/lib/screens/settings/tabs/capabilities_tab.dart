@@ -55,12 +55,16 @@ class CapabilitiesTab extends StatelessWidget {
                             '提供高级逻辑推理、向量记忆与复杂任务处理能力',
                             style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
+                          const Text(
+                            '已固定启用（仅后端模式）',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
                         ],
                       ),
                     ),
                     Switch(
-                      value: settings.enablePythonBackend,
-                      onChanged: (v) => controller.setEnablePythonBackend(v),
+                      value: true,
+                      onChanged: null,
                     ),
                   ],
                 ),
@@ -79,8 +83,8 @@ class CapabilitiesTab extends StatelessWidget {
                   ),
                 ),
                 SwitchListTile(
-                  title: const Text('搭话模式 (Initiative Mode)'),
-                  subtitle: const Text('允许 AI 主动发起对话 (消耗 Tokens)'),
+                  title: const Text('搭话模式 (后端心跳)'),
+                  subtitle: const Text('由后端心跳触发主动对话（消耗 Tokens）'),
                   value: settings.ai.initiativeMode,
                   onChanged: (v) => controller.updateAiSettings(settings.ai.copyWith(initiativeMode: v)),
                   secondary: Icon(
@@ -88,40 +92,6 @@ class CapabilitiesTab extends StatelessWidget {
                     color: settings.ai.initiativeMode ? Theme.of(context).colorScheme.primary : Colors.grey,
                   ),
                 ),
-                if (settings.ai.initiativeMode)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                         Row(
-                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                           children: [
-                             Text(
-                               '弹幕批处理间隔 (Danmaku Batch Interval)', 
-                               style: Theme.of(context).textTheme.bodyMedium
-                             ),
-                             Text(
-                               '${settings.ai.danmakuBatchInterval} 秒', 
-                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)
-                             ),
-                           ],
-                         ),
-                         Slider(
-                           value: settings.ai.danmakuBatchInterval.toDouble().clamp(5.0, 300.0),
-                           min: 5.0,
-                           max: 300.0,
-                           divisions: 59,
-                           label: '${settings.ai.danmakuBatchInterval}s',
-                           onChanged: (v) => controller.setAiDanmakuBatchInterval(v.toInt()),
-                         ),
-                         const Text(
-                           '设置 AI 处理弹幕的最小间隔。间隔越短反应越快，但消耗更多 Token。',
-                           style: TextStyle(fontSize: 12, color: Colors.grey),
-                         ),
-                      ],
-                    ),
-                  ),
               ],
             ),
           ),
@@ -420,11 +390,9 @@ class CapabilitiesTab extends StatelessWidget {
                 value: settings.enableFloatingWindow,
                 onChanged: (v) => controller.setEnableFloatingWindow(v),
               ),
-              SwitchListTile(
-                title: const Text('启用 AI 字幕窗口'),
-                subtitle: const Text('创建独立字幕窗口（可被 OBS 捕获）'),
-                value: settings.enableAiSubtitleWindow,
-                onChanged: (v) => controller.setEnableAiSubtitleWindow(v),
+              ListTile(
+                title: const Text('AI 字幕显示'),
+                subtitle: const Text('AI 字幕已内嵌在 Live2D 窗口中'),
               ),
               SwitchListTile(
                 title: const Text('启用 用户/语音 字幕窗口'),

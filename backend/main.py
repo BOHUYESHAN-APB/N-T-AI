@@ -517,6 +517,12 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
     deep_research = deep_research_str.lower() in ["true", "1", "yes"]
     suppress_inner_monologue_str = raw_request.headers.get("X-Suppress-Inner-Monologue", "false")
     suppress_inner_monologue = suppress_inner_monologue_str.lower() in ["true", "1", "yes"]
+    strict_no_markdown_str = raw_request.headers.get("X-Strict-No-Markdown", "false")
+    strict_no_markdown = strict_no_markdown_str.lower() in ["true", "1", "yes"]
+    system_state.update_state("chat_mode", chat_mode)
+    system_state.update_state("persona_mode", persona_mode)
+    system_state.update_state("suppress_inner_monologue", suppress_inner_monologue)
+    system_state.update_state("strict_no_markdown", strict_no_markdown)
     user_nickname = raw_request.headers.get("X-User-Nickname")
     if user_nickname:
         try:
@@ -710,6 +716,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                         chat_mode=chat_mode,
                         deep_research=deep_research,
                         suppress_inner_monologue=suppress_inner_monologue,
+                        strict_no_markdown=strict_no_markdown,
                         user_nickname=user_nickname,
                         system_prompt_override=system_prompt_override,
                         assistant_name=assistant_name,
@@ -756,6 +763,7 @@ async def chat_completions(request: OpenAIRequest, raw_request: Request, backgro
                 chat_mode=chat_mode,
                 deep_research=deep_research,
                 suppress_inner_monologue=suppress_inner_monologue,
+                strict_no_markdown=strict_no_markdown,
                 user_nickname=user_nickname,
                 system_prompt_override=system_prompt_override,
                 assistant_name=assistant_name,

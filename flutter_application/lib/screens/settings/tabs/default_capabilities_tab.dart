@@ -30,14 +30,12 @@ class _DefaultCapabilitiesTabState extends State<DefaultCapabilitiesTab> {
           secondary: const Icon(Icons.psychology),
         ),
         SwitchListTile(
-          title: const Text('搭话模式 (Initiative Mode)'),
-          subtitle: const Text('允许 AI 主动发起对话 (消耗 Tokens)'),
-          value: settings.agentEnabled, // Using agentEnabled as proxy for Initiative for now? Or proactiveChatEnabled
-          // Note: In CapabilitiesTab, there was no direct "Initiative Mode" switch linked to a specific setting other than agentEnabled.
-          // However, in Live2D JS there is 'proactiveChatEnabled'. 
-          // Let's assume 'agentEnabled' enables the agentic behavior including initiative.
-          onChanged: (v) => controller.setAgentEnabled(v), 
-          secondary: const Icon(Icons.chat_bubble_outline),
+          title: const Text('搭话模式 (后端心跳)'),
+          subtitle: const Text('由后端心跳触发主动对话 (消耗 Tokens)'),
+          value: settings.ai.initiativeMode,
+          onChanged: (v) =>
+              controller.updateAiSettings(settings.ai.copyWith(initiativeMode: v)),
+          secondary: const Icon(Icons.record_voice_over),
         ),
 
         const Divider(height: 32),

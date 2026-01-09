@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_application/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
+import 'package:record/record.dart';
 import '../../../services/logger_service.dart';
 import '../../../settings/settings_scope.dart';
 import '../../../settings/settings.dart';
@@ -21,9 +22,12 @@ class GeneralTab extends StatefulWidget {
 class _GeneralTabState extends State<GeneralTab> {
   bool _didInit = false;
   bool _loadingAudioDevices = false;
+  bool _loadingMicDevices = false;
   String? _audioDevicesError;
+  String? _micDevicesError;
   List<Map<String, dynamic>> _inputDevices = const [];
   List<Map<String, dynamic>> _outputDevices = const [];
+  List<InputDevice> _micDevices = const [];
   int? _defaultInputDeviceIndex;
   int? _defaultOutputDeviceIndex;
   Map<int, String> _hostApiNames = const {};
@@ -205,6 +209,38 @@ class _GeneralTabState extends State<GeneralTab> {
     return items;
   }
 
+  List<DropdownMenuItem<String?>> _buildMicDeviceItems(String defaultLabel) {
+    final items = <DropdownMenuItem<String?>>[
+      DropdownMenuItem<String?>(
+        value: null,
+        child: Text(
+          defaultLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+        ),
+      ),
+    ];
+    final seen = <String>{};
+    for (final d in _micDevices) {
+      final id = d.id.trim();
+      if (id.isEmpty || seen.contains(id)) continue;
+      seen.add(id);
+      items.add(
+        DropdownMenuItem<String?>(
+          value: id,
+          child: Text(
+            _formatMicDeviceLabel(d),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            softWrap: false,
+          ),
+        ),
+      );
+    }
+    return items;
+  }
+
   List<DropdownMenuItem<String?>> _buildProviderItems(
     AiProviderCategory category,
     String defaultLabel,
@@ -318,12 +354,35 @@ class _GeneralTabState extends State<GeneralTab> {
     return '[$idx] $name $tagText$defaultText'.trim();
   }
 
+  String _formatMicDeviceLabel(InputDevice d) {
+    final id = d.id.trim();
+    final labelRaw = d.label.trim();
+    final name = labelRaw.isNotEmpty ? labelRaw : id;
+    final lowerName = name.toLowerCase();
+    final tags = <String>[];
+    final isVirtual = lowerName.contains('virtual') ||
+        lowerName.contains('cable') ||
+        lowerName.contains('vb-audio') ||
+        lowerName.contains('voicemeeter') ||
+        lowerName.contains('loopback') ||
+        lowerName.contains('blackhole');
+    if (isVirtual) {
+      tags.add('虚拟');
+    }
+    final suffix = (labelRaw.isNotEmpty && id.isNotEmpty && labelRaw != id)
+        ? ' ($id)'
+        : '';
+    final tagText = tags.isEmpty ? '' : '〔${tags.join(' / ')}〕';
+    return '$name$suffix $tagText'.trim();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_didInit) return;
     _didInit = true;
     _refreshAudioDevices();
+    _refreshMicDevices();
   }
 
   Future<void> _refreshAudioDevices() async {
@@ -425,6 +484,36 @@ class _GeneralTabState extends State<GeneralTab> {
         _audioDevicesError = e.toString();
         _loadingAudioDevices = false;
       });
+    }
+  }
+
+  Future<void> _refreshMicDevices() async {
+    if (mounted) {
+      setState(() {
+        _loadingMicDevices = true;
+        _micDevicesError = null;
+      });
+    }
+
+    final recorder = AudioRecorder();
+    try {
+      final devices = await recorder.listInputDevices();
+      if (!mounted) return;
+      setState(() {
+        _micDevices = devices;
+        _loadingMicDevices = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _micDevices = const [];
+        _micDevicesError = e.toString();
+        _loadingMicDevices = false;
+      });
+    } finally {
+      try {
+        await recorder.dispose();
+      } catch (_) {}
     }
   }
 
@@ -674,6 +763,13 @@ class _GeneralTabState extends State<GeneralTab> {
             ))
         ? s.sttLoopbackDeviceIndex
         : null;
+    final savedMicId = s.sttMicDeviceId?.trim() ?? '';
+    final micIds = _micDevices.map((d) => d.id).toSet();
+    final safeSttMicDeviceId =
+        savedMicId.isNotEmpty && micIds.contains(savedMicId)
+            ? savedMicId
+            : null;
+    final micMissing = savedMicId.isNotEmpty && !micIds.contains(savedMicId);
 
     final basicSectionChildren = <Widget>[
       SwitchListTile(
@@ -998,6 +1094,38 @@ class _GeneralTabState extends State<GeneralTab> {
           subtitle: const Text('在对话结束后自动开启麦克风录音 (运行在前端设备)'),
           value: s.autoMicListening,
           onChanged: (v) => controller.setAutoMicListening(v),
+        ),
+      if (s.enableStt)
+        ListTile(
+          leading: const Icon(Icons.mic),
+          title: const Text('前端麦克风设备'),
+          subtitle: _loadingMicDevices
+              ? const Text('正在获取设备列表…')
+              : (_micDevicesError != null
+                  ? Text('获取失败：$_micDevicesError')
+                  : Text(
+                      micMissing
+                          ? '已保存设备不可用，已回退默认'
+                          : '默认使用系统麦克风（与回环采集互斥）',
+                    )),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: '刷新',
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: _loadingMicDevices ? null : _refreshMicDevices,
+              ),
+              DropdownButton<String?>(
+                value: safeSttMicDeviceId,
+                underline: const SizedBox(),
+                onChanged: _loadingMicDevices
+                    ? null
+                    : (v) => controller.setSttMicDeviceId(v),
+                items: _buildMicDeviceItems('默认（系统默认麦克风）'),
+              ),
+            ],
+          ),
         ),
       const Divider(height: 1, indent: 72),
       SwitchListTile(

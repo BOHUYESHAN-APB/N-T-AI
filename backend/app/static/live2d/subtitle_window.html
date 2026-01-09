@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Subtitle Window</title>
+  <title>用户字幕窗口</title>
   <style>
     html, body {
       margin: 0;
@@ -47,7 +47,7 @@
       position: absolute;
       top: 10px;
       left: 12px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       border-radius: 10px;
       font-size: 11px;
       font-weight: 600;
@@ -56,35 +56,38 @@
       color: #f8fafc;
     }
 
-    .mode-ai #subtitle-card {
-      border-left: 4px solid #7dd3fc;
+    .kind-mic #subtitle-card {
+      border-left: 4px solid #38bdf8;
     }
 
-    .mode-user #subtitle-card {
-      border-left: 4px solid #f59e0b;
+    .kind-voice #subtitle-card {
+      border-left: 4px solid #34d399;
     }
   </style>
 </head>
 <body>
   <div id="subtitle-wrap">
-    <div id="subtitle-label">SUBTITLE</div>
+    <div id="subtitle-label">用户 / 语音</div>
     <div id="subtitle-card"></div>
   </div>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const mode = (params.get('mode') || 'ai').toLowerCase();
     const subtitleWrap = document.getElementById('subtitle-wrap');
     const subtitleCard = document.getElementById('subtitle-card');
     const subtitleLabel = document.getElementById('subtitle-label');
-
-    subtitleWrap.classList.add(mode === 'user' ? 'mode-user' : 'mode-ai');
-    subtitleLabel.textContent = mode === 'user' ? 'USER / VOICE' : 'AI';
+    subtitleWrap.classList.add('kind-mic');
 
     let currentText = '';
     function normalizeText(text) {
       if (!text) return '';
-      return String(text).replace(/\s+/g, ' ').trim();
+      let cleaned = String(text);
+      cleaned = cleaned.replace(/\[SPLIT\]/g, ' ');
+      cleaned = cleaned.replace(/\[END_OF_SPEECH\]/g, ' ');
+      cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+      cleaned = cleaned.replace(/`([^`]*)`/g, '$1');
+      cleaned = cleaned.replace(/[>*#_`]/g, ' ');
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
+      return cleaned;
     }
 
     function showText(text) {
@@ -93,53 +96,29 @@
       subtitleCard.textContent = normalized;
       subtitleCard.classList.add('show');
     }
-
-    function updateAiSubtitle(text, isNew) {
-      const normalized = normalizeText(text);
-      if (!normalized) return;
-      if (isNew) {
-        currentText = normalized;
-      } else {
-        currentText = `${currentText}${normalized}`.trim();
-      }
-      showText(currentText);
-    }
-
-    function updateUserSubtitle(text, prefix) {
+    function updateUserSubtitle(text, kind, prefix) {
       const normalized = normalizeText(text);
       if (!normalized) return;
       currentText = prefix ? `[${prefix}] ${normalized}` : normalized;
+      subtitleWrap.classList.toggle('kind-voice', kind === 'voice');
+      subtitleWrap.classList.toggle('kind-mic', kind !== 'voice');
       showText(currentText);
     }
 
     function handleMessage(message) {
       if (!message || typeof message !== 'object') return;
-
-      if (mode === 'ai') {
-        if (message.type === 'gemini_response') {
-          const isNew = message.isNewMessage === undefined ? true : !!message.isNewMessage;
-          updateAiSubtitle(message.text || '', isNew);
-        } else if (message.type === 'chat_message') {
-          const sender = (message.sender || '').toString().toLowerCase();
-          if (sender === 'assistant' || sender === 'ai' || sender === 'gemini') {
-            updateAiSubtitle(message.text || '', true);
-          }
-        }
-        return;
-      }
-
       if (message.type === 'user_transcript') {
-        updateUserSubtitle(message.text || '', 'MIC');
+        updateUserSubtitle(message.text || '', 'mic', '麦克风');
         return;
       }
 
       if (message.type === 'voice_channel_transcript') {
         const channelId = (message.channel_id || '').toString();
         const speaker = (message.speaker || '').toString();
-        const prefixParts = ['VOICE'];
+        const prefixParts = ['语音频道'];
         if (channelId) prefixParts.push(channelId);
         if (speaker) prefixParts.push(speaker);
-        updateUserSubtitle(message.text || '', prefixParts.join(' '));
+        updateUserSubtitle(message.text || '', 'voice', prefixParts.join(' '));
       }
     }
 

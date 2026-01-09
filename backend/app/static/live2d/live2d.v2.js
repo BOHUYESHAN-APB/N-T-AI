@@ -3201,6 +3201,7 @@ class Live2DManager {
         // 检查 URL 参数以识别是否处于独立浮窗模式，但允许在应用内也显示 JS 按钮
         const urlParams = new URLSearchParams(window.location.search);
         const controlsParam = urlParams.get('controls');
+        const isFloating = urlParams.get('floating') === 'true';
 
         // Logic:
         // 1. If controls explicitly set to 'false', HIDE.
@@ -3243,6 +3244,10 @@ class Live2DManager {
             padding: '10px',
             borderRadius: '30px',
         });
+        if (isFloating) {
+            buttonsContainer.dataset.pinned = 'true';
+            buttonsContainer.style.display = 'flex';
+        }
 
         // 响应式布局：窄窗口时改为竖向靠右显示，宽窗口时居中横向显示
         if (window.innerWidth <= 420) {
@@ -3547,15 +3552,13 @@ class Live2DManager {
             
             // 设置菜单内容构建...
             
-            // 先添加 Focus 模式、主动搭话、眼神跟随开关
+            // 先添加 Focus 模式、眼神跟随开关
             const settingsToggles = [
                 { id: 'focus-mode', label: '🎯 允许打断', storageKey: 'focusModeEnabled', inverted: true },
-                { id: 'proactive-chat', label: '💬 主动搭话', storageKey: 'proactiveChatEnabled' },
                 { id: 'mouse-tracking', label: '👀 眼神跟随', storageKey: 'mouseTrackingEnabled' },
                 { id: 'tts', label: 'TTS 语音播放' },
                 { id: 'voice-channel', label: '语音频道监听' },
                 { id: 'subtitle-ai-toggle', label: '字幕 · LLM' },
-                { id: 'subtitle-user-toggle', label: '字幕 · 用户/语音' },
                 { id: 'bubble-toggle', label: '对话气泡' },
                 { id: 'screen-capture-toggle', label: '截图开关' }
             ];
@@ -3585,8 +3588,6 @@ class Live2DManager {
                 // 初始化状态
                 if (toggle.id === 'focus-mode' && typeof window.focusModeEnabled !== 'undefined') {
                     checkbox.checked = toggle.inverted ? !window.focusModeEnabled : window.focusModeEnabled;
-                } else if (toggle.id === 'proactive-chat' && typeof window.proactiveChatEnabled !== 'undefined') {
-                    checkbox.checked = window.proactiveChatEnabled;
                 } else if (toggle.id === 'mouse-tracking') {
                     checkbox.checked = this.mouseTrackingEnabled;
                 } else if (toggle.id === 'tts') {
@@ -3595,8 +3596,6 @@ class Live2DManager {
                     checkbox.checked = overlayState.voiceChannelMonitor === true;
                 } else if (toggle.id === 'subtitle-ai-toggle') {
                     checkbox.checked = overlayState.aiSubtitle !== undefined ? overlayState.aiSubtitle : true;
-                } else if (toggle.id === 'subtitle-user-toggle') {
-                    checkbox.checked = overlayState.userSubtitle !== undefined ? overlayState.userSubtitle : true;
                 } else if (toggle.id === 'bubble-toggle') {
                     checkbox.checked = overlayState.bubble !== undefined ? overlayState.bubble : true;
                 } else if (toggle.id === 'screen-capture-toggle') {
@@ -3641,24 +3640,6 @@ class Live2DManager {
                             }
                             console.log(`允许打断已${isChecked ? '开启' : '关闭'}（focusModeEnabled=${actualValue}）`);
                         }
-                    } else if (toggle.id === 'proactive-chat') {
-                        const appCheckbox = document.getElementById('proactive-chat-toggle-l2d');
-                        if (appCheckbox && appCheckbox.checked !== isChecked) {
-                            appCheckbox.checked = isChecked;
-                            appCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-                        } else if (!appCheckbox) {
-                            if (typeof window.setProactiveChatEnabled === 'function') {
-                                window.setProactiveChatEnabled(isChecked);
-                            } else {
-                                window.proactiveChatEnabled = isChecked;
-                                if (isChecked && typeof window.resetProactiveChatBackoff === 'function') {
-                                    window.resetProactiveChatBackoff();
-                                } else if (!isChecked && typeof window.stopProactiveChatSchedule === 'function') {
-                                    window.stopProactiveChatSchedule();
-                                }
-                            }
-                            console.log(`主动搭话已${isChecked ? '开启' : '关闭'}`);
-                        }
                     } else if (toggle.id === 'mouse-tracking') {
                         this.mouseTrackingEnabled = isChecked;
                         console.log(`眼神跟随已${isChecked ? '开启' : '关闭'}`);
@@ -3688,10 +3669,6 @@ class Live2DManager {
                     } else if (toggle.id === 'subtitle-ai-toggle') {
                         if (typeof window.setLive2dOverlayState === 'function') {
                             window.setLive2dOverlayState('aiSubtitle', isChecked);
-                        }
-                    } else if (toggle.id === 'subtitle-user-toggle') {
-                        if (typeof window.setLive2dOverlayState === 'function') {
-                            window.setLive2dOverlayState('userSubtitle', isChecked);
                         }
                     } else if (toggle.id === 'bubble-toggle') {
                         if (typeof window.setLive2dOverlayState === 'function') {
@@ -3794,21 +3771,16 @@ class Live2DManager {
         // 如果是设置弹出框，每次显示时更新开关状态（确保与 app.js 同步）
         if (buttonId === 'settings') {
             const focusCheckbox = popup.querySelector('#live2d-focus-mode');
-            const proactiveChatCheckbox = popup.querySelector('#live2d-proactive-chat');
             const mouseTrackingCheckbox = popup.querySelector('#live2d-mouse-tracking');
             const ttsCheckbox = popup.querySelector('#live2d-tts');
             const voiceChannelCheckbox = popup.querySelector('#live2d-voice-channel');
             const subtitleAiCheckbox = popup.querySelector('#live2d-subtitle-ai-toggle');
-            const subtitleUserCheckbox = popup.querySelector('#live2d-subtitle-user-toggle');
             const bubbleCheckbox = popup.querySelector('#live2d-bubble-toggle');
             const screenCaptureCheckbox = popup.querySelector('#live2d-screen-capture-toggle');
             
             if (focusCheckbox && typeof window.focusModeEnabled !== 'undefined') {
                 // "允许打断"按钮值与 focusModeEnabled 相反
                 focusCheckbox.checked = !window.focusModeEnabled;
-            }
-            if (proactiveChatCheckbox && typeof window.proactiveChatEnabled !== 'undefined') {
-                proactiveChatCheckbox.checked = window.proactiveChatEnabled;
             }
             if (mouseTrackingCheckbox) {
                 mouseTrackingCheckbox.checked = this.mouseTrackingEnabled;
@@ -3817,10 +3789,9 @@ class Live2DManager {
             if (overlayState) {
                 if (ttsCheckbox) ttsCheckbox.checked = overlayState.tts !== undefined ? overlayState.tts : true;
                 if (voiceChannelCheckbox) voiceChannelCheckbox.checked = overlayState.voiceChannelMonitor === true;
-                if (subtitleAiCheckbox) subtitleAiCheckbox.checked = overlayState.aiSubtitle !== undefined ? overlayState.aiSubtitle : true;
-                if (subtitleUserCheckbox) subtitleUserCheckbox.checked = overlayState.userSubtitle !== undefined ? overlayState.userSubtitle : true;
-                if (bubbleCheckbox) bubbleCheckbox.checked = overlayState.bubble !== undefined ? overlayState.bubble : true;
-                if (screenCaptureCheckbox) screenCaptureCheckbox.checked = overlayState.screenshotEnabled !== undefined ? overlayState.screenshotEnabled : true;
+            if (subtitleAiCheckbox) subtitleAiCheckbox.checked = overlayState.aiSubtitle !== undefined ? overlayState.aiSubtitle : true;
+            if (bubbleCheckbox) bubbleCheckbox.checked = overlayState.bubble !== undefined ? overlayState.bubble : true;
+            if (screenCaptureCheckbox) screenCaptureCheckbox.checked = overlayState.screenshotEnabled !== undefined ? overlayState.screenshotEnabled : true;
             }
         }
         
@@ -3875,6 +3846,10 @@ class Live2DManager {
         window.addEventListener('mousemove', (event) => {
             const floatingButtons = document.getElementById('live2d-floating-buttons');
             if (!floatingButtons || this._goodbyeClicked) return;
+            if (floatingButtons.dataset.pinned === 'true') {
+                floatingButtons.style.display = 'flex';
+                return;
+            }
 
             // 检测鼠标是否在顶部区域 (y < 100) 或在工具栏上
             const isTopArea = event.clientY < 100;
@@ -4662,6 +4637,18 @@ if (typeof cubism4Model !== 'undefined' && cubism4Model) {
         try {
             // 初始化 PIXI 应用
             await window.live2dManager.initPIXI('live2d-canvas', 'live2d-container');
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const isFloatingMode = urlParams.get('floating') === 'true';
+            const waitForLayout = async (minSize = 120, maxWaitMs = 2000) => {
+                const start = Date.now();
+                while (Date.now() - start < maxWaitMs) {
+                    if (window.innerWidth >= minSize && window.innerHeight >= minSize) return;
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+            };
+
+            await waitForLayout();
             
             // 加载用户偏好
             const preferences = await window.live2dManager.loadUserPreferences();
@@ -4679,8 +4666,22 @@ if (typeof cubism4Model !== 'undefined' && cubism4Model) {
             
             // 加载模型
             await window.live2dManager.loadModel(cubism4Model, {
-                preferences: modelPreferences,
+                preferences: isFloatingMode ? null : modelPreferences,
                 isMobile: window.innerWidth <= 768
+            });
+
+            const relayout = () => {
+                const model = window.live2dManager.getCurrentModel();
+                if (!model) return;
+                window.live2dManager.applyModelSettings(model, {
+                    preferences: isFloatingMode ? null : modelPreferences,
+                    isMobile: window.innerWidth <= 768
+                });
+            };
+            window.addEventListener('resize', () => {
+                if (isFloatingMode || !modelPreferences) {
+                    relayout();
+                }
             });
 
             // 设置全局引用（兼容性）

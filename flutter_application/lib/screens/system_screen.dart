@@ -118,13 +118,22 @@ class _SystemScreenState extends State<SystemScreen> {
             value: controller.settings.showAgentThoughts,
             onChanged: controller.settings.agentEnabled ? (v) => controller.setAgentShowThoughts(v) : null,
           ),
-          SwitchListTile(
-            secondary: const Icon(Icons.voice_over_off),
-            title: const Text('禁用心里描写'),
-            subtitle: const Text('不显示括号内旁白/动作，并提示主脑不要输出'),
-            value: controller.settings.suppressInnerMonologue,
-            onChanged: (v) => controller.setSuppressInnerMonologue(v),
-          ),
+          if (controller.settings.chatMode == ChatModeOption.persona) ...[
+            SwitchListTile(
+              secondary: const Icon(Icons.voice_over_off),
+              title: const Text('强烈禁止心理描写（拟人模式）'),
+              subtitle: const Text('严格删除括号内旁白/动作，并提示主脑不要输出'),
+              value: controller.settings.suppressInnerMonologue,
+              onChanged: (v) => controller.setSuppressInnerMonologue(v),
+            ),
+            SwitchListTile(
+              secondary: const Icon(Icons.text_fields),
+              title: const Text('强烈禁止 Markdown（拟人模式）'),
+              subtitle: const Text('强制去掉列表/标题/代码块等格式'),
+              value: controller.settings.strictNoMarkdown,
+              onChanged: (v) => controller.setStrictNoMarkdown(v),
+            ),
+          ],
           
           const Divider(),
           // Vision configuration

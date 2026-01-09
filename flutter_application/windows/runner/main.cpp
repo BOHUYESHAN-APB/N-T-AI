@@ -31,7 +31,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!window.Create(L"N-T-AI", origin, size)) {
     return EXIT_FAILURE;
   }
-  window.SetQuitOnClose(true);
+  // Let desktop_multi_window manage quit when all windows are closed.
+  window.SetQuitOnClose(false);
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {

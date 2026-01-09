@@ -426,6 +426,12 @@ async def live2d_websocket(websocket: WebSocket):
                 if action == "set_tts_enabled":
                     enabled = bool(message.get("enabled", True))
                     system_state.update_state("enable_tts", enabled)
+                    await manager.broadcast(
+                        {
+                            "type": "tts_toggle",
+                            "enabled": enabled,
+                        }
+                    )
                     print(f"[Live2D WS] Global TTS Enabled set to: {enabled}")
                     continue
 
@@ -828,6 +834,10 @@ async def voice_channel_transcript(request: VoiceChannelTranscriptRequest):
             enable_thinking=False,
             enable_search=False,
             enable_backend_tts=False,
+            chat_mode=system_state.get_state("chat_mode", "persona"),
+            persona_mode=system_state.get_state("persona_mode", "full"),
+            suppress_inner_monologue=system_state.get_state("suppress_inner_monologue", False),
+            strict_no_markdown=system_state.get_state("strict_no_markdown", False),
             tts_mode="sentence",
         )
 

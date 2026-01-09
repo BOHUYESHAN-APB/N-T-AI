@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart';
 import '../core/services/expression_agent_service.dart';
@@ -38,6 +39,11 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   // Windows controller
   final _windowsController = WebviewController();
   bool _isWindowsInitialized = false;
+  bool _windowsInitInProgress = false;
+  int _windowsInitAttempts = 0;
+  Timer? _windowsRetryTimer;
+  bool _windowsErrorShown = false;
+  static const int _maxWindowsInitAttempts = 3;
 
   // StreamSubscription? _expressionSub; // Removed
   // StreamSubscription? _motionSub;     // Removed
@@ -69,6 +75,8 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   void dispose() {
     _initDelayTimer?.cancel();
     _initDelayTimer = null;
+    _windowsRetryTimer?.cancel();
+    _windowsRetryTimer = null;
     // _expressionSub and _motionSub are removed
     if (widget.controller != null) {
       widget.controller!.detach();
@@ -133,6 +141,9 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
   }
 
   Future<void> _initWindowsWebView(String url) async {
+    if (_windowsInitInProgress || _isWindowsInitialized) return;
+    _windowsInitInProgress = true;
+    _windowsInitAttempts += 1;
     try {
       if (!_windowsController.value.isInitialized) {
         await _windowsController.initialize();
@@ -146,22 +157,43 @@ class _CharacterDisplayState extends State<CharacterDisplay> {
       if (mounted) {
         setState(() {
           _isWindowsInitialized = true;
+          _windowsErrorShown = false;
         });
         _runJavascript("window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = true; window.LIVE2D_EXTERNAL_AUDIO_MUTED = true;");
         _injectInitialExpression();
       }
     } catch (e) {
       debugPrint("Error initializing Windows WebView: $e");
-      if (mounted) {
+      final isUnsupported =
+          e is PlatformException && e.code == 'unsupported_platform';
+      if (mounted && !isUnsupported && _windowsInitAttempts < _maxWindowsInitAttempts) {
+        _windowsRetryTimer?.cancel();
+        _windowsRetryTimer = Timer(
+          Duration(milliseconds: 600 * _windowsInitAttempts),
+          () {
+            if (mounted) {
+              _initWindowsWebView(url);
+            }
+          },
+        );
+        return;
+      }
+      if (mounted && !_windowsErrorShown) {
+        _windowsErrorShown = true;
+        final message = isUnsupported
+            ? 'Live2D WebView is unsupported on this system. Try the native floating window.'
+            : 'Live2D WebView Init Failed: $e';
         // Show error in UI
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Live2D WebView Init Failed: $e'),
+            content: Text(message),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
         );
       }
+    } finally {
+      _windowsInitInProgress = false;
     }
   }
 

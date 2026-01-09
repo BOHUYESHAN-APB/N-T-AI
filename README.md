@@ -488,7 +488,7 @@ If no one is available to assist, I plan to purchase an M5 Mac mini after its re
 
 ---
 
-## � 扩展与插件 / Extensions & Plugins
+## 扩展与插件 / Extensions & Plugins
 
 有兴趣开发插件或了解我们如何集成第三方工具？
 
@@ -500,7 +500,7 @@ Please check our **[Plugin Development Guide](PLUGIN_DEV_GUIDE.md)**.
 
 ---
 
-## �� 致谢 / Acknowledgements
+## 致谢 / Acknowledgements
 
 本项目站在巨人的肩膀上。我们衷心感谢以下开源项目与工具提供的灵感与支持。
 

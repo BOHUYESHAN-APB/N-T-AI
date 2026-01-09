@@ -4,11 +4,12 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:desktop_webview_window/desktop_webview_window.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import '../../core/services/backend_service.dart';
 import '../floating_window_service.dart';
+import '../../windows/window_args.dart';
 
-/// Windows 平台浮窗实现（使用 desktop_webview_window 独立 WebView 窗口）
+/// Windows 平台浮窗实现（使用 desktop_multi_window + Flutter Window）
 class FloatingWindowWindows implements FloatingWindowService {
   /// 最大允许的浮窗数量
   static const int maxFloatingWindows = 2;
@@ -22,11 +23,10 @@ class FloatingWindowWindows implements FloatingWindowService {
   String backendUrl;
   bool _isInitialized = false;
   bool _isVisible = false;
-  Webview? _webview;
+  WindowController? _windowController;
   VoidCallback? _onCloseCallback;
-  String? _currentModelPath;
-  bool _showControls = false;
   StreamSubscription? _urlSubscription;
+  StreamSubscription? _windowChangedSubscription;
 
   FloatingWindowWindows({required this.backendUrl});
 
@@ -34,17 +34,19 @@ class FloatingWindowWindows implements FloatingWindowService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
-    
-    // Subscribe to backend URL changes to keep the window in sync
+
     _urlSubscription = BackendService().urlStream.listen((url) {
       debugPrint('[FloatingWindowWindows] Received backend URL update: $url');
       updateBackendUrl(url);
     });
-    
-    // Ensure we have the latest URL immediately
+
+    _windowChangedSubscription = onWindowsChanged.listen((_) {
+      _syncWindowAlive();
+    });
+
     final currentUrl = BackendService().backendUrl;
     if (currentUrl != backendUrl) {
-       updateBackendUrl(currentUrl);
+      updateBackendUrl(currentUrl);
     }
   }
 
@@ -52,24 +54,33 @@ class FloatingWindowWindows implements FloatingWindowService {
   void updateBackendUrl(String url) {
     if (backendUrl == url) return;
     backendUrl = url;
-    if (_webview != null && _currentModelPath != null) {
-      _reloadWindow();
+    if (_windowController != null) {
+      _windowController!.invokeMethod('set_backend_url', {'url': url});
     }
   }
 
-  Future<void> _reloadWindow() async {
+  Future<void> _syncWindowAlive() async {
+    if (_windowController == null) return;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final debug = prefs.getBool('settings.live2dDebug') ?? false;
-      final url =
-          '$backendUrl/static/live2d/index.html?model=$_currentModelPath&debug=$debug&floating=true&controls=$_showControls&capture=flutter';
-      
-      if (_webview != null) {
-        _webview!.launch(url);
-        debugPrint('[FloatingWindowWindows] Reloaded with URL: $url');
+      final controllers = await WindowController.getAll();
+      final exists = controllers.any(
+        (c) => c.windowId == _windowController!.windowId,
+      );
+      if (!exists) {
+        _handleWindowClosed();
       }
-    } catch (e) {
-      debugPrint('[FloatingWindowWindows] Failed to reload window: $e');
+    } catch (_) {}
+  }
+
+  void _handleWindowClosed() {
+    _activeInstances.remove(this);
+    _windowController = null;
+    _isVisible = false;
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('floating.window.enabled', false);
+    });
+    if (_onCloseCallback != null) {
+      _onCloseCallback!();
     }
   }
 
@@ -89,15 +100,34 @@ class FloatingWindowWindows implements FloatingWindowService {
       throw StateError('FloatingWindowWindows not initialized');
     }
 
-    // 检查是否超过最大浮窗数量限制
-    if (_webview == null && _activeInstances.length >= maxFloatingWindows) {
+    if (_windowController == null && _activeInstances.length >= maxFloatingWindows) {
       debugPrint(
         '[FloatingWindowWindows] Max floating windows limit reached ($maxFloatingWindows)',
       );
-      return; // 达到上限，不创建新窗口
+      return;
     }
 
-    // Auto-select model if path is empty (consistent with CharacterDisplay)
+    if (_windowController != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setDouble('floating.window.width', width);
+        await prefs.setDouble('floating.window.height', height);
+        await prefs.setBool('floating.window.enabled', true);
+        if (modelPath.isNotEmpty) {
+          await prefs.setString('floating.window.modelPath', modelPath);
+        }
+        await _windowController!.invokeMethod('set_size', {
+          'width': width,
+          'height': height,
+        });
+        await _windowController!.show();
+        _isVisible = true;
+      } catch (e) {
+        debugPrint('[FloatingWindowWindows] Reuse window failed: $e');
+      }
+      return;
+    }
+
     if (modelPath.isEmpty) {
       try {
         final uri = Uri.parse('$backendUrl/v1/models/list');
@@ -118,16 +148,11 @@ class FloatingWindowWindows implements FloatingWindowService {
       }
     }
 
-    _currentModelPath = modelPath;
-    _showControls = showControls;
-
     try {
-      // 如果当前实例已经存在浮窗，先关闭
-      if (_webview != null) {
+      if (_windowController != null) {
         await closeFloatingWindow();
       }
 
-      // 保存浮窗配置到本地存储
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('floating.window.width', width);
       await prefs.setDouble('floating.window.height', height);
@@ -136,95 +161,55 @@ class FloatingWindowWindows implements FloatingWindowService {
         await prefs.setString('floating.window.modelPath', modelPath);
       }
 
-      // 构建 Live2D URL，根据设置决定是否开启调试
-      final debug = prefs.getBool('settings.live2dDebug') ?? false;
-      final url =
-          '$backendUrl/static/live2d/index.html?model=$modelPath&debug=$debug&floating=true&controls=$showControls&capture=flutter';
+      final args = WindowArgs.encode(
+        WindowType.live2d,
+        {
+          'backendUrl': backendUrl,
+          'width': width,
+          'height': height,
+          'showTitleBar': false,
+          'showControls': showControls,
+        },
+      );
 
-      // 创建独立 WebView 窗口（隐藏标题栏和工具栏，只显示纯 WebView 内容）
-      _webview = await WebviewWindow.create(
-        configuration: CreateConfiguration(
-          windowWidth: width.toInt(),
-          windowHeight: height.toInt(),
-          title: '', // 设置为空标题，减少标题栏布局压力
-          titleBarTopPadding: 0,
-          titleBarHeight: 0, // 标题栏高度为0
+      final controller = await WindowController.create(
+        WindowConfiguration(
+          arguments: args,
+          hiddenAtLaunch: true,
         ),
       );
-
-      // 加载 Live2D 页面
-      _webview!.launch(url);
-
-      // 注册到活跃实例集合
+      _windowController = controller;
       _activeInstances.add(this);
 
-      // 监听窗口关闭事件
-      _webview!.onClose.whenComplete(() {
-        debugPrint('[FloatingWindowWindows] WebView window closed by user');
-        _activeInstances.remove(this);
-        _webview = null;
-        _isVisible = false;
-        SharedPreferences.getInstance().then((p) {
-          p.setBool('floating.window.enabled', false);
-        });
-        // 通知外部回调
-        if (_onCloseCallback != null) {
-          _onCloseCallback!();
-        }
-      });
-
-      // 监听来自 JS 的消息 (用于关闭窗口等交互)
-      _webview!.addOnWebMessageReceivedCallback((message) {
-        final trimmed = message.trim();
-        if (trimmed.isEmpty) return;
-
-        String? action;
-        if (trimmed == 'close') {
-          action = 'close';
-        } else {
-          try {
-            final data = jsonDecode(trimmed);
-            if (data is Map && data['action'] != null) {
-              action = data['action'].toString();
-            }
-          } catch (_) {}
-        }
-
-        if (action == 'close') {
-          debugPrint('[FloatingWindowWindows] Received close message from JS');
-          unawaited(closeFloatingWindow());
-        }
-      });
+      await controller.show();
 
       _isVisible = true;
-      debugPrint(
-        '[FloatingWindowWindows] WebView window created with URL: $url',
-      );
+      debugPrint('[FloatingWindowWindows] Live2D window created');
     } catch (e) {
       debugPrint('[FloatingWindowWindows] Create window failed: $e');
-      // If the desktop webview plugin is not available at runtime (MissingPluginException),
-      // fail gracefully instead of rethrowing so the main app can continue running.
       try {
         if (e is MissingPluginException) {
-          debugPrint('[FloatingWindowWindows] Missing plugin detected, skipping floating window creation.');
-          // Persist disabled state so UI can reflect inability to create floating window
+          debugPrint(
+            '[FloatingWindowWindows] Missing plugin detected, skipping floating window creation.',
+          );
           SharedPreferences.getInstance().then((prefs) {
             prefs.setBool('floating.window.enabled', false);
           });
-          _webview = null;
+          _windowController = null;
           _isVisible = false;
           return;
         }
-      } catch (_) {
-        // ignore errors during exception handling
-      }
+      } catch (_) {}
       rethrow;
     }
   }
 
   @override
   Future<void> showFloatingWindow() async {
-    _isVisible = true;
+    if (_windowController != null) {
+      await _windowController!.show();
+      _isVisible = true;
+    }
   }
 
   @override
@@ -234,33 +219,39 @@ class FloatingWindowWindows implements FloatingWindowService {
 
   @override
   Future<void> closeFloatingWindow() async {
-    if (_webview != null) {
+    if (_windowController != null) {
       try {
-        _activeInstances.remove(this);
-        _webview!.close();
-        _webview = null;
-        _isVisible = false;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('floating.window.enabled', false);
-        debugPrint(
-          '[FloatingWindowWindows] WebView window closed (active: ${_activeInstances.length})',
-        );
-      } catch (e) {
-        debugPrint('[FloatingWindowWindows] Close window failed: $e');
-        _activeInstances.remove(this);
-        _webview = null;
-        _isVisible = false;
-      }
+        await _windowController!.invokeMethod('window_close');
+      } catch (_) {}
+      _isVisible = false;
+      _activeInstances.remove(this);
+      _windowController = null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('floating.window.enabled', false);
+      debugPrint(
+        '[FloatingWindowWindows] Live2D window closed (active: ${_activeInstances.length})',
+      );
     }
   }
 
   @override
   Future<bool> isFloatingWindowVisible() async {
-    return _isVisible && _webview != null;
+    return _isVisible && _windowController != null;
   }
 
   @override
-  Future<void> setPosition(double x, double y) async {}
+  Future<void> setPosition(double x, double y) async {
+    if (_windowController != null) {
+      try {
+        await _windowController!.invokeMethod('set_position', {
+          'x': x,
+          'y': y,
+        });
+      } catch (e) {
+        debugPrint('[FloatingWindowWindows] Set position failed: $e');
+      }
+    }
+  }
 
   @override
   Future<void> setSize(double width, double height) async {
@@ -271,16 +262,36 @@ class FloatingWindowWindows implements FloatingWindowService {
     } catch (e) {
       debugPrint('[FloatingWindowWindows] Set size failed: $e');
     }
+    if (_windowController != null) {
+      try {
+        await _windowController!.invokeMethod('set_size', {
+          'width': width,
+          'height': height,
+        });
+      } catch (e) {
+        debugPrint('[FloatingWindowWindows] Set size failed: $e');
+      }
+    }
   }
 
   @override
-  Future<void> setAlwaysOnTop(bool alwaysOnTop) async {}
+  Future<void> setAlwaysOnTop(bool alwaysOnTop) async {
+    if (_windowController != null) {
+      try {
+        await _windowController!.invokeMethod('set_always_on_top', {
+          'value': alwaysOnTop,
+        });
+      } catch (e) {
+        debugPrint('[FloatingWindowWindows] Set always-on-top failed: $e');
+      }
+    }
+  }
 
   @override
   Future<void> executeJavaScript(String js) async {
-    if (_webview != null) {
+    if (_windowController != null) {
       try {
-        await _webview!.evaluateJavaScript(js);
+        await _windowController!.invokeMethod('execute_js', {'js': js});
       } catch (e) {
         debugPrint('[FloatingWindowWindows] Execute JS failed: $e');
       }
@@ -290,6 +301,7 @@ class FloatingWindowWindows implements FloatingWindowService {
   @override
   Future<void> dispose() async {
     _urlSubscription?.cancel();
+    _windowChangedSubscription?.cancel();
     await closeFloatingWindow();
     _isInitialized = false;
   }

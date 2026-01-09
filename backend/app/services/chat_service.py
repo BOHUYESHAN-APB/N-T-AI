@@ -100,15 +100,23 @@ class ChatService:
     def _strip_inner_monologue_text(self, text: str) -> str:
         s = text or ""
         s = re.sub(r"（[^）]*）", "", s, flags=re.DOTALL)
+        s = re.sub(r"\([^)]*\)", "", s, flags=re.DOTALL)
+        s = re.sub(r"[ \t]+\n", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        return s.strip()
 
-        def repl(m: re.Match) -> str:
-            inner = (m.group(1) or "").strip()
-            has_cjk = re.search(r"[\u4e00-\u9fff]", inner) is not None
-            if has_cjk and len(inner) <= 40:
-                return ""
-            return m.group(0) or ""
-
-        s = re.sub(r"(?<!\])\(([^)]*)\)", repl, s, flags=re.DOTALL)
+    def _strip_markdown_text(self, text: str) -> str:
+        s = text or ""
+        s = re.sub(r"```[\s\S]*?```", "", s)
+        s = re.sub(r"`([^`]*)`", r"\1", s)
+        s = re.sub(r"^\s{0,3}#{1,6}\s*", "", s, flags=re.MULTILINE)
+        s = re.sub(r"^\s{0,3}>\s*", "", s, flags=re.MULTILINE)
+        s = re.sub(r"^\s*[-*+]\s+", "", s, flags=re.MULTILINE)
+        s = re.sub(r"^\s*\d+\.\s+", "", s, flags=re.MULTILINE)
+        s = re.sub(r"!\[.*?\]\(.*?\)", "", s)
+        s = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1", s)
+        s = re.sub(r"(\*\*|__)(.*?)\1", r"\2", s)
+        s = re.sub(r"(\*|_)(.*?)\1", r"\2", s)
         s = re.sub(r"[ \t]+\n", "\n", s)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
@@ -246,6 +254,7 @@ class ChatService:
                             chat_mode: str = "persona",
                             deep_research: bool = False,
                             suppress_inner_monologue: bool = False,
+                            strict_no_markdown: bool = False,
                             user_nickname: Optional[str] = None,
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
@@ -358,7 +367,13 @@ class ChatService:
             
             full_response_text += chunk
             sentence_buffer += chunk
-            yield chunk
+            out_chunk = chunk
+            if suppress_inner_monologue and chat_mode == "persona" and not deep_research:
+                out_chunk = self._strip_inner_monologue_text(out_chunk)
+            if strict_no_markdown and chat_mode == "persona" and not deep_research:
+                out_chunk = self._strip_markdown_text(out_chunk)
+            if out_chunk:
+                yield out_chunk
 
             # Check for immediate TTS trigger token
             if "[END_OF_SPEECH]" in sentence_buffer:
@@ -402,17 +417,23 @@ class ChatService:
                     clean_segment, tts_api_key, tts_base_url, tts_voice, tts_mode
                 ))
 
+        final_response_text = full_response_text
+        if suppress_inner_monologue and chat_mode == "persona" and not deep_research:
+            final_response_text = self._strip_inner_monologue_text(final_response_text)
+        if strict_no_markdown and chat_mode == "persona" and not deep_research:
+            final_response_text = self._strip_markdown_text(final_response_text)
+
         # Save Assistant Response and post-processing
         with Session(engine) as session:
-            session.add(Conversation(role="assistant", content=full_response_text, session_id=session_id))
+            session.add(Conversation(role="assistant", content=final_response_text, session_id=session_id))
             session.commit()
             
-        # Trigger Expression based on full response text
-        expression_data = self.expression_service.get_expression_from_text(full_response_text)
+        # Trigger Expression based on final response text
+        expression_data = self.expression_service.get_expression_from_text(final_response_text)
         await self._broadcast_expression(expression_data)
 
         if background_tasks:
-            background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": full_response_text}], target_api_key, target_base_url, target_model)
+            background_tasks.add_task(self.mood_service.update_mood, user_id, [{"role": "user", "content": text_content}, {"role": "assistant", "content": final_response_text}], target_api_key, target_base_url, target_model)
             if random.random() < learning_probability:
                 background_tasks.add_task(self._learn_from_interaction, text_content, user_id, target_api_key, target_base_url, target_model)
 
@@ -527,6 +548,7 @@ class ChatService:
                             chat_mode: str = "persona",
                             deep_research: bool = False,
                             suppress_inner_monologue: bool = False,
+                            strict_no_markdown: bool = False,
                             user_nickname: Optional[str] = None,
                             system_prompt_override: Optional[str] = None,
                             assistant_name: Optional[str] = None,
@@ -989,8 +1011,10 @@ class ChatService:
                     final_response_text = response_text
                 break
 
-        if suppress_inner_monologue:
+        if suppress_inner_monologue and chat_mode == "persona" and not deep_research:
             final_response_text = self._strip_inner_monologue_text(final_response_text)
+        if strict_no_markdown and chat_mode == "persona" and not deep_research:
+            final_response_text = self._strip_markdown_text(final_response_text)
 
         # 6. Save Assistant Response
         with Session(engine) as session:

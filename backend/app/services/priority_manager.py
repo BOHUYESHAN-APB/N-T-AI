@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List, Union
 from app.core.logger import logger
 from app.services.search_service import SearchService
 from app.core.config import settings
+from app.services.system_state import system_state
 
 class ChatPriority:
     USER = 1        # 最高优先级 (Microphone/Text)
@@ -89,6 +90,14 @@ class PriorityManager:
                     kwargs = task.kwargs.copy()
                     if "tts_mode" not in kwargs:
                         kwargs["tts_mode"] = "sentence"
+                    if "chat_mode" not in kwargs:
+                        kwargs["chat_mode"] = system_state.get_state("chat_mode", "persona")
+                    if "persona_mode" not in kwargs:
+                        kwargs["persona_mode"] = system_state.get_state("persona_mode", "full")
+                    if "suppress_inner_monologue" not in kwargs:
+                        kwargs["suppress_inner_monologue"] = system_state.get_state("suppress_inner_monologue", False)
+                    if "strict_no_markdown" not in kwargs:
+                        kwargs["strict_no_markdown"] = system_state.get_state("strict_no_markdown", False)
                         
                     await self.chat_service.process_message(
                         message=task.message,
