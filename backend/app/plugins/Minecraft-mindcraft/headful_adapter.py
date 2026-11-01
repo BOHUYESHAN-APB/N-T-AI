@@ -1,0 +1,330 @@
+import asyncio
+import json
+import time
+from typing import Any, Callable, Dict, Optional
+
+import websockets
+
+
+class HeadfulAdapter:
+    def __init__(
+        self,
+        logger,
+        log_append: Callable[[str], None],
+        on_ready: Callable[[bool], None],
+        on_state: Callable[[Optional[Dict[str, Any]]], None],
+        on_event: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    ) -> None:
+        self._logger = logger
+        self._log_append = log_append
+        self._on_ready = on_ready
+        self._on_state = on_state
+        self._on_event = on_event
+        self._ws_task: asyncio.Task | None = None
+        self._ws = None
+        self._stop_event = asyncio.Event()
+        self._last_log = 0.0
+        self._last_state_pos: Optional[tuple[float, float, float]] = None
+        self._last_state_flags: Dict[str, Any] = {}
+        self._send_lock = asyncio.Lock()
+        self.ready = False
+        self.last_state: Optional[Dict[str, Any]] = None
+        self.last_screen: Optional[Dict[str, Any]] = None
+        self._screen_waiters: list[asyncio.Future] = []
+        self._pending_requests: Dict[str, asyncio.Future] = {}
+        self._request_counter = 0
+
+    async def activate(self, config: Dict[str, Any]) -> bool:
+        if self._ws_task and not self._ws_task.done():
+            return True
+        self._stop_event = asyncio.Event()
+        self._ws_task = asyncio.create_task(self._run(config))
+        return True
+
+    async def deactivate(self) -> None:
+        self._stop_event.set()
+        if self._ws is not None:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+        if self._ws_task is not None:
+            self._ws_task.cancel()
+            try:
+                await self._ws_task
+            except Exception:
+                pass
+        self._ws_task = None
+        self._ws = None
+        self.ready = False
+        self._on_ready(False)
+
+    async def send_message(self, message: str, config: Dict[str, Any]) -> bool:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; send failed.")
+            return False
+        payload = {"type": "chat", "message": message}
+        if message.startswith("/"):
+            payload = {"type": "command", "command": message.lstrip("/")}
+        token = (config or {}).get("token", "")
+        if token:
+            payload["token"] = token
+        async with self._send_lock:
+            try:
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                return True
+            except Exception as e:
+                self._log_append(f"Headful send failed: {e}")
+                return False
+
+    async def send_action(self, action: Dict[str, Any], config: Dict[str, Any]) -> bool:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; action send failed.")
+            return False
+        if not isinstance(action, dict):
+            self._log_append("Headful action invalid: not an object.")
+            return False
+        if "type" not in action:
+            self._log_append("Headful action invalid: missing type.")
+            return False
+        payload = dict(action)
+        token = (config or {}).get("token", "")
+        if token and "token" not in payload:
+            payload["token"] = token
+        async with self._send_lock:
+            try:
+                await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                return True
+            except Exception as e:
+                self._log_append(f"Headful action send failed: {e}")
+                return False
+
+    async def request_screen_snapshot(
+        self, config: Dict[str, Any], timeout: float = 2.0
+    ) -> Optional[Dict[str, Any]]:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; screen snapshot failed.")
+            return None
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        self._screen_waiters.append(future)
+        ok = await self.send_action({"type": "screenSnapshot"}, config)
+        if not ok:
+            if not future.done():
+                future.cancel()
+            try:
+                self._screen_waiters.remove(future)
+            except ValueError:
+                pass
+            return None
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._log_append("Headful screen snapshot timeout.")
+            return None
+        finally:
+            if not future.done():
+                future.cancel()
+            try:
+                self._screen_waiters.remove(future)
+            except ValueError:
+                pass
+
+    async def request_action(
+        self,
+        action: Dict[str, Any],
+        config: Dict[str, Any],
+        timeout: float = 2.0,
+    ) -> Optional[Dict[str, Any]]:
+        if self._ws is None:
+            self._log_append("Headful WS not connected; request failed.")
+            return None
+        loop = asyncio.get_running_loop()
+        self._request_counter += 1
+        request_id = f"req_{int(time.time() * 1000)}_{self._request_counter}"
+        future: asyncio.Future = loop.create_future()
+        self._pending_requests[request_id] = future
+        payload = dict(action or {})
+        payload["requestId"] = request_id
+        ok = await self.send_action(payload, config)
+        if not ok:
+            if not future.done():
+                future.cancel()
+            self._pending_requests.pop(request_id, None)
+            return None
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._log_append("Headful request timeout.")
+            return None
+        finally:
+            if not future.done():
+                future.cancel()
+            self._pending_requests.pop(request_id, None)
+
+    async def _run(self, config: Dict[str, Any]) -> None:
+        backoff = 1
+        while not self._stop_event.is_set():
+            host = (config or {}).get("host", "127.0.0.1")
+            port = (config or {}).get("port", 8765)
+            token = (config or {}).get("token", "")
+            uri = f"ws://{host}:{port}"
+            try:
+                self._log_append(f"Headful WS connecting: {uri}")
+                async with websockets.connect(uri, max_size=2**20) as ws:
+                    self._ws = ws
+                    self.ready = True
+                    self._on_ready(True)
+                    backoff = 1
+                    sub = {"type": "subscribe"}
+                    if token:
+                        sub["token"] = token
+                    await ws.send(json.dumps(sub))
+                    self._log_append("Headful WS connected and subscribed.")
+                    debug_enabled = bool((config or {}).get("debug", False))
+                    debug_chat = bool((config or {}).get("debug_chat", False))
+                    await self.send_action(
+                        {"type": "setDebug", "enabled": debug_enabled, "chat": debug_chat},
+                        config,
+                    )
+                    async for message in ws:
+                        await self._handle_message(message)
+            except Exception as e:
+                self.ready = False
+                self._on_ready(False)
+                self._ws = None
+                self._log_append(f"Headful WS error: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 10)
+
+    async def _handle_message(self, message: str) -> None:
+        try:
+            data = json.loads(message)
+        except Exception:
+            self._log_append(f"Headful WS raw: {message}")
+            return
+        req_id = data.get("requestId")
+        if req_id and req_id in self._pending_requests:
+            future = self._pending_requests.pop(req_id)
+            if not future.done():
+                future.set_result(data)
+            return
+
+        msg_type = data.get("type")
+        if msg_type == "state":
+            self.last_state = data
+            self._on_state(data)
+            now = time.time()
+            pos = None
+            try:
+                pos = (
+                    float(data.get("x")),
+                    float(data.get("y")),
+                    float(data.get("z")),
+                )
+            except (TypeError, ValueError):
+                pos = None
+            focused = data.get("focused")
+            manual = data.get("manualOverride")
+            last_pos = self._last_state_pos
+            last_focused = self._last_state_flags.get("focused")
+            last_manual = self._last_state_flags.get("manualOverride")
+            pos_changed = False
+            if pos is not None:
+                if last_pos is None:
+                    pos_changed = True
+                else:
+                    dx = pos[0] - last_pos[0]
+                    dy = pos[1] - last_pos[1]
+                    dz = pos[2] - last_pos[2]
+                    pos_changed = (dx * dx + dy * dy + dz * dz) >= 0.01
+            flag_changed = (focused != last_focused) or (manual != last_manual)
+            if (pos_changed and (now - self._last_log) > 0.8) or flag_changed:
+                if pos is not None:
+                    x, y, z = pos
+                    suffix = f" focused={focused} manual={manual}"
+                    self._log_append(
+                        f"Headful state: x={x:.2f} y={y:.2f} z={z:.2f}{suffix}"
+                    )
+                    self._last_state_pos = pos
+                elif flag_changed:
+                    self._log_append(
+                        f"Headful state: focused={focused} manual={manual}"
+                    )
+                self._last_state_flags["focused"] = focused
+                self._last_state_flags["manualOverride"] = manual
+                self._last_log = now
+        elif msg_type == "event":
+            event_name = data.get("event")
+            self._log_append(f"Headful event: {event_name}")
+            if event_name in {"path_blocked", "path_started", "path_complete"}:
+                details = []
+                for key in ("reason", "nodes", "x", "y", "z"):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
+            elif event_name == "manual_control":
+                details = []
+                for key in ("active", "reason", "timeout_ms", "until_ms"):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
+            elif event_name in {"player_death", "player_respawn"}:
+                details = []
+                for key in (
+                    "x",
+                    "y",
+                    "z",
+                    "death_x",
+                    "death_y",
+                    "death_z",
+                    "respawn_x",
+                    "respawn_y",
+                    "respawn_z",
+                    "distance",
+                    "dimension",
+                    "death_dimension",
+                    "respawn_dimension",
+                ):
+                    if key in data:
+                        details.append(f"{key}={data.get(key)}")
+                if details:
+                    self._log_append(
+                        f"Headful event detail: {event_name} " + " ".join(details)
+                    )
+            if self._on_event is not None:
+                result = self._on_event(data)
+                if asyncio.iscoroutine(result):
+                    await result
+        elif msg_type == "hello":
+            self._log_append("Headful WS hello received.")
+        elif msg_type == "path_ack":
+            status = data.get("status")
+            nodes = data.get("nodes")
+            self._log_append(f"Headful WS path_ack: status={status} nodes={nodes}")
+        elif msg_type == "screen_snapshot":
+            self.last_screen = data
+            if self._screen_waiters:
+                waiters = list(self._screen_waiters)
+                self._screen_waiters.clear()
+                for waiter in waiters:
+                    if not waiter.done():
+                        waiter.set_result(data)
+            handler = data.get("handler")
+            screen = data.get("screenClass")
+            slots = data.get("slotsCount")
+            open_flag = data.get("screenOpen")
+            title = data.get("title")
+            self._log_append(
+                f"Headful screen: {screen or handler} slots={slots} open={open_flag} title={title}"
+            )
+        elif msg_type == "error":
+            self._log_append(f"Headful WS error: {data.get('error')}")
+        else:
+            self._log_append(f"Headful WS msg: {msg_type}")

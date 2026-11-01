@@ -1,0 +1,29 @@
+字体授权（nfdcs）
+
+授权说明：
+- 基于 MIT 和 ISAS 的字体文件授权
+- 免费使用、复制、修改、分发字体
+- 不可以为字体收费（不得就字体本体单独收费）
+- 需要附上同样的授权信息
+
+作者与联系信息：
+H.S.S. – 寒沙
+GitHub: https://github.com/Hansha2011/
+QQ: 3582930858
+E-Mail: 3582930858@qq.com
+X: https://x.com/HSS_HACKERSam
+
+原文（保留）：
+授权
+基于MIT和ISAS的字体文件的授权文件授权
+
+免费使用、复制、修改、分发字体
+不可以为字体收费
+需要附上同样的授权信息
+H.S.S. – 寒沙	Github：https://github.com/Hansha2011/
+联系
+QQ: 3582930858
+
+E-Mail: 3582930858@qq.com
+
+X: https://x.com/HSS_HACKERSam

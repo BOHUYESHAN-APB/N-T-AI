@@ -1,0 +1,83 @@
+name: flutter_application
+description: A new Flutter project.
+publish_to: 'none'
+version: 0.3.16-beta+2
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  
+  # State Management
+  provider: ^6.1.1
+
+  # Networking & Data
+  http: ^1.2.0
+  shared_preferences: ^2.2.2
+  sqflite: ^2.3.2
+  sqflite_common_ffi: ^2.3.2
+  path: ^1.9.0
+  path_provider: ^2.1.2
+  uuid: ^4.3.3
+  
+  # UI & Desktop
+  desktop_webview_window: ^0.2.3
+  desktop_multi_window: ^0.3.0
+  webview_windows: ^0.4.0
+  webview_flutter: ^4.7.0
+  flutter_markdown: ^0.6.19
+  window_manager: ^0.3.9
+  screen_capturer: ^0.2.1
+  url_launcher: ^6.3.0
+  file_picker: ^8.0.0
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  
+  # Media
+  audioplayers: ^6.0.0
+  record: ^6.1.2
+
+  # Utils
+  logging: ^1.2.0
+  intl: ^0.20.2
+  package_info_plus: ^8.0.0
+  html: ^0.15.4
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  msix: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/
+    - assets/excalidraw/
+    - assets/images/
+  fonts:
+    - family: MiSansVF
+      fonts:
+        - asset: assets/fonts/MiSans VF.ttf
+    - family: FZG
+      fonts:
+        - asset: assets/fonts/FZG_CN.ttf
+        - asset: assets/fonts/FZG_HAX.ttf
+    - family: nfdcs
+      fonts:
+        - asset: assets/fonts/nfdcsCN16.ttf
+        - asset: assets/fonts/nfdcsCN24.ttf
+
+msix_config:
+  display_name: N-T-AI
+  publisher_display_name: N-T-AI Team
+  identity_name: N-T-AI
+  msix_version: 0.3.8.0
+  assets:
+    - path: server
+      destination: server

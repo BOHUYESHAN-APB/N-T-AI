@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live2D Status Check</title>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 20px;
+            background: #1a1a1a; 
+            color: #fff; 
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .status { padding: 5px 0; }
+        .ok { color: #4caf50; }
+        .error { color: #f44336; }
+        .warn { color: #ff9800; }
+        .pending { color: #2196f3; }
+        #model-canvas { border: 2px solid #333; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h2>Live2D Library Status Check</h2>
+    <div id="status"></div>
+    <canvas id="model-canvas" width="400" height="500"></canvas>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        function status(name, ok, detail = '') {
+            const div = document.createElement('div');
+            div.className = 'status ' + (ok ? 'ok' : 'error');
+            div.textContent = (ok ? '✓ ' : '✗ ') + name + (detail ? ': ' + detail : '');
+            statusDiv.appendChild(div);
+            return ok;
+        }
+        function pending(name) {
+            const div = document.createElement('div');
+            div.id = name.replace(/\s/g, '-').toLowerCase();
+            div.className = 'status pending';
+            div.textContent = '⏳ ' + name + '...';
+            statusDiv.appendChild(div);
+            return div;
+        }
+        function update(div, ok, detail = '') {
+            div.className = 'status ' + (ok ? 'ok' : 'error');
+            div.textContent = (ok ? '✓ ' : '✗ ') + div.textContent.split('...')[0].substring(2) + (detail ? ': ' + detail : '');
+        }
+    </script>
+
+    <!-- Libraries -->
+    <script src="/static/live2d/libs/live2dcubismcore.min.js"></script>
+    <script src="/static/live2d/libs/live2d.min.js"></script>
+    <script src="/static/live2d/libs/pixi.min.js"></script>
+    <script>
+        window.PIXI = PIXI;
+        status('PIXI loaded', true, 'v' + PIXI.VERSION);
+        status('PIXI.Container', !!PIXI.Container);
+        status('PIXI.Texture.from', typeof PIXI.Texture?.from === 'function');
+        status('PIXI.Application', !!PIXI.Application);
+        status('Live2DCubismCore', !!window.Live2DCubismCore);
+        status('Live2D (Cubism 2)', !!window.Live2D);
+    </script>
+
+    <script src="/static/live2d/libs/pixi-live2d-display-rasan.min.js"></script>
+    <script>
+        const live2dOk = !!(PIXI.live2d && Object.keys(PIXI.live2d).length > 0);
+        status('PIXI.live2d namespace', live2dOk, live2dOk ? Object.keys(PIXI.live2d).length + ' exports' : 'empty');
+        
+        const modelOk = !!(PIXI.live2d?.Live2DModel);
+        status('PIXI.live2d.Live2DModel', modelOk);
+
+        if (live2dOk) {
+            const keys = Object.keys(PIXI.live2d).slice(0, 15).join(', ');
+            status('Exports', true, keys);
+        }
+    </script>
+
+    <script>
+        (async function() {
+            if (!PIXI.live2d?.Live2DModel) {
+                status('Cannot continue', false, 'Live2DModel not available');
+                return;
+            }
+
+            const appDiv = pending('Creating PIXI Application');
+            try {
+                const canvas = document.getElementById('model-canvas');
+                const app = new PIXI.Application({
+                    view: canvas,
+                    width: 400,
+                    height: 500,
+                    backgroundColor: 0x2a2a2a,
+                    backgroundAlpha: 1
+                });
+                update(appDiv, true, 'created');
+            } catch (e) {
+                update(appDiv, false, e.message);
+                return;
+            }
+
+            const modelDiv = pending('Loading Live2D Model');
+            try {
+                // Use the model we know exists in the workspace
+                const modelPath = '/static/live2d/mao_pro_zh/mao_pro_zh/runtime/mao_pro.model3.json';
+                const model = await PIXI.live2d.Live2DModel.from(modelPath);
+                update(modelDiv, true, 'loaded');
+                
+                // Setup model
+                model.scale.set(0.15); // Adjusted scale for this model
+                model.anchor.set(0.5, 0.5);
+                model.x = 200;
+                model.y = 300;
+                
+                const stageDiv = pending('Adding to stage');
+                const canvas = document.getElementById('model-canvas');
+                const app = PIXI.Application.sharedApplication || 
+                           new PIXI.Application({ view: canvas, width: 400, height: 500, backgroundColor: 0x2a2a2a });
+                app.stage.addChild(model);
+                update(stageDiv, true);
+                
+                status('SUCCESS', true, 'Model is now visible!');
+                
+                // Try motion
+                setTimeout(() => {
+                    try {
+                        if (model.internalModel?.motionManager) {
+                            model.motion('idle', 0);
+                            status('Idle motion', true, 'started');
+                        }
+                    } catch (e) {
+                        status('Motion', false, e.message);
+                    }
+                }, 1000);
+                
+            } catch (e) {
+                update(modelDiv, false, e.message);
+                console.error(e);
+            }
+        })();
+    </script>
+</body>
+</html>

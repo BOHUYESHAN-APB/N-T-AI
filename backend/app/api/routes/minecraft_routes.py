@@ -1,0 +1,394 @@
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from app.services.live2d_service import manager
+from app.services.system_state import system_state
+from app.core.logger import logger
+
+import httpx
+from fastapi.responses import HTMLResponse, StreamingResponse
+from app.plugins import get_plugin
+
+router = APIRouter(prefix="/plugins/Minecraft-mindcraft", tags=["minecraft"])
+
+class SendMessageRequest(BaseModel):
+    agent: str
+    message: str
+    sender: Optional[str] = "frontend"
+
+class HeadfulActionRequest(BaseModel):
+    action: Dict[str, Any]
+
+class HeadfulSkillRequest(BaseModel):
+    skill: str
+    params: Optional[Dict[str, Any]] = None
+
+class MinecraftCommandRequest(BaseModel):
+    goal: str
+    sender: Optional[str] = "frontend"
+    interrupt_current: Optional[bool] = False
+    llm_api_key: Optional[str] = None
+    llm_base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+    embedding_model: Optional[str] = None
+
+@router.post("/config")
+async def update_minecraft_config(request_data: Dict[str, Any]):
+    """
+    更新 Minecraft 插件的配置。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    # 获取配置数据，处理前端可能发送的 {"config": {...}} 或直接 {...}
+    config = request_data.get("config", request_data)
+    if isinstance(config, dict) and isinstance(config.get("headful"), dict):
+        existing = plugin.config.get("headful", {})
+        if isinstance(existing, dict):
+            merged_headful = {**existing, **config["headful"]}
+            config = {**config, "headful": merged_headful}
+    
+    # 更新插件内存中的配置
+    plugin.config.update(config)
+    
+    # 触发插件的配置更新回调（会自动持久化并重启）
+    await plugin.on_config_updated()
+    
+    return {"status": "ok", "config": plugin.config}
+
+@router.api_route("/ui/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+async def proxy_minecraft_ui(path: str, request: Request):
+    """
+    代理 Minecraft 管理页面的请求。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    
+    # 获取插件配置的端口
+    ms_port = plugin.config.get("mindserver_port", 8080)
+    
+    # 构造目标 URL
+    target_url = f"http://localhost:{ms_port}/{path}"
+    
+    # 转发查询参数
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # 转发请求
+            method = request.method
+            headers = dict(request.headers)
+            # 移除一些可能引起问题的 header
+            headers.pop("host", None)
+            headers.pop("content-length", None) # 避免长度不匹配
+            
+            # 读取请求体（如果是 POST）
+            content = await request.body()
+            
+            # 使用 request 预取响应，然后手动流式传输或返回内容
+            # 对于 UI 页面，通常不需要 StreamingResponse，直接返回内容更稳妥
+            resp = await client.request(
+                method,
+                target_url,
+                headers=headers,
+                content=content,
+                follow_redirects=True,
+                timeout=10.0
+            )
+            
+            from fastapi.responses import Response
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers=dict(resp.headers)
+            )
+        except Exception as e:
+            logger.error(f"Proxy error to {target_url}: {e}")
+            raise HTTPException(status_code=502, detail=f"Could not connect to MindServer on port {ms_port}")
+
+@router.get("/ui", include_in_schema=False)
+async def proxy_minecraft_ui_root(request: Request):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=str(request.url).rstrip('/') + '/')
+
+class MinecraftEvent(BaseModel):
+    type: str
+    agent: str
+    message: str
+    data: Optional[Dict[str, Any]] = None
+
+class MinecraftPOVFrame(BaseModel):
+    agent: str
+    image: str  # base64 encoded image
+    stats: Optional[Dict[str, Any]] = None
+
+@router.post("/event")
+async def handle_minecraft_event(event: MinecraftEvent):
+    """
+    接收来自 Minecraft 代理的事件，并将其广播到前端界面。
+    """
+    # logger.info(f"[Minecraft Event] {event.agent}: {event.message}")
+    
+    if event.type == "chat":
+        # 广播到前端的 Live2D WebSocket，以便在聊天界面显示
+        # 我们使用 sender: "minecraft" 让前端识别
+        await manager.broadcast({
+            "type": "chat_message",
+            "text": event.message,
+            "sender": "minecraft",
+            "senderName": event.agent
+        })
+    elif event.type == "status":
+        # 广播状态更新
+        await manager.broadcast({
+            "type": "minecraft_status",
+            "agent": event.agent,
+            "message": event.message,
+            "data": event.data
+        })
+    
+    return {"status": "ok"}
+
+@router.post("/pov")
+async def handle_minecraft_pov(frame: MinecraftPOVFrame):
+    """
+    接收来自 Minecraft 代理的第一视角画面，并将其广播到前端界面。
+    """
+    await manager.broadcast({
+        "type": "minecraft_pov",
+        "agent": frame.agent,
+        "image": frame.image,
+        "stats": frame.stats
+    })
+    return {"status": "ok"}
+
+@router.post("/send_message")
+async def send_message_to_agent(req: SendMessageRequest):
+    """
+    通过后端转发消息到 MindServer，再由插件送入游戏内对话框。
+    这支持前端文本、语音识别文本、语音频道输入的融合。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    # headful 模式下通过 WS 直连模组
+    if getattr(plugin, "control_mode", "headless") == "headful":
+        try:
+            routed = await plugin.handle_frontend_chat(req.message, sender=req.sender or "frontend")
+        except Exception as exc:
+            logger.error(f"Headful frontend chat routing failed: {exc}")
+            routed = False
+        if routed:
+            return {"status": "ok", "routed": "headful_chat"}
+        ok = await plugin.send_headful_message(req.message)
+        if ok:
+            return {"status": "ok", "routed": "game_chat"}
+        raise HTTPException(status_code=502, detail="Failed to send headful message")
+    ms_port = plugin.config.get("mindserver_port", 8080)
+    url = f"http://localhost:{ms_port}/api/send-message"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json={"agent": req.agent, "from": req.sender, "message": req.message}, timeout=5.0)
+            if resp.status_code == 200:
+                return {"status": "ok"}
+            else:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except Exception as e:
+        logger.error(f"Failed to send message to MindServer: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+@router.post("/command")
+async def send_agent_command(req: MinecraftCommandRequest, request: Request):
+    """
+    直接向 Minecraft Agent 发送指令，绕过主脑调度。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+
+    payload: Dict[str, Any] = {
+        "goal": req.goal,
+        "sender": req.sender or "frontend",
+        "source": "agent-direct",
+    }
+    if req.interrupt_current:
+        payload["interrupt_current"] = True
+    llm_api_key = request.headers.get("X-Target-Api-Key") or req.llm_api_key
+    llm_base_url = request.headers.get("X-Target-Base-Url") or req.llm_base_url
+    llm_model = request.headers.get("X-Target-Model") or req.llm_model
+    embedding_api_key = request.headers.get("X-Embedding-Api-Key") or req.embedding_api_key
+    embedding_base_url = request.headers.get("X-Embedding-Base-Url") or req.embedding_base_url
+    embedding_model = request.headers.get("X-Embedding-Model") or req.embedding_model
+    if embedding_api_key in ("sk-ntai-internal", "sk-ntai-frontend"):
+        embedding_api_key = None
+    if embedding_api_key or embedding_base_url or embedding_model:
+        existing_embedding = system_state.get_state("embedding_config") or {}
+        updated_embedding = dict(existing_embedding)
+        if embedding_api_key:
+            updated_embedding["api_key"] = embedding_api_key
+        if embedding_base_url:
+            updated_embedding["base_url"] = embedding_base_url
+        if embedding_model:
+            updated_embedding["model"] = embedding_model
+        system_state.update_state("embedding_config", updated_embedding)
+
+    if llm_api_key:
+        payload["llm_api_key"] = llm_api_key
+    if llm_base_url:
+        payload["llm_base_url"] = llm_base_url
+    if llm_model:
+        payload["llm_model"] = llm_model
+    if embedding_api_key:
+        payload["embedding_api_key"] = embedding_api_key
+    if embedding_base_url:
+        payload["embedding_base_url"] = embedding_base_url
+    if embedding_model:
+        payload["embedding_model"] = embedding_model
+
+    res = await plugin.handle_event("minecraft_command", payload)
+    if res and res.get("status") == "received":
+        return {"status": "ok", "queued": res.get("queued")}
+    raise HTTPException(status_code=500, detail=res or {"error": "send_failed"})
+
+@router.post("/headful_action")
+async def send_headful_action(req: HeadfulActionRequest):
+    """
+    直接转发 headful 动作 JSON 到本地 Fabric 模组 WS。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    if getattr(plugin, "control_mode", "headless") != "headful":
+        raise HTTPException(status_code=400, detail="Plugin not in headful mode")
+    ok = await plugin.send_headful_action(req.action)
+    if ok:
+        return {"status": "ok"}
+    raise HTTPException(status_code=502, detail="Failed to send headful action")
+
+@router.post("/headful_skill")
+async def run_headful_skill(req: HeadfulSkillRequest, request: Request):
+    """
+    执行 headful 背包/容器技能（自动装备/整理/合成等）。
+    """
+    plugin = get_plugin("Minecraft-mindcraft")
+    if not plugin:
+        raise HTTPException(status_code=404, detail="Minecraft plugin not found")
+    if getattr(plugin, "control_mode", "headless") != "headful":
+        raise HTTPException(status_code=400, detail="Plugin not in headful mode")
+    params = dict(req.params or {})
+    llm_api_key = request.headers.get("X-Target-Api-Key")
+    llm_base_url = request.headers.get("X-Target-Base-Url")
+    llm_model = request.headers.get("X-Target-Model")
+    llm_provider_id = request.headers.get("X-Target-Provider-Id")
+    llm_require_frontend = request.headers.get("X-LLM-Require-Frontend")
+    embedding_api_key = request.headers.get("X-Embedding-Api-Key")
+    embedding_base_url = request.headers.get("X-Embedding-Base-Url")
+    embedding_model = request.headers.get("X-Embedding-Model")
+    if llm_api_key:
+        params["llm_api_key"] = llm_api_key
+    if llm_base_url:
+        params["llm_base_url"] = llm_base_url
+    if llm_model:
+        params["llm_model"] = llm_model
+    if llm_provider_id:
+        params["llm_provider_id"] = llm_provider_id
+    if llm_require_frontend:
+        params["llm_require_frontend"] = llm_require_frontend
+    if embedding_api_key:
+        params["embedding_api_key"] = embedding_api_key
+    if embedding_base_url:
+        params["embedding_base_url"] = embedding_base_url
+    if embedding_model:
+        params["embedding_model"] = embedding_model
+    result = await plugin.run_headful_skill(req.skill, params)
+    encoded = jsonable_encoder(result)
+    if result.get("ok"):
+        return {"status": "ok", "result": encoded}
+    raise HTTPException(status_code=400, detail=encoded)
+
+@router.get("/stream", response_class=HTMLResponse)
+async def get_minecraft_stream():
+    """
+    返回一个专门用于 OBS 捕获的全屏推流页面。
+    """
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Minecraft AI POV Stream</title>
+        <style>
+            body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: black; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+            #stream { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+            #status-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); }
+            .stats-row { display: flex; gap: 15px; color: white; font-size: 14px; text-shadow: 1px 1px 2px black; }
+            .stat-item { display: flex; align-items: center; gap: 5px; }
+            .health-bar { color: #ff4d4d; font-weight: bold; }
+            .food-bar { color: #ffa366; font-weight: bold; }
+            .pos-info { color: #aaa; font-size: 12px; }
+            #status-top { position: absolute; top: 10px; left: 10px; color: #00ff00; font-family: monospace; text-shadow: 1px 1px 2px black; }
+            .live-badge { background: red; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; margin-right: 5px; animation: blink 1s infinite; }
+            @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+            .held-item { background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.3); }
+        </style>
+    </head>
+    <body>
+        <div id="status-top"><span class="live-badge">LIVE</span> <span id="agent-name">Waiting for stream...</span></div>
+        <img id="stream" src="" />
+        <div id="status-bar">
+            <div class="stats-row">
+                <div class="stat-item health-bar">❤️ <span id="hp">20</span>/20</div>
+                <div class="stat-item food-bar">🍖 <span id="food">20</span>/20</div>
+                <div class="stat-item">⚔️ <span id="held-item" class="held-item">None</span></div>
+            </div>
+            <div class="pos-info">XYZ: <span id="pos">0, 0, 0</span></div>
+        </div>
+        <script>
+            const streamImg = document.getElementById('stream');
+            const agentName = document.getElementById('agent-name');
+            const hpText = document.getElementById('hp');
+            const foodText = document.getElementById('food');
+            const heldItemText = document.getElementById('held-item');
+            const posText = document.getElementById('pos');
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/live2d/ws`;
+            
+            function connect() {
+                const ws = new WebSocket(wsUrl);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'minecraft_pov') {
+                        streamImg.src = 'data:image/jpeg;base64,' + data.image;
+                        agentName.innerText = data.agent;
+                        
+                        if (data.stats) {
+                            hpText.innerText = Math.round(data.stats.health || 0);
+                            foodText.innerText = Math.round(data.stats.food || 0);
+                            heldItemText.innerText = data.stats.heldItem || 'None';
+                            if (data.stats.pos) {
+                                posText.innerText = `${Math.round(data.stats.pos.x)}, ${Math.round(data.stats.pos.y)}, ${Math.round(data.stats.pos.z)}`;
+                            }
+                        }
+                    }
+                };
+                ws.onclose = () => {
+                    agentName.innerText = 'Disconnected. Reconnecting...';
+                    setTimeout(connect, 2000);
+                };
+                ws.onerror = (err) => {
+                    console.error('WebSocket Error:', err);
+                };
+            }
+            connect();
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)

@@ -1,0 +1,796 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../settings/settings.dart';
+
+class TokenUsage {
+  final int promptTokens;
+  final int completionTokens;
+  final int totalTokens;
+  final String model;
+  final String type; // main, tool, memory, system
+
+  TokenUsage({
+    required this.promptTokens,
+    required this.completionTokens,
+    required this.totalTokens,
+    required this.model,
+    required this.type,
+  });
+}
+
+class AiResponse {
+  final String content;
+  final String? emotion;
+  final String? reasoningContent;
+  final List<dynamic>? toolCalls;
+  
+  AiResponse({
+    required this.content, 
+    this.emotion, 
+    this.reasoningContent,
+    this.toolCalls
+  });
+}
+
+class LLMService {
+  static const String _kAiProviders = 'settings.ai.providers';
+  static const String _kAiActiveId = 'settings.ai.activeId';
+  
+  // Stream for token usage updates
+  static final _usageController = StreamController<TokenUsage>.broadcast();
+  static Stream<TokenUsage> get usageStream => _usageController.stream;
+
+  Future<AiProviderConfig?> getActiveProviderConfig() async {
+    return _getActiveProvider();
+  }
+
+  Future<AiProviderConfig?> _getActiveProvider() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Note: We no longer force 'neural_hub' here. 
+    // Instead, we return the actual selected provider, and handle the routing in chat().
+    
+    final activeId = prefs.getString(_kAiActiveId);
+    final providersRaw = prefs.getString(_kAiProviders);
+
+    if (providersRaw == null || activeId == null) return null;
+
+    try {
+      final List data = jsonDecode(providersRaw) as List;
+      final providers = data.map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>)).toList();
+      return providers.firstWhere((p) => p.id == activeId, orElse: () => providers.first);
+    } catch (e) {
+      debugPrint("Error loading providers: $e");
+      return null;
+    }
+  }
+
+  Future<List<AiProviderConfig>> getProviders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final providersRaw = prefs.getString(_kAiProviders);
+    if (providersRaw == null) return [];
+    try {
+      final List data = jsonDecode(providersRaw) as List;
+      return data.map((e) => AiProviderConfig.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<AiProviderConfig?> getProviderById(String id) async {
+    final providers = await getProviders();
+    if (providers.isEmpty) return null;
+    try {
+      return providers.firstWhere((p) => p.id == id, orElse: () => providers.first);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> getApiKey() async {
+    final provider = await _getActiveProvider();
+    return provider?.apiKey;
+  }
+
+  Future<bool> isActiveModelVisionCapable() async {
+    final provider = await _getActiveProvider();
+    if (provider == null) return false;
+    return _providerSupportsVision(provider);
+  }
+
+  // No longer used directly, settings are managed by SettingsController
+  Future<void> saveSettings(String apiKey, String baseUrl, String model) async {
+    // Deprecated: Settings are now managed centrally in SystemScreen
+  }
+
+  Future<List<double>> getEmbedding(String text) async {
+    final prefs = await SharedPreferences.getInstance();
+    final embeddingId = prefs.getString('settings.agent.embeddingProviderId');
+    
+    AiProviderConfig? provider;
+    if (embeddingId != null) {
+      provider = await getProviderById(embeddingId);
+    }
+    
+    // 如果没有配置独立的 Embedding 服务商，则使用活跃的主服务商
+    provider ??= await _getActiveProvider();
+    
+    if (provider == null) throw Exception("No active AI provider configured");
+
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+
+    String requestUrl;
+    Map<String, String> headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Determine embedding model based on provider
+    String embeddingModel = provider.model;
+    if (embeddingModel.isEmpty) {
+      embeddingModel = 'text-embedding-ada-002';
+      final targetBaseUrl = provider.baseUrl.toLowerCase();
+      
+      if (targetBaseUrl.contains('siliconflow')) {
+        embeddingModel = 'BAAI/bge-m3';
+      }
+    }
+
+    requestUrl = '$backendUrl/v1/embeddings';
+    headers['X-Target-Api-Key'] = provider.apiKey;
+    headers['X-Target-Model'] = embeddingModel;
+
+    var targetBaseUrl = provider.baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
+
+    try {
+      final response = await http.post(
+        Uri.parse(requestUrl),
+        headers: headers,
+        body: jsonEncode({
+          'input': text,
+          'model': embeddingModel,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        
+        if (data.containsKey('usage')) {
+          final usage = data['usage'];
+          _usageController.add(TokenUsage(
+            promptTokens: usage['prompt_tokens'] ?? 0,
+            completionTokens: 0,
+            totalTokens: usage['total_tokens'] ?? 0,
+            model: 'embedding',
+            type: 'memory',
+          ));
+        }
+
+        final List<dynamic> embedding = data['data'][0]['embedding'];
+        return embedding.cast<double>();
+      } else {
+        debugPrint('Embedding API error: ${response.statusCode} ${response.body}');
+        return [];
+      }
+    } catch (e) {
+      debugPrint('Embedding network error: $e');
+      return [];
+    }
+  }
+
+  Future<AiResponse> chat(
+    List<Map<String, String>> messages, {
+    String usageType = 'main',
+    double temperature = 0.7,
+    AiProviderConfig? providerOverride,
+    String? systemPromptOverride,
+    String? assistantNameOverride,
+    String? sessionId,
+    double? learningProbabilityOverride,
+  }) async {
+    final provider = providerOverride ?? await _getActiveProvider();
+    if (provider == null) throw Exception("No active AI provider configured");
+
+    final prefs = await SharedPreferences.getInstance();
+    final userNickname = prefs.getString('settings.user.nickname') ?? '';
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+    final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
+    final suppressInnerMonologue = prefs.getBool('settings.chat.suppressInnerMonologue') ?? false;
+    final strictNoMarkdown = prefs.getBool('settings.chat.strictNoMarkdown') ?? false;
+    final systemPrompt = systemPromptOverride ?? (prefs.getString('settings.ai.systemPrompt') ?? '');
+    final assistantName = assistantNameOverride ?? (prefs.getString('settings.ai.assistantName') ?? 'Firefly');
+    final proactiveChatEnabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
+    final embeddingProviderId = prefs.getString('settings.agent.embeddingProviderId');
+    AiProviderConfig? embeddingProvider;
+    if (embeddingProviderId != null && embeddingProviderId.isNotEmpty) {
+      final candidate = await getProviderById(embeddingProviderId);
+      if (candidate != null && candidate.category == AiProviderCategory.embedding) {
+        embeddingProvider = candidate;
+      }
+    }
+    if (embeddingProvider == null) {
+      final providers = await getProviders();
+      for (final p in providers) {
+        if (p.category == AiProviderCategory.embedding) {
+          embeddingProvider = p;
+          break;
+        }
+      }
+    }
+    
+    // Parse search region from int setting (0: auto, 1: cn, 2: global)
+    final searchRegionIdx = prefs.getInt('settings.agent.searchRegion');
+    String searchRegion = 'zh-CN'; // Default
+    if (searchRegionIdx != null) {
+      if (searchRegionIdx == 2) {
+        searchRegion = 'wt-wt';
+      } else if (searchRegionIdx == 1) {
+        searchRegion = 'zh-CN';
+      } else {
+        searchRegion = 'zh-CN'; // Auto defaults to CN for now, or could be 'auto' if backend supports it
+      }
+    }
+
+    // Parse Persona Level
+    final personaLevelIdx = prefs.getInt('settings.ui.personaLevel');
+    String personaMode = 'full';
+    if (personaLevelIdx != null) {
+      if (personaLevelIdx == 0) {
+        personaMode = 'basic';
+      } else if (personaLevelIdx == 1) {
+        personaMode = 'advanced';
+      } else {
+        personaMode = 'full';
+      }
+    }
+    
+    // Parse Chat Mode (persona vs standard)
+    final chatModeIdx = prefs.getInt('settings.ui.chatMode');
+    String chatMode = 'persona';
+    if (chatModeIdx != null) {
+      if (chatModeIdx == ChatModeOption.standard.index) {
+        chatMode = 'standard';
+      }
+    }
+    
+    // Deep Research flag (backend-only orchestration mode)
+    final enableDeepResearch = prefs.getBool('settings.backend.deepResearch') ?? false;
+    
+    // Debug logging
+    debugPrint('[LLM] backend forced: true');
+    debugPrint('[LLM] enableBrowser from prefs: $enableBrowser');
+    debugPrint('[LLM] searchRegion: $searchRegion');
+    debugPrint('[LLM] personaMode: $personaMode');
+    debugPrint('[LLM] usageType: $usageType');
+
+    // Determine actual target URL and headers
+    String requestUrl;
+    Map<String, String> headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Route through Python Backend (forced)
+    requestUrl = '$backendUrl/v1/chat/completions';
+
+    // Pass the underlying provider's config to the backend
+    headers['X-Target-Api-Key'] = provider.apiKey;
+    if (userNickname.isNotEmpty) {
+      headers['X-User-Nickname'] = Uri.encodeComponent(userNickname);
+    }
+
+    // Sanitize Base URL for backend (remove /chat/completions if present)
+    var targetBaseUrl = provider.baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
+
+    headers['X-Target-Model'] = provider.model;
+    headers['X-Enable-Browser'] = enableBrowser.toString();
+    headers['X-Search-Region'] = searchRegion;
+    headers['X-Proactive-Chat'] = proactiveChatEnabled.toString();
+    final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+    headers['X-Enable-VTS'] = enableVts.toString();
+    headers['X-Usage-Type'] = usageType;
+    headers['X-Temperature'] = temperature.toString();
+    headers['X-Persona-Mode'] = personaMode;
+    headers['X-Chat-Mode'] = chatMode;
+    headers['X-Deep-Research'] = enableDeepResearch.toString();
+    headers['X-Suppress-Inner-Monologue'] = suppressInnerMonologue.toString();
+    if (chatMode == 'persona' && strictNoMarkdown) {
+      headers['X-Strict-No-Markdown'] = 'true';
+    }
+    final scenarioContext =
+        (prefs.getString('settings.scenario.context') ?? '').trim();
+    final scenarioTasks = prefs.getStringList('settings.scenario.tasks') ?? [];
+    if (scenarioContext.isNotEmpty) {
+      headers['X-Scene-Context'] = Uri.encodeComponent(scenarioContext);
+    }
+    final cleanedTasks = scenarioTasks
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (cleanedTasks.isNotEmpty) {
+      headers['X-Scene-Tasks'] = Uri.encodeComponent(jsonEncode(cleanedTasks));
+    }
+    final learningProbability =
+        learningProbabilityOverride ??
+        prefs.getDouble('settings.user.learningProbability') ??
+        1.0;
+    headers['X-Learning-Probability'] = learningProbability.toString();
+    if (systemPrompt.trim().isNotEmpty) {
+      headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+    }
+    if (assistantName.trim().isNotEmpty) {
+      headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
+    }
+    if (sessionId != null && sessionId.isNotEmpty) {
+      headers['X-Session-Id'] = sessionId;
+    }
+    if (embeddingProvider != null) {
+      if (embeddingProvider.apiKey.isNotEmpty) {
+        headers['X-Embedding-Api-Key'] = embeddingProvider.apiKey;
+      }
+      if (embeddingProvider.baseUrl.isNotEmpty) {
+        var embeddingBaseUrl = embeddingProvider.baseUrl;
+        if (embeddingBaseUrl.endsWith('/chat/completions')) {
+          embeddingBaseUrl = embeddingBaseUrl.replaceAll('/chat/completions', '');
+        }
+        if (embeddingBaseUrl.endsWith('/')) {
+          embeddingBaseUrl = embeddingBaseUrl.substring(0, embeddingBaseUrl.length - 1);
+        }
+        headers['X-Embedding-Base-Url'] = embeddingBaseUrl;
+      }
+      if (embeddingProvider.model.isNotEmpty) {
+        headers['X-Embedding-Model'] = embeddingProvider.model;
+      }
+    } else {
+      headers['X-Disable-Memory'] = 'true';
+    }
+
+    // --- Specialized Agent Providers ---
+    final refinerId = prefs.getString('settings.agent.speechRefinerProviderId');
+    final toolCallerId = prefs.getString('settings.agent.toolCallingProviderId');
+    final deepResearcherId = prefs.getString('settings.agent.deepResearchProviderId');
+
+    if (refinerId != null && refinerId.isNotEmpty) {
+      final refiner = await getProviderById(refinerId);
+      if (refiner != null) {
+        headers['X-Refiner-Model'] = refiner.model;
+        headers['X-Refiner-Api-Key'] = refiner.apiKey;
+        var refinerUrl = refiner.baseUrl;
+        if (refinerUrl.endsWith('/chat/completions')) {
+          refinerUrl = refinerUrl.replaceAll('/chat/completions', '');
+        }
+        if (refinerUrl.endsWith('/')) {
+          refinerUrl = refinerUrl.substring(0, refinerUrl.length - 1);
+        }
+        headers['X-Refiner-Base-Url'] = refinerUrl;
+      }
+    }
+
+    if (toolCallerId != null && toolCallerId.isNotEmpty) {
+      final toolCaller = await getProviderById(toolCallerId);
+      if (toolCaller != null) {
+        headers['X-ToolCaller-Model'] = toolCaller.model;
+        headers['X-ToolCaller-Api-Key'] = toolCaller.apiKey;
+        var toolCallerUrl = toolCaller.baseUrl;
+        if (toolCallerUrl.endsWith('/chat/completions')) {
+          toolCallerUrl = toolCallerUrl.replaceAll('/chat/completions', '');
+        }
+        if (toolCallerUrl.endsWith('/')) {
+          toolCallerUrl = toolCallerUrl.substring(0, toolCallerUrl.length - 1);
+        }
+        headers['X-ToolCaller-Base-Url'] = toolCallerUrl;
+      }
+    }
+
+    if (deepResearcherId != null && deepResearcherId.isNotEmpty) {
+      final deepResearcher = await getProviderById(deepResearcherId);
+      if (deepResearcher != null) {
+        headers['X-Researcher-Model'] = deepResearcher.model;
+        headers['X-Researcher-Api-Key'] = deepResearcher.apiKey;
+        var deepResearcherUrl = deepResearcher.baseUrl;
+        if (deepResearcherUrl.endsWith('/chat/completions')) {
+          deepResearcherUrl = deepResearcherUrl.replaceAll('/chat/completions', '');
+        }
+        if (deepResearcherUrl.endsWith('/')) {
+          deepResearcherUrl = deepResearcherUrl.substring(0, deepResearcherUrl.length - 1);
+        }
+        headers['X-Researcher-Base-Url'] = deepResearcherUrl;
+      }
+    }
+
+    try {
+      final providersRaw = prefs.getString('settings.ai.providers');
+      if (providersRaw != null) {
+        final List data = jsonDecode(providersRaw) as List;
+        final List<Map<String, dynamic>> providers = data.cast<Map<String, dynamic>>();
+        Map<String, dynamic>? ttsProvider;
+        for (final p in providers) {
+          final category = p['category'] as String? ?? 'llm';
+          final enabled = p['enabled'] as bool? ?? true;
+          if (enabled && category == 'tts') { ttsProvider = p; break; }
+        }
+        if (ttsProvider != null) {
+          final ttsKey = ttsProvider['apiKey'] as String? ?? '';
+          var ttsUrl = ttsProvider['baseUrl'] as String? ?? '';
+          if (ttsKey.isNotEmpty) headers['X-SiliconFlow-Api-Key'] = ttsKey;
+          if (ttsUrl.isNotEmpty) {
+            if (ttsUrl.endsWith('/chat/completions')) {
+              ttsUrl = ttsUrl.replaceAll('/chat/completions', '');
+            }
+            if (ttsUrl.endsWith('/')) {
+              ttsUrl = ttsUrl.substring(0, ttsUrl.length - 1);
+            }
+            headers['X-SiliconFlow-Base-Url'] = ttsUrl;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // --- Vision Agent Configuration ---
+    // Only send vision headers when the current request actually uses image content.
+    bool hasImageTag = false;
+    for (final m in messages) {
+      final content = m['content'] ?? '';
+      if (content.contains('[IMAGE:')) {
+        hasImageTag = true;
+        break;
+      }
+    }
+    if (hasImageTag) {
+      final activeVisionId = prefs.getString('settings.ai.activeVisionId');
+      final visionFallbackAgent = prefs.getBool('settings.vision.fallbackAgent') ?? true;
+      final visionPrompt = prefs.getString('settings.vision.promptTemplate') ?? '请用中文用一段话描述这张图片的内容。若有文字请概括其要点。以主题和直观感受为主，避免分点与多段，仅输出纯文本。';
+
+      if (activeVisionId != null && activeVisionId.isNotEmpty) {
+        final visionProvider = await getProviderById(activeVisionId);
+        if (visionProvider != null) {
+          headers['X-Vision-Api-Key'] = visionProvider.apiKey;
+
+          var visionBaseUrl = visionProvider.baseUrl;
+          if (visionBaseUrl.endsWith('/chat/completions')) {
+            visionBaseUrl = visionBaseUrl.replaceAll('/chat/completions', '');
+          }
+          if (visionBaseUrl.endsWith('/')) visionBaseUrl = visionBaseUrl.substring(0, visionBaseUrl.length - 1);
+          headers['X-Vision-Base-Url'] = visionBaseUrl;
+
+          headers['X-Vision-Model'] = visionProvider.model;
+          headers['X-Vision-Prompt'] = Uri.encodeComponent(visionPrompt);
+          headers['X-Vision-Fallback'] = visionFallbackAgent.toString();
+          debugPrint('[LLM] Sending Vision Agent Config: ${visionProvider.model}');
+        }
+      }
+    }
+
+    debugPrint('[LLM] Sending X-Enable-Browser: ${enableBrowser.toString()}');
+    debugPrint('[LLM] Sending X-Search-Region: $searchRegion');
+
+    // Enable Thinking Mode (DeepSeek)
+    final enableThinking = prefs.getBool('settings.ai.enableThinking') ?? false;
+    headers['X-Enable-Thinking'] = enableThinking.toString();
+    debugPrint('[LLM] Sending X-Enable-Thinking: $enableThinking');
+
+    // Note: We don't need Authorization header for the local backend unless it requires it.
+    // But we might want to pass it if the backend is secured. For now, assume local is open.
+
+    final model = provider.model.isNotEmpty ? provider.model : 'gpt-3.5-turbo';
+    final supportsVision = _providerSupportsVision(provider);
+
+    // Parse messages for multimodal content (images)
+    final List<Map<String, dynamic>> payloadMessages = [];
+    for (final m in messages) {
+      final content = m['content'] ?? '';
+      if (supportsVision) {
+        payloadMessages.add({
+          'role': m['role'],
+          'content': _parseMultimodalContent(content),
+        });
+      } else {
+        // For non-vision models, send content as plain text.
+        // [IMAGE:...] tags will remain as text, which is fine.
+        payloadMessages.add({
+          'role': m['role'],
+          'content': content,
+        });
+      }
+    }
+
+    final requestBody = jsonEncode({
+      'model': model,
+      'messages': payloadMessages,
+      'temperature': temperature,
+      // 'user': 'user_id' // Could pass user ID here if available
+    });
+
+    debugPrint('--- [LLM Request ($usageType)] ---');
+    debugPrint('URL: $requestUrl');
+    debugPrint('Model: $model (Vision: $supportsVision)');
+    // Truncate body log if too long
+    debugPrint('Body: ${requestBody.length > 2000 ? '${requestBody.substring(0, 2000)}...' : requestBody}');
+    debugPrint('-----------------------');
+
+    final response = await http.post(
+      Uri.parse(requestUrl),
+      headers: headers,
+      body: requestBody,
+    );
+
+    debugPrint('--- [LLM Response] ---');
+    debugPrint('Status: ${response.statusCode}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
+    debugPrint('------------------------');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      
+      // Track usage
+      if (data.containsKey('usage')) {
+        final usage = data['usage'];
+        _usageController.add(TokenUsage(
+          promptTokens: usage['prompt_tokens'] ?? 0,
+          completionTokens: usage['completion_tokens'] ?? 0,
+          totalTokens: usage['total_tokens'] ?? 0,
+          model: model,
+          type: usageType,
+        ));
+      }
+
+      final choice = data['choices'][0];
+      final message = choice['message'];
+      final content = message['content'];
+      final emotion = data['emotion'] as String?;
+      final reasoningContent = message['reasoning_content'];
+      final toolCalls = message['tool_calls'];
+
+      return AiResponse(
+        content: content, 
+        emotion: emotion,
+        reasoningContent: reasoningContent,
+        toolCalls: toolCalls
+      );
+    } else {
+      throw Exception('Failed to chat: ${response.body}');
+    }
+  }
+
+  dynamic _parseMultimodalContent(String text) {
+    final regex = RegExp(r'\[IMAGE:\s*(.*?)\]');
+    if (!regex.hasMatch(text)) return text;
+
+    final List<Map<String, dynamic>> content = [];
+    final matches = regex.allMatches(text);
+    int lastEnd = 0;
+
+    for (final match in matches) {
+      if (match.start > lastEnd) {
+        final t = text.substring(lastEnd, match.start);
+        if (t.isNotEmpty) content.add({'type': 'text', 'text': t});
+      }
+      final url = match.group(1)?.trim() ?? '';
+      if (url.isNotEmpty) {
+        content.add({
+          'type': 'image_url',
+          'image_url': {'url': url}
+        });
+      }
+      lastEnd = match.end;
+    }
+    if (lastEnd < text.length) {
+      final t = text.substring(lastEnd);
+      if (t.isNotEmpty) content.add({'type': 'text', 'text': t});
+    }
+    return content;
+  }
+
+  Future<String> chatWithProvider(List<Map<String, String>> messages, {String usageType = 'expression', String? providerIdOverride}) async {
+    AiProviderConfig? provider = providerIdOverride != null ? await getProviderById(providerIdOverride) : await _getActiveProvider();
+    if (provider == null) throw Exception("No active AI provider configured");
+
+    final apiKey = provider.apiKey;
+    var baseUrl = provider.baseUrl;
+    final model = provider.model.isNotEmpty ? provider.model : 'gpt-3.5-turbo';
+
+    final prefs = await SharedPreferences.getInstance();
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+
+    final requestBody = jsonEncode({
+      'model': model,
+      'messages': messages,
+      'temperature': 0.4,
+    });
+
+    debugPrint('--- [LLM Provider Request ($usageType)] ---');
+    debugPrint('URL: $baseUrl');
+    debugPrint('Model: $model');
+    debugPrint('Body: ${requestBody.length > 1000 ? '${requestBody.substring(0, 1000)}...' : requestBody}');
+    debugPrint('-----------------------------------------');
+
+    var targetBaseUrl = baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) {
+      targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    }
+
+    final response = await http.post(
+      Uri.parse('$backendUrl/v1/chat/completions'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Api-Key': apiKey,
+        'X-Target-Base-Url': targetBaseUrl,
+        'X-Target-Model': model,
+        'X-Usage-Type': usageType,
+      },
+      body: requestBody,
+    );
+
+    debugPrint('--- [LLM Provider Response ($usageType)] ---');
+    debugPrint('Status: ${response.statusCode}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
+    debugPrint('------------------------------------------');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (data.containsKey('usage')) {
+        final usage = data['usage'];
+        _usageController.add(TokenUsage(
+          promptTokens: usage['prompt_tokens'] ?? 0,
+          completionTokens: usage['completion_tokens'] ?? 0,
+          totalTokens: usage['total_tokens'] ?? 0,
+          model: model,
+          type: usageType,
+        ));
+      }
+      return data['choices'][0]['message']['content'];
+    } else {
+      throw Exception('Failed chat (override): ${response.body}');
+    }
+  }
+
+  String _providerLlmClass(AiProviderConfig provider) {
+    final raw = provider.meta['llm_class'];
+    if (raw is String) return raw.trim().toLowerCase();
+    return '';
+  }
+
+  bool _providerSupportsVision(AiProviderConfig provider) {
+    final llmClass = _providerLlmClass(provider);
+    if (llmClass == 'omni' || llmClass == 'vllm') return true;
+    return _modelSupportsVision(provider.model);
+  }
+
+  bool _modelSupportsVision(String model) {
+    final m = model.toLowerCase();
+    return m.contains('gpt-4o') || m.contains('gpt-4.1') || m.contains('vision') || m.contains('-vl') || m.contains('multimodal');
+  }
+
+  Future<String> chatWithImage({
+    required List<Map<String, String>> messages,
+    required Uint8List imageBytes,
+    String? prompt,
+    String usageType = 'main',
+    String? providerIdOverride,
+  }) async {
+    AiProviderConfig? provider = providerIdOverride != null
+        ? await getProviderById(providerIdOverride)
+        : await _getActiveProvider();
+    if (provider == null) throw Exception("No active AI provider configured");
+
+    final prefs = await SharedPreferences.getInstance();
+    final backendUrl = prefs.getString('settings.backend.url') ?? 'http://localhost:23456';
+    final enableBrowser = prefs.getBool('settings.agent.enableBrowser') ?? false;  // FIX: Use correct key
+    final systemPrompt = prefs.getString('settings.ai.systemPrompt') ?? '';
+    final assistantName = prefs.getString('settings.ai.assistantName') ?? 'Firefly';
+    final proactiveChatEnabled = prefs.getBool('settings.ai.initiativeMode') ?? false;
+
+    final apiKey = provider.apiKey;
+    var baseUrl = provider.baseUrl;
+    final model = provider.model.isNotEmpty ? provider.model : 'gpt-4o-mini';
+
+    if (!_providerSupportsVision(provider)) {
+      throw Exception('当前模型不支持视觉（多模态）');
+    }
+
+    String requestUrl;
+    Map<String, String> headers = {
+      'Content-Type': 'application/json',
+    };
+
+    // Route through Python Backend (forced)
+    requestUrl = '$backendUrl/v1/chat/completions';
+    headers['X-Target-Api-Key'] = apiKey;
+
+    var targetBaseUrl = baseUrl;
+    if (targetBaseUrl.endsWith('/chat/completions')) {
+      targetBaseUrl = targetBaseUrl.replaceAll('/chat/completions', '');
+    }
+    if (targetBaseUrl.endsWith('/')) targetBaseUrl = targetBaseUrl.substring(0, targetBaseUrl.length - 1);
+    headers['X-Target-Base-Url'] = targetBaseUrl;
+
+    headers['X-Target-Model'] = model;
+    headers['X-Enable-Browser'] = enableBrowser.toString();
+    headers['X-Proactive-Chat'] = proactiveChatEnabled.toString();
+    final enableVts = prefs.getBool('settings.vts.enabled') ?? false;
+    headers['X-Enable-VTS'] = enableVts.toString();
+    headers['X-Usage-Type'] = usageType;
+    if (systemPrompt.trim().isNotEmpty) {
+      headers['X-System-Prompt'] = Uri.encodeComponent(systemPrompt.trim());
+    }
+    if (assistantName.trim().isNotEmpty) {
+      headers['X-Assistant-Name'] = Uri.encodeComponent(assistantName.trim());
+    }
+
+    final imageB64 = base64Encode(imageBytes);
+
+    // Build payload messages as dynamic to allow array content for multimodal
+    final List<Map<String, dynamic>> payloadMessages = [];
+    for (final m in messages) {
+      payloadMessages.add({
+        'role': m['role'],
+        'content': m['content'],
+      });
+    }
+    payloadMessages.add({
+      'role': 'user',
+      'content': [
+        if (prompt != null && prompt.isNotEmpty) {'type': 'text', 'text': prompt},
+        {
+          'type': 'image_url',
+          'image_url': {'url': 'data:image/png;base64,$imageB64'}
+        }
+      ]
+    });
+
+    final requestBody = jsonEncode({
+      'model': model,
+      'messages': payloadMessages,
+      'temperature': 0.7,
+    });
+
+    debugPrint('--- [LLM Vision Request] ---');
+    debugPrint('URL: $requestUrl');
+    debugPrint('Model: $model');
+    // Don't log full body for vision as base64 is huge
+    debugPrint('Body (truncated): ${requestBody.length > 500 ? '${requestBody.substring(0, 500)}... [Image Data Omitted] ...' : requestBody}');
+    debugPrint('----------------------------');
+
+    final response = await http.post(
+      Uri.parse(requestUrl),
+      headers: headers,
+      body: requestBody,
+    );
+
+    debugPrint('--- [LLM Vision Response] ---');
+    debugPrint('Status: ${response.statusCode}');
+    debugPrint('Body: ${response.body.length > 500 ? '${response.body.substring(0, 500)}...' : response.body}');
+    debugPrint('-----------------------------');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (data.containsKey('usage')) {
+        final usage = data['usage'];
+        _usageController.add(TokenUsage(
+          promptTokens: usage['prompt_tokens'] ?? 0,
+          completionTokens: usage['completion_tokens'] ?? 0,
+          totalTokens: usage['total_tokens'] ?? 0,
+          model: model,
+          type: usageType,
+        ));
+      }
+      return data['choices'][0]['message']['content'];
+    } else {
+      throw Exception('Failed vision chat: ${response.body}');
+    }
+  }
+}

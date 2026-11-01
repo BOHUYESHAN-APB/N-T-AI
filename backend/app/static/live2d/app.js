@@ -1,0 +1,1823 @@
+function init_app(){
+    // [Log Recorder] Send frontend errors to backend
+    const sendLogToBackend = (msg, exc) => {
+        try {
+            fetch('/api/logs/frontend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+            errors: [{
+                timestamp: Date.now() / 1000,
+                level: 'ERROR',
+                message: msg,
+                exception: exc
+            }]
+        })
+            }).catch(() => {});
+        } catch (_) {}
+    };
+
+    window.onerror = function(message, source, lineno, colno, error) {
+        const msg = `[Global Error] ${message} (${source}:${lineno}:${colno})`;
+        const exc = error ? error.stack : null;
+        console.error(msg, exc);
+        sendLogToBackend(msg, exc);
+        return false;
+    };
+
+    window.onunhandledrejection = function(event) {
+        const msg = `[Unhandled Promise] ${event.reason}`;
+        console.error(msg, event.reason);
+        sendLogToBackend(msg, event.reason ? event.reason.stack : null);
+    };
+
+    // Helper to safely get element
+    const getEl = (id) => document.getElementById(id);
+    const createStubClassList = () => ({
+        add: () => {},
+        remove: () => {},
+        toggle: () => false,
+        contains: () => false,
+    });
+    const createStubElement = () => ({
+        style: {},
+        classList: createStubClassList(),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        setAttribute: () => {},
+        removeAttribute: () => {},
+        appendChild: () => {},
+        remove: () => {},
+        querySelector: () => null,
+        focus: () => {},
+        blur: () => {},
+        textContent: '',
+        innerHTML: '',
+        value: '',
+        disabled: false,
+        scrollTop: 0,
+        scrollHeight: 0,
+    });
+    const ensureEl = (el) => el || createStubElement();
+
+    const micButton = ensureEl(getEl('micButton'));
+    const muteButton = ensureEl(getEl('muteButton'));
+    const screenButton = ensureEl(getEl('screenButton'));
+    const stopButton = ensureEl(getEl('stopButton'));
+    const resetSessionButton = ensureEl(getEl('resetSessionButton'));
+    const statusElement = getEl('status') || { textContent: '' };
+    const chatContainer = getEl('chat-container');
+    const chatContentWrapper = getEl('chat-content-wrapper');
+    const textInputBox = ensureEl(getEl('textInputBox'));
+    const textSendButton = ensureEl(getEl('textSendButton'));
+    const screenshotButton = ensureEl(getEl('screenshotButton'));
+    const screenshotThumbnailContainer = ensureEl(getEl('screenshot-thumbnail-container'));
+    const screenshotsList = ensureEl(getEl('screenshots-list'));
+    const screenshotCount = ensureEl(getEl('screenshot-count'));
+    const clearAllScreenshots = ensureEl(getEl('clear-all-screenshots'));
+    const overlayAiSubtitle = getEl('live2d-subtitle-ai');
+    const overlayBubble = getEl('live2d-speech-bubble');
+    const liteToggleBubble = getEl('live2d-lite-toggle-bubble');
+    const liteToggleSubtitle = getEl('live2d-lite-toggle-subtitle');
+    const liteRefresh = getEl('live2d-lite-refresh');
+    const textInputArea = ensureEl(getEl('text-input-area'));
+    const isLiteMode = !chatContainer;
+    window.live2dLiteMode = isLiteMode;
+    const urlParams = new URLSearchParams(window.location.search);
+    const liteControlsEnabled = urlParams.get('controls') === 'true';
+    if (urlParams.get('capture') === 'flutter') {
+        window.LIVE2D_SCREEN_CAPTURE_VIA_FLUTTER = true;
+    }
+
+    let audioContext;
+    let workletNode;
+    let stream;
+    let isRecording = false;
+    let socket;
+    let currentGeminiMessage = null;
+    let audioPlayerContext = null;
+    let videoTrack, videoSenderInterval;
+    let audioBufferQueue = [];
+    let screenshotCounter = 0; // 截图计数器
+    let isPlaying = false;
+    let audioStartTime = 0;
+    let nextChunkTime = 0; // Added for client-side TTS scheduling
+    let scheduledSources = [];
+    let animationFrameId;
+    let seqCounter = 0;
+    let globalAnalyser = null;
+    let lipSyncActive = false;
+    
+    // Client-side TTS Buffer
+    // let ttsTextBuffer = "";
+    // const sentenceDelimiters = /[.。！？\?!\n]+/;
+    
+    // async function playTTS(text) {
+    //    ...
+    // }
+    let screenCaptureStream = null; // 暂存屏幕共享stream，不再需要每次都弹窗选择共享区域，方便自动重连
+    // 新增：当前选择的麦克风设备ID
+    let selectedMicrophoneId = null;
+    
+    // 麦克风静音检测相关变量
+    let silenceDetectionTimer = null;
+    let hasSoundDetected = false;
+    let inputAnalyser = null;
+    
+    // 模式管理
+    let isTextSessionActive = false;
+    let isSwitchingMode = false; // 新增：模式切换标志
+    let sessionStartedResolver = null; // 用于等待 session_started 消息
+    
+    // Focus模式相关（兼容原有的focus_mode）
+    let focusModeEnabled = (typeof focus_mode !== 'undefined' && focus_mode === true) ? true : false;
+    
+    // 暴露到全局作用域，供 live2d.js 等其他模块访问
+    window.focusModeEnabled = focusModeEnabled;
+
+    const readBool = (key, fallback) => {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === 'true' || raw === 'false') return raw === 'true';
+        } catch (_) {}
+        return fallback;
+    };
+
+    const writeBool = (key, value) => {
+        try {
+            localStorage.setItem(key, value ? 'true' : 'false');
+        } catch (_) {}
+    };
+
+    focusModeEnabled = readBool('live2d.focusModeEnabled', focusModeEnabled);
+    window.focusModeEnabled = focusModeEnabled;
+
+    const overlayStorageKeys = {
+        aiSubtitle: 'live2d.subtitle.ai',
+        bubble: 'live2d.bubble',
+        tts: 'live2d.tts.enabled',
+        voiceChannelMonitor: 'live2d.voiceChannelMonitor',
+        screenshotEnabled: 'live2d.screenshot.enabled',
+    };
+
+    const overlayState = {
+        aiSubtitle: readBool(overlayStorageKeys.aiSubtitle, true),
+        bubble: readBool(overlayStorageKeys.bubble, true),
+        tts: readBool(overlayStorageKeys.tts, true),
+        voiceChannelMonitor: readBool(overlayStorageKeys.voiceChannelMonitor, false),
+        screenshotEnabled: readBool(overlayStorageKeys.screenshotEnabled, true),
+    };
+    let lastAiSubtitle = '';
+    let bubbleHideTimer = null;
+    let bubbleRaf = 0;
+
+    const applyOverlayVisibility = () => {
+        if (overlayAiSubtitle) {
+            overlayAiSubtitle.style.display = overlayState.aiSubtitle && lastAiSubtitle ? 'block' : 'none';
+        }
+        if (overlayBubble && !overlayState.bubble) {
+            overlayBubble.classList.remove('show');
+            overlayBubble.style.opacity = '0';
+        }
+    };
+
+    function applyScreenshotState() {
+        const enabled = overlayState.screenshotEnabled !== false;
+        if (screenshotButton) {
+            screenshotButton.disabled = !enabled;
+        }
+        if (screenshotThumbnailContainer) {
+            if (!enabled || screenshotCounter === 0) {
+                screenshotThumbnailContainer.style.display = 'none';
+            } else {
+                screenshotThumbnailContainer.style.display = 'flex';
+            }
+        }
+        const floatingBtn = document.getElementById('live2d-btn-screenshot');
+        if (floatingBtn) {
+            floatingBtn.style.opacity = enabled ? '1' : '0.5';
+            floatingBtn.style.pointerEvents = enabled ? 'auto' : 'none';
+        }
+    }
+
+    const setLiteButtonActive = (btn, active, labelOn, labelOff) => {
+        if (!btn) return;
+        btn.dataset.active = active ? 'true' : 'false';
+        if (labelOn && labelOff) {
+            btn.textContent = active ? labelOn : labelOff;
+        }
+    };
+
+    const syncLiteControls = () => {
+        if (!liteControlsEnabled) return;
+        setLiteButtonActive(liteToggleBubble, overlayState.bubble, '气泡:开', '气泡:关');
+        setLiteButtonActive(liteToggleSubtitle, overlayState.aiSubtitle, '字幕:开', '字幕:关');
+    };
+
+    if (liteControlsEnabled) {
+        if (liteToggleBubble) {
+            liteToggleBubble.addEventListener('click', () => {
+                setOverlayState('bubble', !overlayState.bubble);
+            });
+        }
+        if (liteToggleSubtitle) {
+            liteToggleSubtitle.addEventListener('click', () => {
+                setOverlayState('aiSubtitle', !overlayState.aiSubtitle);
+            });
+        }
+        if (liteRefresh) {
+            liteRefresh.addEventListener('click', () => {
+                window.location.reload();
+            });
+        }
+    }
+
+    const setOverlayState = (key, value) => {
+        if (!(key in overlayState)) return;
+        overlayState[key] = !!value;
+        const storageKey = overlayStorageKeys[key];
+        if (storageKey) {
+            writeBool(storageKey, overlayState[key]);
+        }
+        applyOverlayVisibility();
+        if (key === 'bubble' && !overlayState.bubble) {
+            if (bubbleHideTimer) {
+                clearTimeout(bubbleHideTimer);
+                bubbleHideTimer = null;
+            }
+            if (bubbleRaf) {
+                cancelAnimationFrame(bubbleRaf);
+                bubbleRaf = 0;
+            }
+        }
+        if (key === 'tts') {
+            window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !overlayState.tts;
+        }
+        if (key === 'screenshotEnabled') {
+            applyScreenshotState();
+        }
+        syncLiteControls();
+    };
+
+    window.setLive2dOverlayState = (key, value) => setOverlayState(key, value);
+    window.getLive2dOverlayState = () => ({ ...overlayState });
+    applyOverlayVisibility();
+    applyScreenshotState();
+    window.LIVE2D_DISABLE_WEBSOCKET_AUDIO = !overlayState.tts;
+    syncLiteControls();
+
+    const normalizeSubtitleText = (text) => {
+        if (!text) return '';
+        return text.replace(/\s+/g, ' ').trim();
+    };
+
+    const sanitizeSubtitleText = (text) => {
+        let cleaned = normalizeSubtitleText(text);
+        if (!cleaned) return '';
+        cleaned = cleaned.replace(/\[SPLIT\]/g, ' ');
+        cleaned = cleaned.replace(/\[END_OF_SPEECH\]/g, ' ');
+        cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+        cleaned = cleaned.replace(/`([^`]*)`/g, '$1');
+        cleaned = cleaned.replace(/[>*#_`]/g, ' ');
+        cleaned = cleaned.replace(/\(.*?\)/g, ' ');
+        cleaned = cleaned.replace(/（.*?）/g, ' ');
+        cleaned = cleaned.replace(/\s+/g, ' ').trim();
+        return cleaned;
+    };
+
+    const shouldIgnoreSubtitleText = (text) => {
+        const raw = (text || '').toString();
+        if (!raw.trim()) return true;
+        const lowered = raw.toLowerCase();
+        if (lowered.includes('[system') || lowered.includes('system notification')) return true;
+        if (lowered.includes('[tool') || lowered.includes('tool output') || lowered.includes('tool result')) return true;
+        if (raw.includes('【环境感知更新】') || raw.includes('心跳')) return true;
+        return false;
+    };
+
+    const updateAiSubtitle = (text, isNewMessage) => {
+        if (shouldIgnoreSubtitleText(text)) return;
+        const normalized = sanitizeSubtitleText(text);
+        if (!normalized) return;
+        if (isNewMessage) {
+            lastAiSubtitle = normalized;
+        } else {
+            lastAiSubtitle = `${lastAiSubtitle}${normalized}`.trim();
+        }
+        if (overlayAiSubtitle && overlayState.aiSubtitle) {
+            overlayAiSubtitle.textContent = lastAiSubtitle;
+            overlayAiSubtitle.style.display = 'block';
+        }
+        updateSpeechBubble(lastAiSubtitle);
+    };
+
+    const updateSpeechBubblePosition = () => {
+        if (!overlayBubble || !overlayState.bubble || !overlayBubble.classList.contains('show')) {
+            if (bubbleRaf) {
+                cancelAnimationFrame(bubbleRaf);
+                bubbleRaf = 0;
+            }
+            return;
+        }
+        try {
+            const model = window.live2dManager && window.live2dManager.currentModel;
+            if (model && typeof model.getBounds === 'function') {
+                const bounds = model.getBounds();
+                const x = bounds.left + (bounds.right - bounds.left) * 0.5;
+                const y = Math.max(16, bounds.top - 12);
+                overlayBubble.style.left = `${x}px`;
+                overlayBubble.style.top = `${y}px`;
+            } else {
+                overlayBubble.style.left = '50%';
+                overlayBubble.style.top = '18%';
+            }
+        } catch (_) {
+            overlayBubble.style.left = '50%';
+            overlayBubble.style.top = '18%';
+        }
+        bubbleRaf = requestAnimationFrame(updateSpeechBubblePosition);
+    };
+
+    const updateSpeechBubble = (text) => {
+        if (!overlayBubble || !overlayState.bubble) return;
+        if (shouldIgnoreSubtitleText(text)) return;
+        const normalized = sanitizeSubtitleText(text);
+        if (!normalized) return;
+        overlayBubble.textContent = normalized;
+        overlayBubble.classList.add('show');
+        if (bubbleHideTimer) {
+            clearTimeout(bubbleHideTimer);
+        }
+        bubbleHideTimer = setTimeout(() => {
+            overlayBubble.classList.remove('show');
+        }, 6000);
+        if (!bubbleRaf) {
+            bubbleRaf = requestAnimationFrame(updateSpeechBubblePosition);
+        }
+    };
+
+    const setFocusModeEnabled = (flag) => {
+        focusModeEnabled = !!flag;
+        window.focusModeEnabled = focusModeEnabled;
+        writeBool('live2d.focusModeEnabled', focusModeEnabled);
+    };
+
+    const setFloatingButtonActive = (id, active) => {
+        const btn = document.getElementById(`live2d-btn-${id}`);
+        if (!btn) return;
+        btn.dataset.active = active ? 'true' : 'false';
+        btn.style.background = active ? 'rgba(79, 140, 255, 0.9)' : 'rgba(255, 255, 255, 0.9)';
+    };
+
+    setFloatingButtonActive('tts', overlayState.tts);
+    setFloatingButtonActive('voice', overlayState.voiceChannelMonitor);
+    if (textInputArea) {
+        setFloatingButtonActive('text', !textInputArea.classList.contains('hidden'));
+    }
+
+    const setLive2dTtsEnabled = (flag, options = {}) => {
+        setOverlayState('tts', flag);
+        setFloatingButtonActive('tts', !!flag);
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (shouldBroadcast && socket && socket.readyState === WebSocket.OPEN) {
+            try {
+                socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: !!flag }));
+            } catch (_) {}
+        }
+    };
+
+    const applyVoiceChannelState = (flag) => {
+        setOverlayState('voiceChannelMonitor', flag);
+        setFloatingButtonActive('voice', !!flag);
+    };
+
+    const setVoiceChannelMonitorEnabled = async (flag, options = {}) => {
+        applyVoiceChannelState(flag);
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (!shouldBroadcast) return;
+        try {
+            await fetch('/api/live2d/agent/voice_channel_monitor', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    channel_id: 'default',
+                    is_active: !!flag,
+                }),
+            });
+        } catch (_) {}
+    };
+
+    if (overlayState.voiceChannelMonitor) {
+        setVoiceChannelMonitorEnabled(true);
+    }
+
+    const setLive2dScreenshotEnabled = (flag, options = {}) => {
+        setOverlayState('screenshotEnabled', flag);
+        const shouldBroadcast = (typeof options === 'object')
+            ? options.broadcast !== false
+            : options !== false;
+        if (shouldBroadcast && socket && socket.readyState === WebSocket.OPEN) {
+            try {
+                socket.send(JSON.stringify({ action: 'set_screen_capture_enabled', enabled: !!flag }));
+            } catch (_) {}
+        }
+    };
+
+    const toggleTextInputPanel = () => {
+        if (!textInputArea) return;
+        textInputArea.classList.toggle('hidden');
+        setFloatingButtonActive('text', !textInputArea.classList.contains('hidden'));
+    };
+
+    window.setFocusModeEnabled = setFocusModeEnabled;
+    window.setLive2dTtsEnabled = setLive2dTtsEnabled;
+    window.setVoiceChannelMonitorEnabled = setVoiceChannelMonitorEnabled;
+    window.setLive2dScreenshotEnabled = setLive2dScreenshotEnabled;
+    window.toggleTextInputPanel = toggleTextInputPanel;
+
+    const requestFlutterScreenCapture = () => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+        try {
+            socket.send(JSON.stringify({ action: 'request_screen_capture', source: 'live2d' }));
+            return true;
+        } catch (_) {
+            return false;
+        }
+    };
+    
+    // WebSocket心跳保活
+    let heartbeatInterval = null;
+    const HEARTBEAT_INTERVAL = 30000; // 30秒发送一次心跳
+
+    function isMobile() {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
+    }
+
+    // 建立WebSocket连接
+    function connectWebSocket() {
+        const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+        const wsUrl = `${protocol}://${window.location.host}/api/live2d/ws`;
+        // Old: const characterName = ... /ws/${characterName} -> This was causing 403 errors
+        
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = () => {
+            console.log('WebSocket连接已建立');
+            
+            // 启动心跳保活机制
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+            heartbeatInterval = setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        action: 'ping'
+                    }));
+                }
+            }, HEARTBEAT_INTERVAL);
+            console.log('心跳保活机制已启动');
+
+            if (overlayState.tts !== undefined) {
+                try {
+                    socket.send(JSON.stringify({ action: 'set_tts_enabled', enabled: overlayState.tts }));
+                } catch (_) {}
+            }
+        };
+
+        socket.onmessage = (event) => {
+            if (event.data instanceof Blob) {
+                // 处理二进制音频数据
+                console.log("收到新的音频块")
+                handleAudioBlob(event.data);
+                return;
+            }
+
+            try {
+                const response = JSON.parse(event.data);
+
+
+                if (response.type === 'gemini_response') {
+                    // 检查是否是新消息的开始
+                    const isNewMessage = response.isNewMessage === undefined ? true : !!response.isNewMessage;
+                    const reasoning = response.reasoning_content || null;
+                    const toolCalls = response.tool_calls || null;
+                    appendMessage(response.text || '', 'gemini', isNewMessage, reasoning, toolCalls);
+                    updateAiSubtitle(response.text || '', isNewMessage);
+                    
+                    // Reverted client-side TTS trigger
+                    // Backend will broadcast 'audio' events
+
+                } else if (response.type === 'voice_channel_update') {
+                    const channelId = response.channel_id || '';
+                    const isActive = !!response.is_active;
+                    const stateText = isActive ? '开始监听' : '停止监听';
+                    appendMessage(`语音频道 ${channelId} ${stateText}`, 'chat_normal', true);
+                    updateStatus(`语音频道 ${channelId} ${stateText}`, 'processing');
+                    setVoiceChannelMonitorEnabled(isActive, { broadcast: false });
+
+                } else if (response.type === 'voice_channel_transcript') {
+                    const channelId = response.channel_id || '';
+                    const speaker = response.speaker || '';
+                    const text = response.text || '';
+                    const prefix = speaker ? `【语音频道 ${channelId}】${speaker}: ` : `【语音频道 ${channelId}】`;
+                    appendMessage(`${prefix}${text}`, 'chat_normal', true);
+                } else if (response.type === 'screen_capture_toggle') {
+                    const enabled = response.enabled !== false;
+                    setLive2dScreenshotEnabled(enabled, { broadcast: false });
+                    updateStatus(enabled ? '截图已开启' : '截图已关闭', 'normal');
+                } else if (response.type === 'tts_toggle') {
+                    const enabled = response.enabled !== false;
+                    setLive2dTtsEnabled(enabled, { broadcast: false });
+                    updateStatus(enabled ? 'TTS 已开启' : 'TTS 已关闭', 'normal');
+
+                } else if (response.type === 'chat_message') {
+                    // Generic chat message (User, Chat, SC, Agent)
+                    appendMessage(response.text, response.sender || 'chat_normal', true);
+                    const sender = (response.sender || '').toString().toLowerCase();
+                    if (sender === 'assistant' || sender === 'ai' || sender === 'gemini') {
+                        updateAiSubtitle(response.text || '', true);
+                    }
+
+                } else if (response.type === 'user_transcript') {
+                    // 处理用户语音转录，显示在聊天界面
+                    appendMessage(response.text, 'user', true);
+                } else if (response.type === 'user_activity') {
+                    clearAudioQueue();
+                } if (response.type === 'cozy_audio' || response.type === 'audio') {
+                    if (!window.LIVE2D_DISABLE_WEBSOCKET_AUDIO) {
+                        console.log("收到后端音频消息:", response.type);
+                        const audioData = response.data || {};
+                        if (typeof audioData.start_at === 'number') {
+                            window.lastAudioStartAt = audioData.start_at;
+                        }
+                        if (window.playAudioBase64 && audioData.audio) {
+                            window.playAudioBase64(audioData.audio);
+                        } else if (window.playAudioUrl && audioData.url) {
+                            window.playAudioUrl(audioData.url);
+                        } else if (window.playAudioBase64 && response.audioData) {
+                            window.playAudioBase64(response.audioData);
+                        }
+                    }
+                } else if (response.type === 'screen_share_error') {
+                    // 屏幕分享/截图错误，复位按钮状态
+                    statusElement.textContent = response.message;
+                    
+                    // 停止屏幕分享
+                    stopScreening();
+                    
+                    // 清理屏幕捕获流
+                    if (screenCaptureStream) {
+                        screenCaptureStream.getTracks().forEach(track => track.stop());
+                        screenCaptureStream = null;
+                    }
+                    
+                    // 复位按钮状态
+                    if (isRecording) {
+                        // 在语音模式下（屏幕分享）
+                        micButton.disabled = true;
+                        muteButton.disabled = false;
+                        screenButton.disabled = false;
+                        stopButton.disabled = true;
+                        resetSessionButton.disabled = false;
+                    } else if (isTextSessionActive) {
+                        // 在文本模式下（截图）
+                        screenshotButton.disabled = false;
+                    }
+                } else if (response.type === 'status') {
+                    // 如果正在切换模式且收到"已离开"消息，则忽略
+                    if (isSwitchingMode && response.message.includes('已离开')) {
+                        console.log('模式切换中，忽略"已离开"状态消息');
+                        return;
+                    }
+                    statusElement.textContent = response.message;
+                    if (response.message === `${lanlan_config.lanlan_name}失联了，即将重启！`){
+                        if (isRecording === false && !isTextSessionActive){
+                            statusElement.textContent = `${lanlan_config.lanlan_name}正在打盹...`;
+                        } else if (isTextSessionActive) {
+                            statusElement.textContent = `正在文本聊天中...`;
+                        } else {
+                            stopRecording();
+                            if (socket.readyState === WebSocket.OPEN) {
+                                socket.send(JSON.stringify({
+                                    action: 'end_session'
+                                }));
+                            }
+                            hideLive2d();
+                            micButton.disabled = true;
+                            muteButton.disabled = true;
+                            screenButton.disabled = true;
+                            stopButton.disabled = true;
+                            resetSessionButton.disabled = true;
+
+                            setTimeout(async () => {
+                                try {
+                                    // 创建一个 Promise 来等待 session_started 消息
+                                    const sessionStartPromise = new Promise((resolve, reject) => {
+                                        sessionStartedResolver = resolve;
+                                        
+                                        // 设置超时（15秒），如果超时则拒绝
+                                        setTimeout(() => {
+                                            if (sessionStartedResolver) {
+                                                sessionStartedResolver = null;
+                                                reject(new Error('Session启动超时'));
+                                            }
+                                        }, 10000);
+                                    });
+                                    
+                                    // 发送start session事件
+                                    socket.send(JSON.stringify({
+                                        action: 'start_session',
+                                        input_type: 'audio'
+                                    }));
+                                    
+                                    // 等待session真正启动成功
+                                    await sessionStartPromise;
+                                    
+                                    showLive2d();
+                                    await startMicCapture();
+                                    if (screenCaptureStream != null){
+                                        await startScreenSharing();
+                                    }
+                                    statusElement.textContent = `重启完成，${lanlan_config.lanlan_name}回来了！`;
+                                } catch (error) {
+                                    console.error("重启时出错:", error);
+                                    statusElement.textContent = `重启失败: ${error.message}`;
+                                }
+                            }, 7500); // 7.5秒后执行
+                        }
+                    }
+                } else if (response.type === 'expression') {
+                    window.LanLan1.registered_expressions[response.message]();
+                } else if (response.type === 'system' && response.data === 'turn end') {
+                    console.log('收到turn end事件，开始情感分析');
+                    
+                    // Flush remaining TTS
+                    // if (ttsTextBuffer.trim().length > 0) {
+                    //      console.log(`[Frontend TTS] Flushing remaining: "${ttsTextBuffer}"`);
+                    //      playTTS(ttsTextBuffer, seqCounter++);
+                    //      ttsTextBuffer = "";
+                    // }
+
+                    // 消息完成时进行情感分析
+                    if (currentGeminiMessage) {
+                        const fullText = currentGeminiMessage.textContent.replace(/^\[\d{2}:\d{2}:\d{2}\] 🎀 /, '');
+                        setTimeout(async () => {
+                            const emotionResult = await analyzeEmotion(fullText);
+                            if (emotionResult && emotionResult.emotion) {
+                                console.log('消息完成，情感分析结果:', emotionResult);
+                                applyEmotion(emotionResult.emotion);
+                            }
+                        }, 100);
+                    }
+                    
+                } else if (response.type === 'session_started') {
+                    console.log('收到session_started事件，模式:', response.input_mode);
+                    // 解析 session_started Promise
+                    if (sessionStartedResolver) {
+                        sessionStartedResolver(response.input_mode);
+                        sessionStartedResolver = null;
+                    }
+                } else if (response.type === 'auto_close_mic') {
+                    console.log('收到auto_close_mic事件，自动关闭麦克风');
+                    // 长时间无语音输入，自动关闭麦克风但不关闭live2d
+                    if (isRecording) {
+                        // 停止录音，但不隐藏live2d
+                        stopRecording();
+                        
+                        // 复位按钮状态
+                        micButton.disabled = false;
+                        muteButton.disabled = true;
+                        screenButton.disabled = true;
+                        stopButton.disabled = true;
+                        resetSessionButton.disabled = false;
+                        
+                        // 移除录音状态类
+                        micButton.classList.remove('recording');
+                        const toggleButton = document.getElementById('toggle-mic-selector');
+                        if (toggleButton) {
+                            toggleButton.classList.remove('recording');
+                        }
+                        
+                        // 重置浮动按钮状态（恢复默认白色背景）
+                        const floatingMicBtn = document.getElementById('live2d-btn-mic');
+                        if (floatingMicBtn) {
+                            floatingMicBtn.dataset.active = 'false';
+                            floatingMicBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+                        }
+                        const floatingScreenBtn = document.getElementById('live2d-btn-screen');
+                        if (floatingScreenBtn) {
+                            floatingScreenBtn.dataset.active = 'false';
+                            floatingScreenBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+                        }
+                        
+                        // 显示提示信息
+                        statusElement.textContent = response.message || '长时间无语音输入，已自动关闭麦克风';
+                    }
+                }
+            } catch (error) {
+                console.error('处理消息失败:', error);
+            }
+        };
+
+        socket.onclose = () => {
+            console.log('WebSocket连接已关闭');
+            
+            // 清理心跳定时器
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+                console.log('心跳保活机制已停止');
+            }
+            
+            // 重置文本session状态，因为后端会清理session
+            if (isTextSessionActive) {
+                isTextSessionActive = false;
+                console.log('WebSocket断开，已重置文本session状态');
+            }
+            // 尝试重新连接
+            setTimeout(connectWebSocket, 3000);
+        };
+
+        socket.onerror = (error) => {
+            console.error('WebSocket错误:', error);
+        };
+    }
+
+    // 初始化连接
+    connectWebSocket();
+
+    window.addEventListener('live2d-mic-toggle', () => {
+        if (typeof window.switchMicCapture === 'function') {
+            window.switchMicCapture();
+        }
+    });
+
+    window.addEventListener('live2d-screen-toggle', () => {
+        if (typeof window.switchScreenSharing === 'function') {
+            window.switchScreenSharing();
+        }
+    });
+
+    window.addEventListener('live2d-screenshot-click', () => {
+        if (!overlayState.screenshotEnabled) {
+            updateStatus('截图功能已关闭', 'normal');
+            return;
+        }
+        if (screenshotButton && !screenshotButton.disabled) {
+            screenshotButton.click();
+        }
+    });
+
+    window.addEventListener('live2d-text-click', () => {
+        toggleTextInputPanel();
+    });
+
+    window.addEventListener('live2d-tts-toggle', (event) => {
+        const active = event.detail && typeof event.detail.active === 'boolean' ? event.detail.active : overlayState.tts;
+        setLive2dTtsEnabled(active);
+    });
+
+    window.addEventListener('live2d-voice-toggle', (event) => {
+        const active = event.detail && typeof event.detail.active === 'boolean' ? event.detail.active : overlayState.voiceChannelMonitor;
+        setVoiceChannelMonitorEnabled(active);
+        setFloatingButtonActive('voice', active);
+    });
+
+    async function startAudioWorklet(mediaStream) {
+        if (!mediaStream) return;
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
+        try {
+            await audioContext.audioWorklet.addModule('/static/live2d/audio-processor.js');
+        } catch (e) {
+            try {
+                await audioContext.audioWorklet.addModule('audio-processor.js');
+            } catch (_) {
+                throw e;
+            }
+        }
+
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        workletNode = new AudioWorkletNode(audioContext, 'audio-processor', {
+            processorOptions: {
+                originalSampleRate: audioContext.sampleRate,
+                targetSampleRate: 16000
+            }
+        });
+
+        const silentGain = audioContext.createGain();
+        silentGain.gain.value = 0;
+
+        source.connect(workletNode);
+        workletNode.connect(silentGain);
+        silentGain.connect(audioContext.destination);
+
+        workletNode.port.onmessage = (event) => {
+            if (!isRecording) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (focusModeEnabled && window.LIVE2D_AUDIO_PLAYING) return;
+            const pcm = event.data;
+            if (!pcm || !pcm.buffer) return;
+            try {
+                socket.send(pcm.buffer);
+            } catch (_) {}
+        };
+
+        isRecording = true;
+    }
+
+    function stopRecording() {
+        isRecording = false;
+
+        try {
+            if (workletNode) {
+                workletNode.port.onmessage = null;
+                workletNode.disconnect();
+            }
+        } catch (_) {}
+        workletNode = null;
+
+        try {
+            if (audioContext) {
+                audioContext.close();
+            }
+        } catch (_) {}
+        audioContext = null;
+
+        try {
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+            }
+        } catch (_) {}
+        stream = null;
+
+        try {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ action: 'end_session' }));
+            }
+        } catch (_) {}
+    }
+
+    // 添加消息到聊天界面
+    function appendMessage(text, sender, isNewMessage = true, reasoning = null, toolCalls = null) {
+        if (sender === 'gemini' || sender === 'ai' || sender === 'assistant') {
+            updateAiSubtitle(text, isNewMessage);
+        } else if (sender === 'user') {
+            updateUserSubtitle(text, 'mic');
+        }
+
+        if (!chatContentWrapper) return;
+
+        function getCurrentTimeString() {
+            return new Date().toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // Map sender to CSS class and Icon
+        let cssClass = sender;
+        let icon = '';
+        let showTimestamp = true;
+
+        switch (sender) {
+            case 'gemini':
+            case 'ai':
+                cssClass = 'gemini'; // Left
+                icon = '🎀';
+                break;
+            case 'user':
+                cssClass = 'user'; // Right
+                icon = '💬';
+                break;
+            case 'chat_normal':
+                cssClass = 'chat-normal'; // Center
+                icon = ''; 
+                showTimestamp = false; 
+                break;
+            case 'chat_sc':
+                cssClass = 'chat-sc'; // Center Gold
+                icon = '💰';
+                break;
+            case 'agent':
+                cssClass = 'agent'; // Distinct Left
+                icon = '🤖';
+                break;
+            default:
+                // Keep original logic for unknown senders or 'system'
+                if (sender === 'system') {
+                    cssClass = 'system';
+                    icon = '⚙️';
+                }
+        }
+
+        if ((sender === 'gemini' || sender === 'ai') && !isNewMessage && currentGeminiMessage) {
+            // Update existing Gemini message
+            
+            // 1. Update Reasoning if present
+            if (reasoning) {
+                let thinkingEl = currentGeminiMessage.querySelector('.thinking-content');
+                if (!thinkingEl) {
+                    // Create if missing (though should be created at start)
+                    const thinkingContainer = document.createElement('div');
+                    thinkingContainer.className = 'thinking-process expanded'; // Auto-expand on new stream
+                    thinkingContainer.innerHTML = `
+                        <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <span>💭 Thinking Process</span>
+                        </div>
+                        <div class="thinking-content"></div>
+                    `;
+                    currentGeminiMessage.insertBefore(thinkingContainer, currentGeminiMessage.firstChild);
+                    thinkingEl = thinkingContainer.querySelector('.thinking-content');
+                }
+                thinkingEl.textContent += reasoning;
+                
+                // Show indicator in status bar
+                updateStatus('Thinking...', 'thinking');
+            }
+
+            // 2. Update Tool Calls if present
+            if (toolCalls && toolCalls.length > 0) {
+                 // Append tool calls before text content but after thinking
+                 toolCalls.forEach(tool => {
+                     // Check if already rendered
+                     if (!currentGeminiMessage.querySelector(`[data-tool-id="${tool.id}"]`)) {
+                         const toolEl = document.createElement('div');
+                         toolEl.className = 'tool-call';
+                         toolEl.setAttribute('data-tool-id', tool.id);
+                         toolEl.innerHTML = `<span class="tool-name">🛠️ Calling: ${tool.function.name}</span>`;
+                         // Insert before the text content (last child usually)
+                         currentGeminiMessage.insertBefore(toolEl, currentGeminiMessage.lastChild);
+                     }
+                 });
+                 
+                 updateStatus('Using Tools...', 'processing');
+            }
+
+            // 3. Update Content
+            if (text) {
+                let contentEl = currentGeminiMessage.querySelector('.message-content');
+                if (!contentEl) {
+                    contentEl = document.createElement('div');
+                    contentEl.className = 'message-content';
+                    currentGeminiMessage.appendChild(contentEl);
+                }
+                contentEl.insertAdjacentHTML('beforeend', text.replaceAll('\n', '<br>'));
+                
+                // Reset status if generating text
+                updateStatus('Speaking...', 'processing');
+            }
+
+        } else {
+            // Create new message
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', cssClass);
+            
+            // Reasoning Section
+            if (reasoning) {
+                const thinkingContainer = document.createElement('div');
+                thinkingContainer.className = 'thinking-process expanded';
+                thinkingContainer.innerHTML = `
+                    <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <span>💭 Thinking Process</span>
+                    </div>
+                    <div class="thinking-content">${reasoning}</div>
+                `;
+                messageDiv.appendChild(thinkingContainer);
+            }
+
+            // Tool Calls Section
+            if (toolCalls && toolCalls.length > 0) {
+                 toolCalls.forEach(tool => {
+                     const toolEl = document.createElement('div');
+                     toolEl.className = 'tool-call';
+                     toolEl.setAttribute('data-tool-id', tool.id);
+                     toolEl.innerHTML = `<span class="tool-name">🛠️ Calling: ${tool.function.name}</span>`;
+                     messageDiv.appendChild(toolEl);
+                 });
+            }
+
+            // Content Section
+            const contentEl = document.createElement('div');
+            contentEl.className = 'message-content';
+            
+            let htmlContent = '';
+            if (showTimestamp) {
+                htmlContent += `<strong>[${getCurrentTimeString()}] ${icon}</strong> <br>`;
+            } else if (icon) {
+                 htmlContent += `<strong>${icon}</strong> `;
+            }
+            
+            htmlContent += text.replaceAll('\n', '<br>');
+            contentEl.innerHTML = htmlContent;
+            messageDiv.appendChild(contentEl);
+
+            chatContentWrapper.appendChild(messageDiv);
+
+            if (sender === 'gemini' || sender === 'ai') {
+                currentGeminiMessage = messageDiv;
+            }
+        }
+        chatContentWrapper.scrollTop = chatContentWrapper.scrollHeight;
+    }
+
+    try {
+        window.appendMessage = appendMessage;
+    } catch (_) {}
+
+    // Helper to update status bar
+    function updateStatus(text, type = 'normal') {
+        const processIndicator = document.getElementById('process-indicator');
+        const statusText = document.getElementById('status');
+        
+        if (statusText) statusText.textContent = text;
+        
+        if (processIndicator) {
+            processIndicator.className = ''; // Reset
+            if (type === 'thinking') processIndicator.classList.add('thinking');
+            if (type === 'processing') processIndicator.classList.add('processing');
+        }
+    }
+
+
+        // 全局变量用于缓存麦克风列表和缓存时间戳
+    let cachedMicrophones = null;
+    let cacheTimestamp = 0;
+    const CACHE_DURATION = 30000; // 缓存30秒
+
+    // 麦克风选择器UI已迁移到浮动按钮系统（live2d.js），保留核心函数供其使用
+    
+    // 选择麦克风
+    async function selectMicrophone(deviceId) {
+        selectedMicrophoneId = deviceId;
+        
+        // 更新UI选中状态
+        const options = document.querySelectorAll('.mic-option');
+        options.forEach(option => {
+            if ((option.classList.contains('default') && deviceId === null) || 
+                (option.dataset.deviceId === deviceId && deviceId !== null)) {
+                option.classList.add('selected');
+            } else {
+                option.classList.remove('selected');
+            }
+        });
+        
+        // 保存选择到服务器
+        await saveSelectedMicrophone(deviceId);
+        
+        // 如果正在录音，重启录音以使用新选择的麦克风
+        if (isRecording) {
+            const wasRecording = isRecording;
+            await stopMicCapture();
+            if (wasRecording) {
+                await startMicCapture();
+            }
+        }
+    }
+    
+    // 保存选择的麦克风到服务器
+    async function saveSelectedMicrophone(deviceId) {
+        try {
+            const response = await fetch('/api/characters/set_microphone', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    microphone_id: deviceId
+                })
+            });
+            
+            if (!response.ok) {
+                console.error('保存麦克风选择失败');
+            }
+        } catch (err) {
+            console.error('保存麦克风选择时发生错误:', err);
+        }
+    }
+    
+    // 加载上次选择的麦克风
+    async function loadSelectedMicrophone() {
+        try {
+            const response = await fetch('/api/characters/get_microphone');
+            if (response.ok) {
+                const data = await response.json();
+                selectedMicrophoneId = data.microphone_id || null;
+            }
+        } catch (err) {
+            console.error('加载麦克风选择失败:', err);
+            selectedMicrophoneId = null;
+        }
+    }
+    
+    // 开麦，按钮on click
+    async function startMicCapture() {
+        try {
+            // 开始录音前添加录音状态类到两个按钮
+            micButton.classList.add('recording');
+            // 同步更新麦克风选择器按钮样式
+            const toggleButton = document.getElementById('toggle-mic-selector');
+            if (toggleButton) {
+                toggleButton.classList.add('recording');
+            }
+            
+            // 同步更新浮动麦克风按钮状态（设置为激活状态，蓝色高亮）
+            const floatingMicBtn = document.getElementById('live2d-btn-mic');
+            if (floatingMicBtn) {
+                floatingMicBtn.dataset.active = 'true';
+                floatingMicBtn.style.background = 'rgba(79, 140, 255, 0.9)';
+            }
+            
+            if (!audioPlayerContext) {
+                audioPlayerContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (audioPlayerContext.state === 'suspended') {
+                await audioPlayerContext.resume();
+            }
+
+            // 获取麦克风流，使用选择的麦克风设备ID
+            const constraints = {
+                audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            // 检查音频轨道状态
+            const audioTracks = stream.getAudioTracks();
+            console.log("音频轨道数量:", audioTracks.length);
+            console.log("音频轨道状态:", audioTracks.map(track => ({
+                label: track.label,
+                enabled: track.enabled,
+                muted: track.muted,
+                readyState: track.readyState
+            })));
+
+            if (audioTracks.length === 0) {
+                console.error("没有可用的音频轨道");
+                statusElement.textContent = '无法访问麦克风';
+                return;
+            }
+
+            await startAudioWorklet(stream);
+
+            micButton.disabled = true;
+            muteButton.disabled = false;
+            screenButton.disabled = false;
+            stopButton.disabled = true;
+            resetSessionButton.disabled = false;
+            statusElement.textContent = '正在语音...';
+            
+        } catch (err) {
+            console.error('获取麦克风权限失败:', err);
+            statusElement.textContent = '无法访问麦克风';
+            // 失败时移除两个按钮的录音状态类
+            micButton.classList.remove('recording');
+            const toggleButton = document.getElementById('toggle-mic-selector');
+            if (toggleButton) {
+                toggleButton.classList.remove('recording');
+            }
+            // 失败时也重置浮动麦克风按钮状态
+            const floatingMicBtn = document.getElementById('live2d-btn-mic');
+            if (floatingMicBtn) {
+                floatingMicBtn.dataset.active = 'false';
+                floatingMicBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+            }
+        }
+    }
+
+    async function stopMicCapture(){ // 闭麦，按钮on click
+        isSwitchingMode = true; // 开始模式切换（从语音切换到待机/文本模式）
+        
+        // 停止录音时移除两个按钮的录音状态类
+        micButton.classList.remove('recording');
+        const toggleButton = document.getElementById('toggle-mic-selector');
+        if (toggleButton) {
+            toggleButton.classList.remove('recording');
+        }
+        
+        // 同步重置浮动麦克风按钮状态
+        const floatingMicBtn = document.getElementById('live2d-btn-mic');
+        if (floatingMicBtn) {
+            floatingMicBtn.dataset.active = 'false';
+            floatingMicBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+        }
+        
+        stopRecording();
+        micButton.disabled = false;
+        muteButton.disabled = true;
+        screenButton.disabled = true;
+        stopButton.disabled = true;
+        resetSessionButton.disabled = false;
+        
+        // 显示文本输入区
+        const textInputArea = document.getElementById('text-input-area');
+        if (textInputArea) {
+            textInputArea.classList.remove('hidden');
+        }
+        
+        // 如果是从语音模式切换回来，显示待机状态
+        // [Refactor] Use 'Firefly' as default name
+        const characterName = (typeof lanlan_config !== 'undefined' && lanlan_config.lanlan_name) ? lanlan_config.lanlan_name : 'Firefly';
+        statusElement.textContent = `${characterName}待机中...`;
+        
+        // 延迟重置模式切换标志，确保"已离开"消息已经被忽略
+        setTimeout(() => {
+            isSwitchingMode = false;
+        }, 500);
+    }
+
+    async function getMobileCameraStream() {
+      const makeConstraints = (facing) => ({
+        video: {
+          facingMode: facing,
+          frameRate: { ideal: 1, max: 1 },
+        },
+        audio: false,
+      });
+
+      const attempts = [
+        { label: 'rear', constraints: makeConstraints({ ideal: 'environment' }) },
+        { label: 'front', constraints: makeConstraints('user') },
+        { label: 'any', constraints: { video: { frameRate: { ideal: 1, max: 1 } }, audio: false } },
+      ];
+
+      let lastError;
+
+      for (const attempt of attempts) {
+        try {
+          console.log(`Trying ${attempt.label} camera @ ${1}fps…`);
+          return await navigator.mediaDevices.getUserMedia(attempt.constraints);
+        } catch (err) {
+          console.warn(`${attempt.label} failed →`, err);
+          statusElement.textContent = err;
+          return err;
+        }
+      }
+    }
+
+    let screenShareMode = null;
+    let screenShareTimer = null;
+
+    function startScreenVideoStreaming(stream, source) {
+        if (!stream) return;
+        screenShareMode = source || 'screen';
+        if (screenShareTimer) {
+            clearInterval(screenShareTimer);
+            screenShareTimer = null;
+        }
+    }
+
+    function stopScreening() {
+        if (screenShareTimer) {
+            clearInterval(screenShareTimer);
+            screenShareTimer = null;
+        }
+        screenShareMode = null;
+        if (screenCaptureStream) {
+            screenCaptureStream.getTracks().forEach(track => track.stop());
+            screenCaptureStream = null;
+        }
+    }
+
+    async function startScreenSharing(){ // 分享屏幕，按钮on click
+        // 检查是否在录音状态
+        if (!isRecording) {
+            statusElement.textContent = '请先开启麦克风录音！';
+            return;
+        }
+        
+        try {
+            // 初始化音频播放上下文
+            showLive2d();
+            if (!audioPlayerContext) {
+                audioPlayerContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            // 如果上下文被暂停，则恢复它
+            if (audioPlayerContext.state === 'suspended') {
+                await audioPlayerContext.resume();
+            }
+            let captureStream;
+
+            if (screenCaptureStream == null){
+                if (isMobile()) {
+                // On mobile we capture the *camera* instead of the screen.
+                // `environment` is the rear camera (iOS + many Androids). If that's not
+                // available the UA will fall back to any camera it has.
+                screenCaptureStream = await getMobileCameraStream();
+
+                } else {
+                // Desktop/laptop: capture the user's chosen screen / window / tab.
+                screenCaptureStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                    cursor: 'always',
+                    frameRate: 1,
+                    },
+                    audio: false,
+                });
+                }
+            }
+            startScreenVideoStreaming(screenCaptureStream, isMobile() ? 'camera' : 'screen');
+
+            micButton.disabled = true;
+            muteButton.disabled = false;
+            screenButton.disabled = true;
+            stopButton.disabled = false;
+            resetSessionButton.disabled = false;
+            setFloatingButtonActive('screen', true);
+
+            // 当用户停止共享屏幕时
+            screenCaptureStream.getVideoTracks()[0].onended = stopScreenSharing;
+
+            // 获取麦克风流
+            if (!isRecording) statusElement.textContent = '没开麦啊喂！';
+          } catch (err) {
+            console.error(isMobile() ? '摄像头访问失败:' : '屏幕共享失败:', err);
+            console.error('启动失败 →', err);
+            let hint = '';
+            switch (err.name) {
+              case 'NotAllowedError':
+                hint = '请检查 iOS 设置 → Safari → 摄像头 权限是否为"允许"';
+                break;
+              case 'NotFoundError':
+                hint = '未检测到摄像头设备';
+                break;
+              case 'NotReadableError':
+              case 'AbortError':
+                hint = '摄像头被其它应用占用？关闭扫码/拍照应用后重试';
+                break;
+            }
+            statusElement.textContent = `${err.name}: ${err.message}${hint ? `\n${hint}` : ''}`;
+          }
+    }
+
+    async function stopScreenSharing(){ // 停止共享，按钮on click
+        stopScreening();
+        micButton.disabled = true;
+        muteButton.disabled = false;
+        screenButton.disabled = false;
+        stopButton.disabled = true;
+        resetSessionButton.disabled = false;
+        screenCaptureStream = null;
+        statusElement.textContent = '正在语音...';
+        setFloatingButtonActive('screen', false);
+    }
+
+    window.switchMicCapture = async () => {
+        if (muteButton.disabled) {
+            await startMicCapture();
+        } else {
+            await stopMicCapture();
+        }
+    }
+    window.switchScreenSharing = async () => {
+        if (stopButton.disabled) {
+            // 检查是否在录音状态
+            if (!isRecording) {
+                statusElement.textContent = '请先开启麦克风！';
+                return;
+            }
+            await startScreenSharing();
+        } else {
+            await stopScreenSharing();
+        }
+    }
+
+    // 显示语音准备提示框
+    function showVoicePreparingToast(message) {
+        // 检查是否已存在提示框，避免重复创建
+        let toast = document.getElementById('voice-preparing-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'voice-preparing-toast';
+            toast.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 20px 32px;
+                border-radius: 16px;
+                font-size: 16px;
+                font-weight: 600;
+                box-shadow: 0 8px 24px rgba(102, 126, 234, 0.5);
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                animation: voiceToastFadeIn 0.3s ease;
+                pointer-events: none;
+            `;
+            
+            // 添加动画样式
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes voiceToastFadeIn {
+                    from {
+                        opacity: 0;
+                        transform: translate(-50%, -50%) scale(0.8);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translate(-50%, -50%) scale(1);
+                    }
+                }
+                @keyframes voiceToastPulse {
+                    0%, 100% {
+                        transform: scale(1);
+                    }
+                    50% {
+                        transform: scale(1.1);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            document.body.appendChild(toast);
+        }
+        
+        // 更新消息内容
+        toast.innerHTML = `
+            <div style="
+                width: 20px;
+                height: 20px;
+                border: 3px solid rgba(255, 255, 255, 0.3);
+                border-top-color: white;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            "></div>
+            <span>${message}</span>
+        `;
+        
+        // 添加旋转动画
+        const spinStyle = document.createElement('style');
+        spinStyle.textContent = `
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        `;
+        if (!document.querySelector('style[data-spin-animation]')) {
+            spinStyle.setAttribute('data-spin-animation', 'true');
+            document.head.appendChild(spinStyle);
+        }
+        
+        toast.style.display = 'flex';
+    }
+    
+    // 隐藏语音准备提示框
+    function hideVoicePreparingToast() {
+        const toast = document.getElementById('voice-preparing-toast');
+        if (toast) {
+            toast.style.animation = 'voiceToastFadeIn 0.3s ease reverse';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 300);
+        }
+    }
+    
+    // 显示"可以说话了"提示
+    function showReadyToSpeakToast() {
+        let toast = document.getElementById('voice-ready-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'voice-ready-toast';
+            toast.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                color: white;
+                padding: 20px 32px;
+                border-radius: 16px;
+                font-size: 18px;
+                font-weight: 600;
+                box-shadow: 0 8px 24px rgba(40, 167, 69, 0.5);
+                z-index: 10000;
+                display: none;
+                align-items: center;
+                gap: 12px;
+                animation: voiceToastFadeIn 0.3s ease;
+                pointer-events: none;
+            `;
+            document.body.appendChild(toast);
+        }
+        
+        toast.innerHTML = `
+            <span style="font-size: 24px; animation: voiceToastPulse 0.6s ease;">🎤</span>
+            <span>可以开始说话了！</span>
+        `;
+        
+        toast.style.display = 'flex';
+        
+        // 2秒后自动消失
+        setTimeout(() => {
+            toast.style.animation = 'voiceToastFadeIn 0.3s ease reverse';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 300);
+        }, 2000);
+    }
+
+    if (micButton) micButton.addEventListener('click', async () => {
+        // 立即显示准备提示
+        showVoicePreparingToast('🎙️ 语音系统准备中...');
+        
+        // 如果有活跃的文本会话，先结束它
+        if (isTextSessionActive) {
+            isSwitchingMode = true; // 开始模式切换
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    action: 'end_session'
+                }));
+            }
+            isTextSessionActive = false;
+            statusElement.textContent = '正在切换到语音模式...';
+            showVoicePreparingToast('🔄 正在切换到语音模式...');
+            // 增加等待时间，确保后端完全清理资源
+            await new Promise(resolve => setTimeout(resolve, 1500)); // 从500ms增加到1500ms
+        }
+        
+        // 隐藏文本输入区
+        const textInputArea = document.getElementById('text-input-area');
+        if (textInputArea) {
+            textInputArea.classList.add('hidden');
+            setFloatingButtonActive('text', false);
+        }
+        
+        // 立即禁用所有语音按钮
+        micButton.disabled = true;
+        muteButton.disabled = true;
+        screenButton.disabled = true;
+        stopButton.disabled = true;
+        resetSessionButton.disabled = true;
+        
+        statusElement.textContent = '正在初始化语音对话...';
+        showVoicePreparingToast('⚙️ 正在连接服务器...');
+        
+        try {
+            // 创建一个 Promise 来等待 session_started 消息
+            const sessionStartPromise = new Promise((resolve, reject) => {
+                sessionStartedResolver = resolve;
+                
+                // 设置超时（15秒），如果超时则拒绝
+                setTimeout(() => {
+                    if (sessionStartedResolver) {
+                        sessionStartedResolver = null;
+                        reject(new Error('Session启动超时'));
+                    }
+                }, 15000);
+            });
+            
+            // 发送start session事件
+            socket.send(JSON.stringify({
+                action: 'start_session',
+                input_type: 'audio'
+            }));
+            
+            // 等待session真正启动成功
+            await sessionStartPromise;
+            
+            // 开始录音
+            await startMicCapture();
+            
+            // 只有在完全准备好后才显示"可以说话了"
+            hideVoicePreparingToast();
+            showReadyToSpeakToast();
+            
+        } catch (error) {
+            console.error("启动语音会话失败:", error);
+            statusElement.textContent = `启动失败: ${error.message}`;
+            hideVoicePreparingToast();
+            
+            // 恢复按钮状态
+            micButton.disabled = false;
+            
+            // 恢复文本输入区
+        const textInputArea = document.getElementById('text-input-area');
+        if (textInputArea) {
+            textInputArea.classList.remove('hidden');
+            setFloatingButtonActive('text', true);
+        }
+        }
+    });
+
+    if (muteButton) muteButton.addEventListener('click', stopMicCapture);
+    if (screenButton) screenButton.addEventListener('click', startScreenSharing);
+    if (stopButton) stopButton.addEventListener('click', stopScreenSharing);
+
+    if (resetSessionButton) resetSessionButton.addEventListener('click', () => {
+        // 重置会话
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+                action: 'reset_session'
+            }));
+            statusElement.textContent = '会话已重置';
+            
+            // Clear chat
+            if (chatContentWrapper) {
+                chatContentWrapper.innerHTML = '<div class="message system">Session reset</div>';
+                currentGeminiMessage = null;
+            }
+        }
+    });
+    
+    // Toggle chat visibility
+    const toggleChatBtn = getEl('toggle-chat-btn');
+    if (toggleChatBtn && chatContainer) {
+        toggleChatBtn.addEventListener('click', () => {
+            chatContainer.classList.toggle('minimized');
+            toggleChatBtn.textContent = chatContainer.classList.contains('minimized') ? '+' : '-';
+        });
+    }
+    
+    // Text input handling
+    if (textSendButton && textInputBox) {
+        const sendText = () => {
+            const text = textInputBox.value.trim();
+            if (!text) return;
+            
+            // 检查是否需要切换到文本模式
+            if (!isTextSessionActive) {
+                // 如果在录音，先停止录音
+                if (isRecording) {
+                    stopMicCapture();
+                }
+                
+                // 发送start session事件 (text mode)
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        action: 'start_session',
+                        input_type: 'text'
+                    }));
+                    isTextSessionActive = true;
+                    console.log('切换到文本对话模式');
+                }
+            }
+            
+            // Send text message
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    action: 'text_input',
+                    text: text
+                }));
+                
+                // Add to UI immediately
+                appendMessage(text, 'user', true);
+                updateUserSubtitle(text, 'text');
+                textInputBox.value = '';
+                
+            }
+        };
+        
+        textSendButton.addEventListener('click', sendText);
+        textInputBox.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendText();
+        });
+    }
+
+    // Screenshot functionality
+    if (screenshotButton) {
+        screenshotButton.addEventListener('click', async () => {
+            try {
+                if (window.LIVE2D_SCREEN_CAPTURE_VIA_FLUTTER) {
+                    const requested = requestFlutterScreenCapture();
+                    updateStatus(requested ? '已请求 Flutter 截图' : '截图请求失败', requested ? 'processing' : 'normal');
+                    return;
+                }
+                // 如果已经在分享屏幕（录音模式下），直接使用当前流
+                if (isRecording && screenCaptureStream) {
+                    takeScreenshot(screenCaptureStream);
+                } else {
+                    // 文本模式下，临时获取屏幕流截图
+                    // 显示提示
+                    statusElement.textContent = '请选择要截图的窗口...';
+                    
+                    let tempStream;
+                    if (isMobile()) {
+                         tempStream = await getMobileCameraStream();
+                    } else {
+                        tempStream = await navigator.mediaDevices.getDisplayMedia({
+                            video: { cursor: 'never' },
+                            audio: false
+                        });
+                    }
+                    
+                    // 等待一小会儿确保流就绪
+                    setTimeout(async () => {
+                        await takeScreenshot(tempStream);
+                        
+                        // 停止临时流
+                        tempStream.getTracks().forEach(track => track.stop());
+                        statusElement.textContent = '截图已发送';
+                    }, 500);
+                }
+            } catch (err) {
+                console.error('截图失败:', err);
+                statusElement.textContent = '截图取消或失败';
+            }
+        });
+    }
+    
+    if (clearAllScreenshots) {
+        clearAllScreenshots.addEventListener('click', () => {
+            // 清除前端显示
+            screenshotsList.innerHTML = '';
+            screenshotCounter = 0;
+            updateScreenshotCount();
+            
+            // 通知后端清除
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    action: 'clear_screenshots'
+                }));
+            }
+        });
+    }
+
+    async function takeScreenshot(stream) {
+        const track = stream.getVideoTracks()[0];
+        const imageCapture = new ImageCapture(track);
+        const bitmap = await imageCapture.grabFrame();
+        
+        // Convert to blob/base64
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0);
+        
+        const base64Data = canvas.toDataURL('image/jpeg', 0.8);
+        
+        // Add to UI list
+        addScreenshotToUI(base64Data);
+        
+        // Send to backend
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+                action: 'image_input',
+                image: base64Data
+            }));
+            console.log('截图已发送');
+        }
+    }
+    
+    function addScreenshotToUI(base64Data) {
+        screenshotCounter++;
+        
+        const item = document.createElement('div');
+        item.className = 'screenshot-item';
+        item.innerHTML = `
+            <img src="${base64Data}" alt="Screenshot ${screenshotCounter}">
+            <div class="screenshot-remove" title="Remove">×</div>
+        `;
+        
+        // Remove button handler
+        item.querySelector('.screenshot-remove').addEventListener('click', () => {
+            item.remove();
+            screenshotCounter--;
+            updateScreenshotCount();
+            // Note: We don't remove from backend here effectively unless we track IDs
+        });
+        
+        screenshotsList.appendChild(item);
+        screenshotsList.scrollTop = screenshotsList.scrollHeight;
+        
+        updateScreenshotCount();
+        
+        // Show container if hidden
+        if (screenshotThumbnailContainer.style.display === 'none') {
+            screenshotThumbnailContainer.style.display = 'block';
+        }
+    }
+    
+    function updateScreenshotCount() {
+        if (screenshotCount) {
+            screenshotCount.textContent = screenshotCounter > 0 ? `${screenshotCounter} images` : '';
+        }
+        if (!overlayState.screenshotEnabled) {
+            screenshotThumbnailContainer.style.display = 'none';
+            return;
+        }
+        if (screenshotCounter === 0) {
+            screenshotThumbnailContainer.style.display = 'none';
+        } else {
+            screenshotThumbnailContainer.style.display = 'flex';
+        }
+    }
+}

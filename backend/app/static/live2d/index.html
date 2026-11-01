@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D Renderer</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            font-family: "Segoe UI", sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            z-index: 1;
+            aspect-ratio: 2 / 3;
+            max-width: 100vw;
+            max-height: 100vh;
+            margin: 0 auto;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+        }
+        
+        /* --- Chat UI Removed --- */
+        
+        #debug-console {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            max-height: 50%;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-family: monospace;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 10000;
+        }
+        .log-entry { border-bottom: 1px solid #444; padding: 2px; }
+        .log-error { color: #ff5555; }
+        .log-warn { color: #ffaa00; }
+        /* 浮窗模式优化 */
+        body.locked #canvas-container { pointer-events: none; }
+
+        /* Live2D Overlay UI */
+        #live2d-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            pointer-events: none;
+            font-family: "Segoe UI", sans-serif;
+        }
+        #live2d-subtitles {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: min(760px, 92vw);
+            pointer-events: none;
+        }
+        .live2d-subtitle {
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #f8fafc;
+            background: rgba(15, 18, 20, 0.68);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+            backdrop-filter: blur(6px);
+        }
+        .live2d-subtitle.ai {
+            border-left: 3px solid #f472b6;
+        }
+        #live2d-speech-bubble {
+            position: fixed;
+            max-width: min(320px, 70vw);
+            padding: 10px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.92);
+            color: #1f2933;
+            font-size: 14px;
+            line-height: 1.4;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+            transform: translate(-50%, -100%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+            border: 1px solid rgba(244, 114, 182, 0.6);
+        }
+        #live2d-speech-bubble.show {
+            opacity: 1;
+        }
+        #live2d-speech-bubble::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            bottom: -8px;
+            width: 16px;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.92);
+            transform: translateX(-50%) rotate(45deg);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+        }
+
+        #live2d-lite-controls {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 80;
+            display: none;
+            pointer-events: auto;
+            font-family: "Segoe UI", sans-serif;
+        }
+        body.lite-controls #live2d-lite-controls {
+            display: block;
+        }
+        #live2d-lite-handle {
+            width: 30px;
+            height: 30px;
+            border-radius: 14px;
+            background: rgba(15, 18, 20, 0.65);
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            letter-spacing: 2px;
+            cursor: pointer;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+            user-select: none;
+        }
+        #live2d-lite-panel {
+            margin-top: 8px;
+            padding: 8px;
+            border-radius: 14px;
+            background: rgba(15, 18, 20, 0.78);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+        }
+        #live2d-lite-controls:hover #live2d-lite-panel {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .live2d-lite-btn {
+            border: none;
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: #f8fafc;
+            background: rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.1s ease;
+        }
+        .live2d-lite-btn[data-active="true"] {
+            background: rgba(244, 114, 182, 0.75);
+            color: #111827;
+            font-weight: 600;
+        }
+        .live2d-lite-btn:hover {
+            transform: translateY(-1px);
+        }
+    </style>
+
+    <!-- Load Libraries -->
+    <script src="/static/live2d/libs/live2dcubismcore.min.js"></script>
+    <script src="/static/live2d/libs/live2d.min.js"></script>
+    <!-- Use PIXI v7.4.3 -->
+    <script src="/static/live2d/libs/pixi.min.js"></script>
+    <script>
+        // Ensure PIXI is globally accessible for pixi-live2d-display
+        window.PIXI = PIXI;
+    </script>
+    
+    <!-- Load pixi-live2d-display v0.5.0-ls-6 (RaSan147 fork) -->
+    <script src="/static/live2d/libs/pixi-live2d-display-rasan.min.js"></script>
+    
+    <!-- Audio Support -->
+    <script src="/static/live2d/audio-loader.js"></script>
+
+    <script>
+        // Debug: Check if PIXI.live2d was attached
+        console.log('[PIXI Setup] PIXI.live2d available:', !!PIXI.live2d);
+        console.log('[PIXI Setup] PIXI.live2d keys:', Object.keys(PIXI.live2d || {}));
+        console.log('[PIXI Setup] PIXI.live2d.Live2DModel:', !!PIXI.live2d?.Live2DModel);
+        
+        // Manual fallback if needed (sometimes UMD attaches to window.Live2DModel directly?)
+        if (!PIXI.live2d.Live2DModel && window.Live2DModel) {
+            console.log('[PIXI Setup] Found Live2DModel on window, attaching to PIXI.live2d');
+            PIXI.live2d.Live2DModel = window.Live2DModel;
+        }
+    </script>
+    
+    <!-- Load Main Logic -->
+    <script src="/static/live2d/live2d.v2.js"></script>
+    <!-- Load App Logic (TTS, LipSync) -->
+    <script src="/static/live2d/app.js"></script>
+    <script>
+        // Initialize app if available
+        window.addEventListener('load', () => {
+            if (typeof init_app === 'function') {
+                console.log('[Index] Initializing App Logic...');
+                init_app();
+            }
+        });
+    </script>
+</head>
+<body>
+    <div id="debug-console"></div>
+
+    <div id="live2d-lite-controls">
+        <div id="live2d-lite-handle">⋯</div>
+        <div id="live2d-lite-panel">
+            <button id="live2d-lite-toggle-subtitle" class="live2d-lite-btn">字幕</button>
+            <button id="live2d-lite-toggle-bubble" class="live2d-lite-btn">气泡</button>
+            <button id="live2d-lite-refresh" class="live2d-lite-btn">刷新</button>
+        </div>
+    </div>
+
+    <div id="live2d-overlay">
+        <div id="live2d-subtitles">
+            <div id="live2d-subtitle-ai" class="live2d-subtitle ai" style="display:none;"></div>
+        </div>
+        <div id="live2d-speech-bubble"></div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="live2d-canvas"></canvas>
+    </div>
+    <script>
+        const debugConsole = document.getElementById('debug-console');
+        const urlParams = new URLSearchParams(window.location.search);
+        const isFloatingMode = urlParams.get('floating') === 'true';
+        const enableLiteControls = urlParams.get('controls') === 'true';
+        if (urlParams.get('debug') === 'true') {
+            debugConsole.style.display = 'block';
+        }
+        if (isFloatingMode) {
+            document.body.classList.add('floating-mode');
+            console.log('[Live2D] Floating window mode enabled - optimizing for streaming');
+        }
+        if (enableLiteControls) {
+            document.body.classList.add('lite-controls');
+        }
+        function logToScreen(msg, type = 'info') {
+            if (debugConsole.style.display === 'none') return;
+            const div = document.createElement('div');
+            div.className = 'log-entry log-' + type;
+            div.textContent = `[${type.toUpperCase()}] ${msg}`;
+            debugConsole.appendChild(div);
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+        }
+        
+        // ========== WebSocket 连接接收表情/动作指令 ==========
+        let live2dSocket = null;
+        let wsHeartbeatInterval = null;
+        const WS_HEARTBEAT_INTERVAL = 30000;
+        
+        function connectLive2DWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const wsUrl = `${protocol}://${window.location.host}/api/live2d/ws`;
+            
+            logToScreen(`Connecting to Live2D WebSocket: ${wsUrl}`);
+            console.log('[Live2D WS] Connecting to:', wsUrl);
+            
+            live2dSocket = new WebSocket(wsUrl);
+            
+            live2dSocket.onopen = () => {
+                console.log('[Live2D WS] Connected');
+                logToScreen('WebSocket connected');
+                
+                // 启动心跳
+                if (wsHeartbeatInterval) clearInterval(wsHeartbeatInterval);
+                wsHeartbeatInterval = setInterval(() => {
+                    if (live2dSocket && live2dSocket.readyState === WebSocket.OPEN) {
+                        live2dSocket.send(JSON.stringify({ action: 'ping' }));
+                    }
+                }, WS_HEARTBEAT_INTERVAL);
+            };
+            
+            live2dSocket.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleLive2DMessage(message);
+                } catch (e) {
+                    console.error('[Live2D WS] Parse error:', e);
+                }
+            };
+            
+            live2dSocket.onclose = () => {
+                console.log('[Live2D WS] Disconnected, reconnecting in 3s...');
+                logToScreen('WebSocket disconnected, reconnecting...', 'warn');
+                if (wsHeartbeatInterval) {
+                    clearInterval(wsHeartbeatInterval);
+                    wsHeartbeatInterval = null;
+                }
+                setTimeout(connectLive2DWebSocket, 3000);
+            };
+            
+            live2dSocket.onerror = (error) => {
+                console.error('[Live2D WS] Error:', error);
+                logToScreen('WebSocket error', 'error');
+            };
+        }
+        
+        function handleLive2DMessage(message) {
+            const type = message.type;
+            const data = message.data;
+            
+            if (type === 'pong') {
+                // 心跳响应
+                return;
+            }
+            
+            if (type === 'expression') {
+                // 表情参数更新
+                console.log('[Live2D WS] Expression update:', data);
+                logToScreen(`Expression: mouth=${data.mouth?.toFixed(2)}, eyes=${data.eyes?.toFixed(2)}`);
+                if (window.live2dManager) {
+                    window.live2dManager.updateParameters(data);
+                }
+            } else if (type === 'motion_request') {
+                // 动作请求
+                console.log('[Live2D WS] Motion request:', data);
+                logToScreen(`Motion request: ${data.userText?.substring(0, 20)}...`);
+                
+                // Extract config
+                const config = {
+                    apiKey: data.apiKey,
+                    baseUrl: data.baseUrl,
+                    model: data.model,
+                    history: data.history // Pass history
+                };
+
+                if (window.LanLan1 && window.LanLan1.askMotionAgent) {
+                    window.LanLan1.askMotionAgent(data.userText, data.aiText, config);
+                } else if (window.live2dManager && window.live2dManager.askMotionAgent) {
+                    window.live2dManager.askMotionAgent(data.userText, data.aiText, config);
+                }
+            } 
+            /* [Duplicate Fix] Audio is handled by app.js to prevent double playback/echo
+            else if (type === 'audio') {
+                // Audio data (base64)
+                console.log('[Live2D WS] Audio received, playing...');
+                if (window.playAudioBase64) {
+                    window.playAudioBase64(data.audio);
+                }
+            }
+            */
+        }
+        
+        // 初始化 WebSocket 连接
+        connectLive2DWebSocket();
+        
+        window.onload = function() {
+            logToScreen('Window loaded. Checking libraries...');
+            if (typeof PIXI === 'undefined') {
+                logToScreen('PIXI is undefined!', 'error');
+            } else {
+                logToScreen(`PIXI version: ${PIXI.VERSION}`);
+                if (PIXI.live2d && PIXI.live2d.Live2DModel) {
+                    logToScreen('PIXI.live2d loaded');
+                } else {
+                    logToScreen('PIXI.live2d is missing - library load failed', 'error');
+                    if (window.Live2DModel) logToScreen('But found window.Live2DModel!', 'warn');
+                }
+            }
+            if (!window.live2dManager) {
+                window.live2dManager = new Live2DManager();
+            }
+            init();
+        };
+        async function init() {
+            logToScreen('Initializing...');
+            try {
+                if (!window.live2dManager) {
+                    throw new Error('Live2DManager not initialized');
+                }
+                if (isFloatingMode) {
+                    window.floatingWindowConfig = {
+                        enableMotion: true,
+                        enableExpression: true,
+                        enablePhysics: true,
+                        motionPriority: 'balance',
+                    };
+                }
+                await window.live2dManager.initPIXI('live2d-canvas', 'canvas-container');
+                logToScreen('PIXI Initialized');
+                const modelPath = urlParams.get('model');
+                if (modelPath) {
+                    logToScreen(`Loading model: ${modelPath}`);
+                    await window.live2dManager.loadModel(modelPath);
+                    logToScreen('Model loaded successfully');
+                    if (isFloatingMode) {
+                        logToScreen('Floating window mode active');
+                    }
+                } else {
+                    logToScreen('No model parameter provided', 'warn');
+                    try {
+                        const fallback = '/static/live2d/mao_pro_zh/mao_pro_zh/runtime/mao_pro.model3.json';
+                        logToScreen(`Loading fallback model: ${fallback}`, 'warn');
+                        await window.live2dManager.loadModel(fallback);
+                        logToScreen('Fallback model loaded successfully');
+                    } catch (e2) {
+                        logToScreen(`Fallback model load failed: ${e2.message}`, 'error');
+                        console.error(e2);
+                    }
+                }
+            } catch (e) {
+                logToScreen(`Init failed: ${e.message}`, 'error');
+                console.error(e);
+            }
+        }
+    </script>
+</body>
+</html>

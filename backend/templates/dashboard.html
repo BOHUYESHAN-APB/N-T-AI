@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Astra-Me 记忆管理后台</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f5f7; }
+        h1 { color: #333; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
+        th { color: #666; font-weight: 600; }
+        button { cursor: pointer; padding: 6px 12px; border-radius: 6px; border: none; transition: 0.2s; }
+        .btn-danger { background: #ff3b30; color: white; }
+        .btn-danger:hover { background: #d70015; }
+        .btn-refresh { background: #007aff; color: white; margin-bottom: 10px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; background: #e5e5ea; color: #333; }
+    </style>
+</head>
+<body>
+    <h1>🧠 记忆核心控制台</h1>
+    
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>记忆碎片列表</h2>
+            <div>
+                <button class="btn-refresh" onclick="loadMemories()">刷新列表</button>
+                <button class="btn-danger" onclick="resetAll()">⚠️ 清空所有记忆</button>
+            </div>
+        </div>
+        <table id="memoryTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>用户</th>
+                    <th>类别</th>
+                    <th>内容</th>
+                    <th>时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function loadMemories() {
+            const res = await fetch('/api/memories');
+            const data = await res.json();
+            const tbody = document.querySelector('#memoryTable tbody');
+            tbody.innerHTML = '';
+            
+            data.forEach(m => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${m.id}</td>
+                    <td>${m.user_id}</td>
+                    <td><span class="tag">${m.category}</span></td>
+                    <td>${m.content}</td>
+                    <td>${new Date(m.created_at).toLocaleString()}</td>
+                    <td><button class="btn-danger" onclick="deleteMemory(${m.id})">删除</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function deleteMemory(id) {
+            if(!confirm('确定要删除这条记忆吗？')) return;
+            await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+            loadMemories();
+        }
+
+        async function resetAll() {
+            if(!confirm('⚠️ 高危操作：确定要清空所有记忆吗？这将无法恢复！')) return;
+            await fetch('/api/memories/reset', { method: 'POST' });
+            loadMemories();
+        }
+
+        loadMemories();
+    </script>
+</body>
+</html>

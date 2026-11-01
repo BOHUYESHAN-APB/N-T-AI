@@ -1,0 +1,3 @@
+User Request: "{{user_input}}"
+
+{{memory_context}}
